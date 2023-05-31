@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+
+import os
+import yaml
+import argparse
+import subprocess
+
+import clyso.ceph.ai
+
+
+CONFIG_FILE = 'copilot.yaml'
+
+#def health_check():
+#def profile_check():
+#def load_check():
+#def capacity_check():
+#def crush_check():
+#def pool_check():
+
+def checkup():
+    health_check()
+    version_check()
+    profile_check()
+    crush_check()
+    pool_check()
+    load_check()
+    capacity_check()
+    print("All good .")
+    return
+
+def get_tuning_profiles():
+    return {
+        'balanced': {
+            'description': 'Balanced tuning for general-purpose workloads.',
+            'settings': {
+                'osd': {
+                    'osd_op_threads': 8,
+                },
+            },
+            'devices': 'hdd|mixed|ssd|nvme',
+        },
+        'performance': {
+            'description': 'Optimized for high-performance workloads.',
+            'settings': {
+                'osd': {
+                    'osd_op_threads': 16,
+                    'osd_memory_target': 2147483648,
+                },
+            }
+        },
+        'capacity': {
+            'description': 'Optimized for large-scale, capacity-oriented workloads.',
+            'settings': {
+                'osd': {
+                    'osd_op_threads': 4,
+                },
+            }
+        },
+        'lowmem': {
+            'description': 'Optimized for low memory nodes, e.g. edge devices.',
+            'settings': {
+                'osd': {
+                    'osd_memory_target': 2147483648,
+                },
+            }
+        }
+    }
+
+def profile_list():
+    profiles = get_tuning_profiles()
+    print("Available tuning profiles:")
+    for name, profile in profiles.items():
+        print(f"- {name}: {profile['description']}")
+    profile_show()
+
+def profile_set(profile_name):
+    profiles = get_tuning_profiles()
+    if profile_name not in profiles:
+        print(f"Error: Unknown profile '{profile_name}'.")
+        profile_list()
+        return
+
+    with open(CONFIG_FILE, 'w') as f:
+        yaml.dump({'active_profile': profile_name}, f)
+
+    print(f"Successfully set active tuning profile to '{profile_name}'.")
+
+def profile_show():
+    if not os.path.exists(CONFIG_FILE):
+        print("Error: No active tuning profile found.")
+        return
+
+    with open(CONFIG_FILE, 'r') as f:
+        config = yaml.safe_load(f)
+
+    active_profile = config.get('active_profile')
+    if not active_profile:
+        print("Error: No active tuning profile found.")
+        return
+
+    print(f"Active tuning profile: {active_profile}")
+
+def profile_verify():
+    if not os.path.exists(CONFIG_FILE):
+        print("Error: No active tuning profile found.")
+        return
+
+    with open(CONFIG_FILE, 'r') as f:
+        config = yaml.safe_load(f)
+
+    active_profile = config.get('active_profile')
+    if not active_profile:
+        print("Error: No active tuning profile found.")
+        return
+
+    profiles = get_tuning_profiles()
+    profile = profiles.get(active_profile)
+    if not profile:
+        print(f"Error: Unknown profile '{active_profile}'.")
+        return
+
+    settings = profile.get('settings')
+    if not settings:
+        print(f"Error: No settings found for profile '{active_profile}'.")
+        return
+
+    for key, value in settings.items():
+        ceph_value = run_ceph_command(['config', 'get', 'global', key])
+        if str(value) != ceph_value.strip():
+            print(f"Error: Mismatched setting '{key}': expected '{value}', found '{ceph_value.strip()}'.")
+            return
+
+    print("Current Ceph configuration matches the active profile.")
+
+def run_ceph_command(args):
+    command = ['ceph']
+    command.extend(args)
+    try:
+        output = subprocess.check_output(command)
+        print(output.decode('utf-8'))
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {e.output.decode('utf-8')}")
+        exit(1)
+
+def copilot_help():
+    help_text = """
+Ceph Copilot Help:
+
+Ceph Copilot is a wrapper around the Ceph CLI tool that disables dangerous
+commands and provides a simplified interface for managing Ceph clusters.
+
+Available Copilot subcommands:
+
+- checkup: Provide an overall health and safety check on the cluster
+- profile list: List available Ceph tuning profiles
+- profile set: Set a Ceph tuning profile
+- profile show: Show the currently used Ceph tuning profile
+- profile verify: Check if the cluster configuration matches the profile recommendations
+    """
+    print(help_text)
+
+def main():
+    parser = argparse.ArgumentParser(description='Ceph Copilot: Your Expert Ceph Assistant')
+    parser.add_argument('subcommand', nargs='*', help='Ceph Copilot subcommand')
+    args = parser.parse_args()
+
+    if not args.subcommand:
+        copilot_help()
+        return
+
+    subcommand = args.subcommand[0]
+
+    if subcommand == 'checkup':
+        checkup()
+    elif subcommand == 'profile':
+        if len(args.subcommand) > 1:
+            profile_subcommand = args.subcommand[1]
+            if profile_subcommand == 'list':
+                profile_list()
+            elif profile_subcommand == 'set':
+                if len(args.subcommand) == 3:
+                    profile_name = args.subcommand[2]
+                    profile_set(profile_name)
+                else:
+                    print(f"Usage: copilot profile set <profile>")
+            elif profile_subcommand == 'show':
+                profile_show()
+            elif profile_subcommand == 'verify':
+                profile_verify()
+            else:
+                print(f"Error: Unknown 'profile' command: {profile_subcommand}")
+                copilot_help()
+        else:
+            print(f"Error: Missing 'profile' command")
+            copilot_help()
+    else:
+        print(f"Error: Unknown command: {subcommand}")
+        copilot_help()
+
+if __name__ == "__main__":
+    main()
