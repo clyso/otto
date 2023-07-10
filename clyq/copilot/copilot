@@ -7,29 +7,52 @@ import os
 import yaml
 import argparse
 import subprocess
+import json
 
-import clyso.ceph.ai
-
+from clyso.ceph.ai import generate_result
 
 CONFIG_FILE = 'copilot.yaml'
 
-#def health_check():
-#def profile_check():
-#def load_check():
-#def capacity_check():
-#def crush_check():
-#def pool_check():
+def jsoncmd(command):
+    with open(os.devnull, 'w') as devnull:
+        out = subprocess.check_output(command.split(), stderr=devnull)
+    return json.loads(out)
 
-def checkup():
-    health_check()
-    version_check()
-    profile_check()
-    crush_check()
-    pool_check()
-    load_check()
-    capacity_check()
-    print("All good .")
-    return
+def collect():
+    return True
+
+def pretty_result(result):
+    # Load the JSON data
+    json_data = json.loads(result)
+
+    # Print the summary
+    print(f"Overall score: {json_data['summary']['score']}/{json_data['summary']['max_score']}")
+    print(f"Grade: {json_data['summary']['grade']}
+")
+
+    # Loop over the sections
+    for section in json_data['sections']:
+        print(f"Section: {section['id']}")
+        print(f"Score: {section['score']}/{section['max_score']}")
+        print(f"Grade: {section['grade']}")
+        print("Checks:")
+        for check in section['checks']:
+            print(f"  - ID: {check['id']}")
+            print(f"    Result: {check['result']}")
+            print(f"    Summary: {check['summary']}")
+            print(f"    Details: {check['detail']}
+")
+
+def subcommand_checkup(args):
+    if args.ceph_report_json:
+        with open(args.ceph_report_json, 'r') as file:
+            report = json.load(file)
+    else:
+        report = collect()
+
+    result = generate_result(report_json = report)
+    pretty_result(result.dump())
+
 
 def get_tuning_profiles():
     return {
@@ -69,18 +92,19 @@ def get_tuning_profiles():
         }
     }
 
-def profile_list():
+def profile_list(args):
     profiles = get_tuning_profiles()
     print("Available tuning profiles:")
     for name, profile in profiles.items():
         print(f"- {name}: {profile['description']}")
-    profile_show()
+    profile_show(args)
 
-def profile_set(profile_name):
+def profile_set(args):
+    profile_name = args.profilename
     profiles = get_tuning_profiles()
     if profile_name not in profiles:
         print(f"Error: Unknown profile '{profile_name}'.")
-        profile_list()
+        profile_list(args)
         return
 
     with open(CONFIG_FILE, 'w') as f:
@@ -88,7 +112,7 @@ def profile_set(profile_name):
 
     print(f"Successfully set active tuning profile to '{profile_name}'.")
 
-def profile_show():
+def profile_show(args):
     if not os.path.exists(CONFIG_FILE):
         print("Error: No active tuning profile found.")
         return
@@ -103,7 +127,7 @@ def profile_show():
 
     print(f"Active tuning profile: {active_profile}")
 
-def profile_verify():
+def profile_verify(args):
     if not os.path.exists(CONFIG_FILE):
         print("Error: No active tuning profile found.")
         return
@@ -163,42 +187,41 @@ Available Copilot subcommands:
     print(help_text)
 
 def main():
-    parser = argparse.ArgumentParser(description='Ceph Copilot: Your Expert Ceph Assistant')
-    parser.add_argument('subcommand', nargs='*', help='Ceph Copilot subcommand')
+    # Create the top-level parser
+    parser = argparse.ArgumentParser(prog='copilot', description='Ceph Copilot: Your Expert Ceph Assistant')
+    subparsers = parser.add_subparsers(required=True, title='subcommands',
+                                       description='valid subcommands',
+                                       help='additional help')
+
+    # create the parser for the "checkup" command
+    parser_checkup = subparsers.add_parser('checkup', help='checkup help')
+    parser_checkup.add_argument('--ceph_report_json', type=str, help='ceph_report_json help')
+    parser_checkup.set_defaults(func=subcommand_checkup)
+
+    # Create the parser for the "profile" command
+    parser_profile = subparsers.add_parser('profile', help='profile help')
+    profile_subparsers = parser_profile.add_subparsers(required=True, help='profile sub-command help')
+
+    # Create the parser for the "profile list" command
+    parser_profile_list = profile_subparsers.add_parser('list', help='list help')
+    parser_profile_list.set_defaults(func=profile_list)
+
+    # Create the parser for the "profile set" command
+    parser_profile_set = profile_subparsers.add_parser('set', help='set help')
+    parser_profile_set.add_argument('profilename', type=str, help='profilename help')
+    parser_profile_set.set_defaults(func=profile_set)
+
+    # Create the parser for the "profile show" command
+    parser_profile_show = profile_subparsers.add_parser('show', help='show help')
+    parser_profile_show.set_defaults(func=profile_show)
+
+    # Create the parser for the "profile verify" command
+    parser_profile_verify = profile_subparsers.add_parser('verify', help='verify help')
+    parser_profile_verify.set_defaults(func=profile_verify)
+
+    # Parse the arguments and call the appropriate function
     args = parser.parse_args()
-
-    if not args.subcommand:
-        copilot_help()
-        return
-
-    subcommand = args.subcommand[0]
-
-    if subcommand == 'checkup':
-        checkup()
-    elif subcommand == 'profile':
-        if len(args.subcommand) > 1:
-            profile_subcommand = args.subcommand[1]
-            if profile_subcommand == 'list':
-                profile_list()
-            elif profile_subcommand == 'set':
-                if len(args.subcommand) == 3:
-                    profile_name = args.subcommand[2]
-                    profile_set(profile_name)
-                else:
-                    print(f"Usage: copilot profile set <profile>")
-            elif profile_subcommand == 'show':
-                profile_show()
-            elif profile_subcommand == 'verify':
-                profile_verify()
-            else:
-                print(f"Error: Unknown 'profile' command: {profile_subcommand}")
-                copilot_help()
-        else:
-            print(f"Error: Missing 'profile' command")
-            copilot_help()
-    else:
-        print(f"Error: Unknown command: {subcommand}")
-        copilot_help()
+    args.func(args)
 
 if __name__ == "__main__":
     main()
