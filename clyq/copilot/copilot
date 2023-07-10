@@ -19,7 +19,7 @@ def jsoncmd(command):
     return json.loads(out)
 
 def collect():
-    return True
+    assert False, "collect: not implemented"
 
 def pretty_result(result):
     # Load the JSON data
@@ -188,35 +188,35 @@ Available Copilot subcommands:
 
 def main():
     # Create the top-level parser
-    parser = argparse.ArgumentParser(prog='copilot', description='Ceph Copilot: Your Expert Ceph Assistant')
+    parser = argparse.ArgumentParser(prog='copilot', description='Ceph Copilot: Your Expert Ceph Assistant. Ceph Copilot is a wrapper around the Ceph CLI tool that disables dangerous commands and provides a simplified interface for managing Ceph clusters.')
     subparsers = parser.add_subparsers(required=True, title='subcommands',
                                        description='valid subcommands',
                                        help='additional help')
 
     # create the parser for the "checkup" command
-    parser_checkup = subparsers.add_parser('checkup', help='checkup help')
+    parser_checkup = subparsers.add_parser('checkup', help='Perform an overall health and safety check on the cluster')
     parser_checkup.add_argument('--ceph_report_json', type=str, help='ceph_report_json help')
     parser_checkup.set_defaults(func=subcommand_checkup)
 
     # Create the parser for the "profile" command
-    parser_profile = subparsers.add_parser('profile', help='profile help')
-    profile_subparsers = parser_profile.add_subparsers(required=True, help='profile sub-command help')
+    parser_profile = subparsers.add_parser('profile', help='View and apply Ceph Tuning Profiles')
+    profile_subparsers = parser_profile.add_subparsers(required=True)
 
     # Create the parser for the "profile list" command
-    parser_profile_list = profile_subparsers.add_parser('list', help='list help')
+    parser_profile_list = profile_subparsers.add_parser('list', help='List available Ceph tuning profiles')
     parser_profile_list.set_defaults(func=profile_list)
 
     # Create the parser for the "profile set" command
-    parser_profile_set = profile_subparsers.add_parser('set', help='set help')
+    parser_profile_set = profile_subparsers.add_parser('set', help='Set a Ceph tuning profile')
     parser_profile_set.add_argument('profilename', type=str, help='profilename help')
     parser_profile_set.set_defaults(func=profile_set)
 
     # Create the parser for the "profile show" command
-    parser_profile_show = profile_subparsers.add_parser('show', help='show help')
+    parser_profile_show = profile_subparsers.add_parser('show', help='Show the currently used Ceph tuning profile')
     parser_profile_show.set_defaults(func=profile_show)
 
     # Create the parser for the "profile verify" command
-    parser_profile_verify = profile_subparsers.add_parser('verify', help='verify help')
+    parser_profile_verify = profile_subparsers.add_parser('verify', help='Check if the cluster configuration matches the profile recommendations')
     parser_profile_verify.set_defaults(func=profile_verify)
 
     # Parse the arguments and call the appropriate function
