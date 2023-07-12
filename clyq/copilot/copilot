@@ -159,6 +159,11 @@ def profile_verify(args):
 
     print("Current Ceph configuration matches the active profile.")
 
+
+def toolkit_upmapremapped(args):
+    print('upmap-remapped is coming soon. For now, github.com/clyso/ceph-scripts/tools/upmap/ for more info')
+    return
+
 def run_ceph_command(args):
     command = ['ceph']
     command.extend(args)
@@ -169,26 +174,9 @@ def run_ceph_command(args):
         print(f"Error: {e.output.decode('utf-8')}")
         exit(1)
 
-def copilot_help():
-    help_text = """
-Ceph Copilot Help:
-
-Ceph Copilot is a wrapper around the Ceph CLI tool that disables dangerous
-commands and provides a simplified interface for managing Ceph clusters.
-
-Available Copilot subcommands:
-
-- checkup: Provide an overall health and safety check on the cluster
-- profile list: List available Ceph tuning profiles
-- profile set: Set a Ceph tuning profile
-- profile show: Show the currently used Ceph tuning profile
-- profile verify: Check if the cluster configuration matches the profile recommendations
-    """
-    print(help_text)
-
 def main():
     # Create the top-level parser
-    parser = argparse.ArgumentParser(prog='copilot', description='Ceph Copilot: Your Expert Ceph Assistant. Ceph Copilot is a wrapper around the Ceph CLI tool that disables dangerous commands and provides a simplified interface for managing Ceph clusters.')
+    parser = argparse.ArgumentParser(prog='copilot', description='Ceph Copilot: Your Expert Ceph Assistant.')
     subparsers = parser.add_subparsers(required=True, title='subcommands',
                                        description='valid subcommands',
                                        help='additional help')
@@ -218,6 +206,14 @@ def main():
     # Create the parser for the "profile verify" command
     parser_profile_verify = profile_subparsers.add_parser('verify', help='Check if the cluster configuration matches the profile recommendations')
     parser_profile_verify.set_defaults(func=profile_verify)
+
+    # Create the parser for the "toolkit" command
+    parser_toolkit = subparsers.add_parser('toolkit', help='A selection of useful Ceph Tools')
+    toolkit_subparsers = parser_toolkit.add_subparsers(required=True)
+
+    # Create the parser for the "toolkit upmap-remapped" command
+    parser_toolkit_upmapremapped = toolkit_subparsers.add_parser('upmap-remapped', help='[Advanced] Used to map PGs to their current location, pausing most backfills')
+    parser_toolkit_upmapremapped.set_defaults(func=toolkit_upmapremapped)
 
     # Parse the arguments and call the appropriate function
     args = parser.parse_args()
