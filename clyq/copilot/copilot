@@ -23,13 +23,13 @@ def pretty_result(result):
     json_data = json.loads(result)
 
     # Print the summary
-    print(f"Overall score: {json_data['summary']['score']} out of {json_data['summary']['max_score']}")
+    print(f"Overall score: {json_data['summary']['score']:g} out of {json_data['summary']['max_score']}")
     print(f"Grade: {json_data['summary']['grade']}\n")
 
     # Loop over the sections
     for section in json_data['sections']:
         print(f"Section: {section['id']}")
-        print(f"Score: {section['score']} out of {section['max_score']}")
+        print(f"Score: {section['score']:g} out of {section['max_score']}")
         print(f"Grade: {section['grade']}")
         print("Checks:")
         for check in section['checks']:
@@ -39,13 +39,16 @@ def pretty_result(result):
             print(f"    Details:")
             for detail in check['detail']:
                 print(f"      - {detail}")
+            if not check['detail']:
+                print(f"      - None")
             print(f"    Recommendations:")
             for recommend in check['recommend']:
                 print(f"      - {recommend}")
-            else:
+            if not check['recommend']:
                 print(f"      - None")
             print("")
         if not section['checks']:
+            print("  - None")
             print("")
 
 
