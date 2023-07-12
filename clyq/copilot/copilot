@@ -23,20 +23,31 @@ def pretty_result(result):
     json_data = json.loads(result)
 
     # Print the summary
-    print(f"Overall score: {json_data['summary']['score']}/{json_data['summary']['max_score']}")
+    print(f"Overall score: {json_data['summary']['score']} out of {json_data['summary']['max_score']}")
     print(f"Grade: {json_data['summary']['grade']}\n")
 
     # Loop over the sections
     for section in json_data['sections']:
         print(f"Section: {section['id']}")
-        print(f"Score: {section['score']}/{section['max_score']}")
+        print(f"Score: {section['score']} out of {section['max_score']}")
         print(f"Grade: {section['grade']}")
         print("Checks:")
         for check in section['checks']:
             print(f"  - ID: {check['id']}")
             print(f"    Result: {check['result']}")
             print(f"    Summary: {check['summary']}")
-            print(f"    Details: {check['detail']}\n")
+            print(f"    Details:")
+            for detail in check['detail']:
+                print(f"      - {detail}")
+            print(f"    Recommendations:")
+            for recommend in check['recommend']:
+                print(f"      - {recommend}")
+            else:
+                print(f"      - None")
+            print("")
+        if not section['checks']:
+            print("")
+
 
 def subcommand_checkup(args):
     if args.ceph_report_json:
