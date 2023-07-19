@@ -186,9 +186,10 @@ def run_ceph_command(args):
 def main():
     # Create the top-level parser
     parser = argparse.ArgumentParser(prog='copilot', description='Ceph Copilot: Your Expert Ceph Assistant.')
-    subparsers = parser.add_subparsers(required=True, title='subcommands',
+    subparsers = parser.add_subparsers(title='subcommands',
                                        description='valid subcommands',
                                        help='additional help')
+    subparsers.required = True;
 
     # create the parser for the "checkup" command
     parser_checkup = subparsers.add_parser('checkup', help='Perform an overall health and safety check on the cluster')
@@ -197,7 +198,8 @@ def main():
 
     # Create the parser for the "profile" command
     parser_profile = subparsers.add_parser('profile', help='View and apply Ceph Tuning Profiles')
-    profile_subparsers = parser_profile.add_subparsers(required=True)
+    profile_subparsers = parser_profile.add_subparsers()
+    profile_subparsers.required = True;
 
     # Create the parser for the "profile list" command
     parser_profile_list = profile_subparsers.add_parser('list', help='List available Ceph tuning profiles')
@@ -218,7 +220,8 @@ def main():
 
     # Create the parser for the "toolkit" command
     parser_toolkit = subparsers.add_parser('toolkit', help='A selection of useful Ceph Tools')
-    toolkit_subparsers = parser_toolkit.add_subparsers(required=True)
+    toolkit_subparsers = parser_toolkit.add_subparsers()
+    toolkit_subparsers.required = True;
 
     # Create the parser for the "toolkit upmap-remapped" command
     parser_toolkit_upmapremapped = toolkit_subparsers.add_parser('upmap-remapped', help='[Advanced] Used to map PGs to their current location, pausing most backfills')
