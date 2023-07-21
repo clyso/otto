@@ -177,6 +177,18 @@ def toolkit_upmapremapped(args):
     print('upmap-remapped is coming soon. For now, github.com/clyso/ceph-scripts/tools/upmap/ for more info')
     return
 
+def planner_upgrade(args):
+    print('Upgrade planner is coming soon.')
+    return
+
+def planner_capacity(args):
+    print('Capacity planner is coming soon.')
+    return
+
+def planner_replacement(args):
+    print('Hardware replacement planner is coming soon.')
+    return
+
 def run_ceph_command(args):
     command = ['ceph']
     command.extend(args)
@@ -199,6 +211,23 @@ def main():
     parser_checkup = subparsers.add_parser('checkup', help='Perform an overall health and safety check on the cluster')
     parser_checkup.add_argument('--ceph_report_json', type=str, help='ceph_report_json help')
     parser_checkup.set_defaults(func=subcommand_checkup)
+
+    # Create the parser for the "planner" command
+    parser_planner = subparsers.add_parser('planner', help='Ceph Planning Tools')
+    planner_subparsers = parser_planner.add_subparsers()
+    planner_subparsers.required = True;
+
+    # Create the parser for the "planner upgrade" command
+    parser_planner_upgrade = planner_subparsers.add_parser('upgrade', help='Plan a ceph upgrade')
+    parser_planner_upgrade.set_defaults(func=planner_upgrade)
+
+    # Create the parser for the "planner capacity" command
+    parser_planner_capacity = planner_subparsers.add_parser('capacity', help='Ceph capacity planning')
+    parser_planner_capacity.set_defaults(func=planner_capacity)
+
+    # Create the parser for the "planner replacement" command
+    parser_planner_replacement = planner_subparsers.add_parser('replacement', help='Hardware replacement planning')
+    parser_planner_replacement.set_defaults(func=planner_replacement)
 
     # Create the parser for the "profile" command
     parser_profile = subparsers.add_parser('profile', help='View and apply Ceph Tuning Profiles')
