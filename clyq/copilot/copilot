@@ -19,7 +19,7 @@ def jsoncmd(command):
     return json.loads(out)
 
 def collect():
-    assert False, "collect: not implemented"
+    return jsoncmd('ceph report')
 
 def pretty_result(result):
     # Load the JSON data
