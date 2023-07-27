@@ -18,7 +18,7 @@ def jsoncmd(command):
 def collect():
     return jsoncmd('ceph report')
 
-def pretty_result(result):
+def pretty_result(result, short):
     # Load the JSON data
     json_data = json.loads(result)
 
@@ -31,15 +31,16 @@ def pretty_result(result):
         print(f"Section: {section['id']}")
         print(f"Score: {section['score']:g} out of {section['max_score']}")
         print(f"Grade: {section['grade']}")
-        print("Info:")
         for info in section['info']:
+            print("Info:")
             print(f"  - ID: {info['id']}")
             print(f"    Summary: {info['summary']}")
-            print(f"    Details:")
-            for detail in info['detail']:
-                print(f"      - {detail}")
-            if not info['detail']:
-                print(f"      - None")
+            if not short:
+                print(f"    Details:")
+                for detail in info['detail']:
+                    print(f"      - {detail}")
+                if not info['detail']:
+                    print(f"      - None")
         if not section['info']:
             print("  - None")
         print("Checks:")
@@ -47,17 +48,20 @@ def pretty_result(result):
             print(f"  - ID: {check['id']}")
             print(f"    Result: {check['result']}")
             print(f"    Summary: {check['summary']}")
-            print(f"    Details:")
-            for detail in check['detail']:
-                print(f"      - {detail}")
-            if not check['detail']:
-                print(f"      - None")
-            print(f"    Recommendations:")
-            for recommend in check['recommend']:
-                print(f"      - {recommend}")
-            if not check['recommend']:
-                print(f"      - None")
-            print("")
+            if not short:
+                print(f"    Details:")
+                for detail in check['detail']:
+                    print(f"      - {detail}")
+                if not check['detail']:
+                    print(f"      - None")
+                print(f"    Recommendations:")
+                for recommend in check['recommend']:
+                    print(f"      - {recommend}")
+                if not check['recommend']:
+                    print(f"      - None")
+                print("")
+            else:
+                print("")
         if not section['checks']:
             print("  - None")
             print("")
@@ -71,7 +75,7 @@ def subcommand_checkup(args):
         report = collect()
 
     result = generate_result(report_json = report)
-    pretty_result(result.dump())
+    pretty_result(result.dump(), args.short)
 
 
 def get_tuning_profiles():
@@ -216,7 +220,8 @@ def main():
 
     # create the parser for the "checkup" command
     parser_checkup = subparsers.add_parser('checkup', help='Perform an overall health and safety check on the cluster')
-    parser_checkup.add_argument('--ceph_report_json', type=str, help='ceph_report_json help')
+    parser_checkup.add_argument('--ceph_report_json', type=str, help='analyze this `ceph.report` file')
+    parser_checkup.add_argument('--short', action='store_true', help='Consise output')
     parser_checkup.set_defaults(func=subcommand_checkup)
 
     # Create the parser for the "planner" command
