@@ -31,6 +31,17 @@ def pretty_result(result):
         print(f"Section: {section['id']}")
         print(f"Score: {section['score']:g} out of {section['max_score']}")
         print(f"Grade: {section['grade']}")
+        print("Info:")
+        for info in section['info']:
+            print(f"  - ID: {info['id']}")
+            print(f"    Summary: {check['summary']}")
+            print(f"    Details:")
+            for detail in check['detail']:
+                print(f"      - {detail}")
+            if not check['detail']:
+                print(f"      - None")
+        if not section['info']:
+            print("  - None")
         print("Checks:")
         for check in section['checks']:
             print(f"  - ID: {check['id']}")
