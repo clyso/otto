@@ -21,20 +21,51 @@ def jsoncmd(command):
 def collect():
     return jsoncmd('ceph report')
 
-def pretty_result(result):
+
+def render_progress_bar(data):
+    statuses = []
+    for section in data['sections']:
+        for check in section['checks']:
+            statuses.append(check['result'])
+    characters = {
+        'PASS': '.',
+        'WARN': '!',
+        'FAIL': 'X',
+    }
+    progress_bar = [characters.get(status, '?') for status in statuses]
+    return ''.join(progress_bar)
+
+
+def compact_result(result):
+    # Load the JSON data
+    json_data = json.loads(result)
+
+    # Print a "progress bar"
+    print(f"Running tests: {render_progress_bar(json_data)}
+")
+
+    # Print the summary
+    print(f"Overall score: {json_data['summary']['score']:g} out of {json_data['summary']['max_score']} ({json_data['summary']['grade']})
+")
+
+    # Loop over the sections
+    for section in json_data['sections']:
+        for check in section['checks']:
+            if check['result'] != 'PASS':
+                print(f"- {check['result']} in {section['id']}/{check['id']}: {check['summary']}")
+
+def verbose_result(result):
     # Load the JSON data
     json_data = json.loads(result)
 
     # Print the summary
-    print(f"Overall score: {json_data['summary']['score']:g} out of {json_data['summary']['max_score']}")
-    print(f"Grade: {json_data['summary']['grade']}
+    print(f"Overall score: {json_data['summary']['score']:g} out of {json_data['summary']['max_score']} ({json_data['summary']['grade']})
 ")
 
     # Loop over the sections
     for section in json_data['sections']:
         print(f"Section: {section['id']}")
-        print(f"Score: {section['score']:g} out of {section['max_score']}")
-        print(f"Grade: {section['grade']}")
+        print(f"Score: {section['score']:g} out of {section['max_score']} ({section['grade']})")
         print("Info:")
         for info in section['info']:
             print(f"  - ID: {info['id']}")
@@ -75,7 +106,10 @@ def subcommand_checkup(args):
         report = collect()
 
     result = generate_result(report_json = report)
-    pretty_result(result.dump())
+    if args.verbose:
+        verbose_result(result.dump())
+    else:
+        compact_result(result.dump())
 
 
 def get_tuning_profiles():
@@ -220,7 +254,8 @@ def main():
 
     # create the parser for the "checkup" command
     parser_checkup = subparsers.add_parser('checkup', help='Perform an overall health and safety check on the cluster')
-    parser_checkup.add_argument('--ceph_report_json', type=str, help='ceph_report_json help')
+    parser_checkup.add_argument('--ceph_report_json', type=str, help='analyze this `ceph.report` file')
+    parser_checkup.add_argument('--verbose', action='store_true', help='Verbose output')
     parser_checkup.set_defaults(func=subcommand_checkup)
 
     # Create the parser for the "planner" command
