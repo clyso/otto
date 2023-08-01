@@ -44,10 +44,15 @@ def compact_result(result):
     print(f"Overall score: {json_data['summary']['score']:g} out of {json_data['summary']['max_score']} ({json_data['summary']['grade']})\n")
 
     # Loop over the sections
+    warned = False
     for section in json_data['sections']:
         for check in section['checks']:
             if check['result'] != 'PASS':
                 print(f"- {check['result']} in {section['id']}/{check['id']}: {check['summary']}")
+                warned = True
+
+    if warned:
+        print("\nUse --verbose for details and recommendations")
 
 def verbose_result(result):
     # Load the JSON data
