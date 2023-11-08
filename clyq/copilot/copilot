@@ -218,8 +218,38 @@ def profile_verify(args):
     print("Current Ceph configuration matches the active profile.")
 
 
-def toolkit_upmapremapped(args):
-    print('upmap-remapped is coming soon. For now, github.com/clyso/ceph-scripts/tools/upmap/ for more info')
+def list_executable_files(directory):
+    """
+    Recursively lists executable files in the given directory and all subdirectories.
+
+    Parameters:
+    directory (str): The path to the directory to search in.
+
+    Returns:
+    list: A list of paths to executable files.
+    """
+    assert(os.path.exists(directory))
+    executable_files = []
+
+    # Walk through the directory
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            file_path = os.path.join(root, file)
+            # Check if the file is executable
+            if os.path.isfile(file_path) and os.access(file_path, os.X_OK):
+                executable_files.append(os.path.relpath(file_path, directory))
+
+    return executable_files
+
+
+def toolkit_list(args):
+    tools_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../tools'))
+
+    print(f"Ceph Tools are installed to {tools_dir}")
+    print("\nTools:\n")
+    tools = list_executable_files(tools_dir)
+    for t in tools:
+        print(f"{t}")
     return
 
 def planner_upgrade(args):
@@ -303,9 +333,9 @@ def main():
     toolkit_subparsers = parser_toolkit.add_subparsers()
     toolkit_subparsers.required = True;
 
-    # Create the parser for the "toolkit upmap-remapped" command
-    parser_toolkit_upmapremapped = toolkit_subparsers.add_parser('upmap-remapped', help='[Advanced] Used to map PGs to their current location, pausing most backfills')
-    parser_toolkit_upmapremapped.set_defaults(func=toolkit_upmapremapped)
+    # Create the parser for the "toolkit list" command
+    parser_toolkit_upmapremapped = toolkit_subparsers.add_parser('list', help='List the included Ceph tools')
+    parser_toolkit_upmapremapped.set_defaults(func=toolkit_list)
 
     # Parse the arguments and call the appropriate function
     args = parser.parse_args()
