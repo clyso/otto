@@ -252,6 +252,11 @@ def toolkit_list(args):
         print(f"{t}")
     return
 
+def toolkit_run(args):
+    tools_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../tools'))
+    cmd = [os.path.join(tools_dir, args.tool)] + args.args
+    subprocess.run(cmd)
+
 def planner_upgrade(args):
     print('Upgrade planner is coming soon.')
     return
@@ -334,8 +339,14 @@ def main():
     toolkit_subparsers.required = True;
 
     # Create the parser for the "toolkit list" command
-    parser_toolkit_upmapremapped = toolkit_subparsers.add_parser('list', help='List the included Ceph tools')
-    parser_toolkit_upmapremapped.set_defaults(func=toolkit_list)
+    parser_toolkit_list = toolkit_subparsers.add_parser('list', help='List the included Ceph tools')
+    parser_toolkit_list.set_defaults(func=toolkit_list)
+
+    # Create the parser for the "toolkit run" command
+    parser_toolkit_run = toolkit_subparsers.add_parser('run', help='Run an included Ceph tool')
+    parser_toolkit_run.add_argument('tool', type=str, help='tool name')
+    parser_toolkit_run.add_argument('args', nargs='*', help='tool options')
+    parser_toolkit_run.set_defaults(func=toolkit_run)
 
     # Parse the arguments and call the appropriate function
     args = parser.parse_args()
