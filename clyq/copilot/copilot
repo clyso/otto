@@ -218,6 +218,20 @@ def profile_verify(args):
     print("Current Ceph configuration matches the active profile.")
 
 
+def get_tools_dir():
+    tools_dir_candidates = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), '../tools')),
+        '/usr/libexec/ceph-copilot/tools',
+        '/usr/share/ceph-copilot/tools',
+        '/usr/lib/ceph-copilot/tools',
+    ]
+
+    for tools_dir in tools_dir_candidates:
+        if os.path.exists(tools_dir):
+            return tools_dir
+
+    return None
+
 def list_executable_files(directory):
     """
     Recursively lists executable files in the given directory and all subdirectories.
@@ -243,7 +257,10 @@ def list_executable_files(directory):
 
 
 def toolkit_list(args):
-    tools_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../tools'))
+    tools_dir = get_tools_dir()
+    if not tools_dir:
+        print("Ceph Tools directory not found", file=sys.stderr)
+        exit(1)
 
     print(f"Ceph Tools are installed to {tools_dir}")
     print("\nTools:\n")
@@ -253,7 +270,11 @@ def toolkit_list(args):
     return
 
 def toolkit_run(args):
-    tools_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../tools'))
+    tools_dir = get_tools_dir()
+    if not tools_dir:
+        print("Ceph Tools directory not found", file=sys.stderr)
+        exit(1)
+
     cmd = [os.path.join(tools_dir, args.tool)] + args.args
     subprocess.run(cmd)
 
