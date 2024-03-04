@@ -314,7 +314,8 @@ def main():
     parser = argparse.ArgumentParser(prog='copilot', description='Ceph Copilot: Your Expert Ceph Assistant.')
     subparsers = parser.add_subparsers(title='subcommands',
                                        description='valid subcommands',
-                                       help='additional help')
+                                       help='additional help',
+                                       dest='{checkup, planner, profile, toolkit}')
     parser.add_argument('--version', action='version', version=f'Clyso Ceph Copilot v{__version__}')
     subparsers.required = True;
 
@@ -326,7 +327,7 @@ def main():
 
     # Create the parser for the "planner" command
     parser_planner = subparsers.add_parser('planner', help='Ceph Planning Tools')
-    planner_subparsers = parser_planner.add_subparsers()
+    planner_subparsers = parser_planner.add_subparsers(dest="{upgrade, capacity, replacement}")
     planner_subparsers.required = True;
 
     # Create the parser for the "planner upgrade" command
@@ -343,7 +344,7 @@ def main():
 
     # Create the parser for the "profile" command
     parser_profile = subparsers.add_parser('profile', help='View and apply Ceph Tuning Profiles')
-    profile_subparsers = parser_profile.add_subparsers()
+    profile_subparsers = parser_profile.add_subparsers(dest = "{list,set,show,verify}")
     profile_subparsers.required = True;
 
     # Create the parser for the "profile list" command
@@ -365,7 +366,7 @@ def main():
 
     # Create the parser for the "toolkit" command
     parser_toolkit = subparsers.add_parser('toolkit', help='A selection of useful Ceph Tools')
-    toolkit_subparsers = parser_toolkit.add_subparsers()
+    toolkit_subparsers = parser_toolkit.add_subparsers(dest='{tool, run}', help='tool help')
     toolkit_subparsers.required = True;
 
     # Create the parser for the "toolkit list" command
