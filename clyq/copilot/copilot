@@ -294,12 +294,17 @@ def planner_replacement(args):
 def pg_distribution(args):
     # temporary code to test the pg_distribution
     # args.ceph_report_json should hold the report json file but I am using it to hold ceph osd tree json
-    # if args.ceph_osd_json:
-    #     with open(args.ceph_osd_json, 'r') as file:
-    #         osd_weights = json.load(file)
-    # else:
-    osd_weights = jsoncmd('ceph osd tree -f json') 
-    pg_stats = jsoncmd("ceph pg dump --format=json")
+    if args.ceph_osd_json:
+        with open(args.ceph_osd_json, 'r') as file:
+            osd_weights = json.load(file)
+    else:
+        osd_weights = jsoncmd('ceph osd tree -f json') 
+    
+    if args.ceph_pg_json:
+        with open(args.ceph_pg_json, 'r') as file:
+            pg_stats = json.load(file)
+    else:
+        pg_stats = jsoncmd("ceph pg dump --format=json")
     
     print_histogram(osd_weights, pg_stats, args)
     
@@ -389,10 +394,11 @@ def main():
     parser_pg = parser_pg.add_subparsers(dest="{distribution}") 
     parser_pg.required = True;
     
-    # Create thje parser for "pg show-distribution" command
+    # Create thje parser for "pg distribution" command
     parser_pg_distribution = parser_pg.add_parser('distribution', help='plot a graph of pg distributions')
     parser_pg_distribution.set_defaults(func=pg_distribution)
-    parser_pg_distribution.required = True;   
+    parser_pg_distribution.add_argument('--ceph_osd_json', type=str, help='analyze this ceph osd tree file')
+    parser_pg_distribution.add_argument('--ceph_pg_json', type=str, help='analyze this pg dump file') 
     parser_pg_distribution.add_argument('--normalize', action='store_true', default=False, help="Normalize number of PGs to each OSD's CRUSH weight")
     parser_pg_distribution.add_argument('--pools', action='append', help="Only work on these Ceph pool IDs")
     parser_pg_distribution.add_argument('-m', '--min', help="minimum value for graph")
