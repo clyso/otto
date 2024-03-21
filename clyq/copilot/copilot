@@ -10,7 +10,7 @@ import subprocess
 import json
 
 from clyso.ceph.ai import generate_result
-from clyso.ceph.ai.pg import print_histogram
+from clyso.ceph.ai.pg import print_histogram, add_pg_distribution
 from clyso.__version__ import __version__
 
 CONFIG_FILE = 'copilot.yaml'
@@ -300,24 +300,6 @@ def planner_replacement(args):
     print('Hardware replacement planner is coming soon.')
     return
 
-def pg_distribution(args):
-    # temporary code to test the pg_distribution
-    # args.ceph_report_json should hold the report json file but I am using it to hold ceph osd tree json
-    if args.ceph_osd_json:
-        with open(args.ceph_osd_json, 'r') as file:
-            osd_weights = json.load(file)
-    else:
-        osd_weights = jsoncmd('ceph osd tree -f json') 
-    
-    if args.ceph_pg_json:
-        with open(args.ceph_pg_json, 'r') as file:
-            pg_stats = json.load(file)
-    else:
-        pg_stats = jsoncmd("ceph pg dump --format=json")
-    
-    print_histogram(osd_weights, pg_stats, args)
-    
-
 def run_ceph_command(args):
     command = ['ceph']
     command.extend(args)
@@ -397,29 +379,9 @@ def main():
     parser_toolkit_run.add_argument('tool', type=str, help='tool name')
     parser_toolkit_run.add_argument('args', nargs='*', help='tool options')
     parser_toolkit_run.set_defaults(func=toolkit_run)
-
-    # Create the parser for "pg" command
-    parser_pg = subparsers.add_parser('pg', help='List of scripts related to placement groups (PG)')
-    parser_pg = parser_pg.add_subparsers(dest="{distribution}") 
-    parser_pg.required = True;
     
-    # Create thje parser for "pg distribution" command
-    parser_pg_distribution = parser_pg.add_parser('distribution', help='plot a graph of pg distributions')
-    parser_pg_distribution.set_defaults(func=pg_distribution)
-    parser_pg_distribution.add_argument('--ceph_osd_json', type=str, help='analyze this ceph osd tree file')
-    parser_pg_distribution.add_argument('--ceph_pg_json', type=str, help='analyze this pg dump file') 
-    parser_pg_distribution.add_argument('--normalize', action='store_true', default=False, help="Normalize number of PGs to each OSD's CRUSH weight")
-    parser_pg_distribution.add_argument('--pools', action='append', help="Only work on these Ceph pool IDs")
-    parser_pg_distribution.add_argument('-m', '--min', help="minimum value for graph")
-    parser_pg_distribution.add_argument('-x', '--max', help="maximum value for graph")
-    parser_pg_distribution.add_argument('-b', '--bins', help="Number of bins to use for the histogram")
-    parser_pg_distribution.add_argument('-l', '--logscale', action='store_true', default=False, help="Bins grow in logarithmic scale")
-    parser_pg_distribution.add_argument('-B', '--custom-bins', help="Comma separated list of bin edges for the histogram")
-    parser_pg_distribution.add_argument('--no-mvsd', action='store_false', default=True, help="Disable the calculation of Mean, Variance and SD (improves performance)")
-    parser_pg_distribution.add_argument('-f', '--bin-format', default="%10.4f", help="format for bin numbers")
-    parser_pg_distribution.add_argument('-p', '--percentage', action='store_true', default=False, help="List percentage for each bar")
-    parser_pg_distribution.add_argument('--dot', default='#', help="Dot representation")
-    
+    # Create the parser for "pg distribution" command
+    add_pg_distribution(subparsers)
     
     # Parse the arguments and call the appropriate function
     args = parser.parse_args()
