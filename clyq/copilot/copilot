@@ -10,15 +10,12 @@ import subprocess
 import json
 
 from clyso.ceph.ai import generate_result
-from clyso.ceph.ai.pg import print_histogram, add_pg_distribution
+from clyso.ceph.ai.common import jsoncmd
+from clyso.ceph.ai.pg import print_histogram, add_command_pg
+
 from clyso.__version__ import __version__
 
 CONFIG_FILE = 'copilot.yaml'
-
-def jsoncmd(command):
-    with open(os.devnull, 'w') as devnull:
-        out = subprocess.check_output(command.split(), stderr=devnull)
-    return json.loads(out)
 
 def collect():
     return jsoncmd('ceph report')
@@ -380,8 +377,8 @@ def main():
     parser_toolkit_run.add_argument('args', nargs='*', help='tool options')
     parser_toolkit_run.set_defaults(func=toolkit_run)
     
-    # Create the parser for "pg distribution" command
-    add_pg_distribution(subparsers)
+    # Create the parser for "pg" command
+    add_command_pg(subparsers)
     
     # Parse the arguments and call the appropriate function
     args = parser.parse_args()
