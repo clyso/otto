@@ -8,7 +8,7 @@ import json
 
 from clyso.ceph.ai import generate_result
 from clyso.ceph.ai.common import jsoncmd
-from clyso.ceph.ai.pg import print_histogram, add_command_pg
+from clyso.ceph.ai.pg import add_command_pg
 
 from clyso.__version__ import __version__
 
