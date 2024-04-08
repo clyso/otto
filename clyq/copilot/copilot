@@ -300,16 +300,28 @@ def run_ceph_command(args):
 
 def main():
     # Create the top-level parser
-    parser = CopilotParser(prog='copilot', description='Ceph Copilot: Your Expert Ceph Assistant.')
+    parser = CopilotParser(prog='copilot', description="Ceph Copilot: Your Expert Ceph Assistant.", usage='%(prog)s [command]')
     subparsers = parser.add_subparsers(title='subcommands',
                                        description='valid subcommands',
-                                       help='additional help',
-                                       dest='{checkup, toolkit, pg}')
+                                       dest='{cluster, pool, toolkit}')
     parser.add_argument('--version',"-v","-V", action='version', version=f'Clyso Ceph Copilot v{__version__}')
     subparsers.required = True;
 
+    # # Add a subparser for the 'help' command
+    help_parser = subparsers.add_parser('help', help='Show this help message and exit')
+    help_parser.set_defaults(func=lambda args: parser.print_help())
+
+    # create the parser for the "cluster" command
+    parser_cluster = subparsers.add_parser('cluster', help='List of commands related to the cluster')
+    cluster_subparsers = parser_cluster.add_subparsers(dest="{check}",description='valid subcommands', help='additional help')
+
+    # create the parser for the "cluster" command
+    parser_pool = subparsers.add_parser('pools', help='Operations and management of Ceph pools')
+    pool_subparsers = parser_pool.add_subparsers(dest="{pg}", description='valid subcommands for pools', help='additional help')
+    pool_subparsers.required = True;
+
     # create the parser for the "checkup" command
-    parser_checkup = subparsers.add_parser('checkup', help='Perform an overall health and safety check on the cluster')
+    parser_checkup = cluster_subparsers.add_parser('checkup', help='Perform an overall health and safety check on the cluster')
     parser_checkup.add_argument('--ceph_report_json', type=str, help='analyze this `ceph.report` file')
     parser_checkup.add_argument('--verbose', action='store_true', help='Verbose output')
     parser_checkup.set_defaults(func=subcommand_checkup)
@@ -371,7 +383,7 @@ def main():
     parser_toolkit_run.set_defaults(func=toolkit_run)
     
     # Create the parser for "pg" command
-    add_command_pg(subparsers)
+    add_command_pg(pool_subparsers)
     
     # Parse the arguments and call the appropriate function
     args = parser.parse_args()
