@@ -100,6 +100,9 @@ def subcommand_checkup(args):
     if args.ceph_report_json:
         with open(args.ceph_report_json, 'r') as file:
             report = json.load(file)
+    elif os.path.exists('cluster_health-report'):
+        with open('cluster_health-report', 'r') as file:
+            report = json.load(file)
     else:
         report = collect()
 
