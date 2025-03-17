@@ -6,6 +6,9 @@ import json
 import os
 import subprocess
 import sys
+import time
+import requests
+import signal
 
 import yaml
 
@@ -14,6 +17,14 @@ from clyso.ceph.ai.common import CopilotParser, json_load, jsoncmd
 from clyso.ceph.ai.pg import add_command_pg
 from clyso.ceph.copilot.upmap import add_command_upmap
 from clyso.__version__ import __version__
+
+from clyso.ceph.copilot.daemon import (
+    CopilotDaemon,
+    CopilotSecret,
+    CommandType,
+    WebhookRegistrationError,
+)
+from clyso.ceph.copilot.command_registry import CommandRegistry
 
 CONFIG_FILE = "copilot.yaml"
 
@@ -128,6 +139,12 @@ def subcommand_checkup(args):
         verbose_result(result.dump())
     else:
         compact_result(result.dump())
+
+def get_analyzer_report_json(args):
+    report = collect()
+    r = generate_result(report_json=report)
+    print(r.data)
+    return r.data
 
 
 def get_tuning_profiles():
@@ -331,6 +348,78 @@ def run_ceph_command(args):
         print(f"Error: {e.output.decode('utf-8')}")
         exit(1)
 
+def daemon_start(args):
+    """Start the copilot daemon"""
+    print("Starting ceph copilot daemon...")
+
+    # Initialize secret
+    try:
+        if os.path.exists(args.secret):
+            secret = CopilotSecret.from_file(args.secret)
+        else:
+            secret = CopilotSecret.from_base64(args.secret)
+    except ValueError as e:
+        print(f"Error processing secret: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Initialize command registry
+    registry = CommandRegistry()
+
+    # Register copilot commands
+    registry.register(
+        "checkup", CommandType.COPILOT, "checkup", get_analyzer_report_json
+    )
+
+    # Create daemon instance
+    daemon = CopilotDaemon(secret=secret)
+
+    # Perform webhook health check
+    try:
+        response = requests.get(secret.url + "/health", timeout=10)
+        if response.status_code != 200:
+            print(
+                f"Error: Unable to perform healthcheck: webhook returned status code {response.status_code}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print("Webhook is healthy")
+    except requests.Timeout:
+        print("Error: Webhook health check timed out", file=sys.stderr)
+        sys.exit(1)
+    except requests.ConnectionError:
+        print("Error: Could not connect to webhook endpoint", file=sys.stderr)
+        sys.exit(1)
+    except requests.RequestException as e:
+        print(
+            f"Error starting the daemon: webhook health check failed: {e}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Register signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        print("
+Stopping daemon...")
+        daemon.stop()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # Start the daemon
+    try:
+        daemon.start()
+        print("Copilot daemon started successfully...")
+    except WebhookRegistrationError as e:
+        print(f"Error registering webhook: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error starting daemon: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Keep the main thread alive
+    while True:
+        time.sleep(1)
 
 def main():
     # Create the top-level parser
@@ -340,7 +429,7 @@ def main():
     subparsers = parser.add_subparsers(
         title="subcommands",
         description="valid subcommands",
-        dest="{cluster, pool, toolkit}",
+        dest="{cluster, pool, toolkit, agent-daemon, webhook}",
     )
     parser.add_argument(
         "--version",
@@ -382,6 +471,34 @@ def main():
     )
     parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
     parser_checkup.set_defaults(func=subcommand_checkup)
+
+    # Create the parser for the "daemon" command
+    parser_daemon = subparsers.add_parser(
+        "agent-daemon",
+        help="Run Copilot's agent daemon with webhook integration",
+        description="""
+    This command starts Ceph Copilot agent in daemon mode, which continuously 
+    monitors your Ceph cluster's health and sends periodic updates to your 
+    monitoring backend via encrypted webhook notifications.
+    
+    The agent will run in the background and requires a secret for 
+    secure communication with monitoring endpoints.
+    """,
+    )
+    parser_daemon.add_argument(
+        "--secret",
+        required=True,
+        help="""
+    Path to secret file with base64 secret or secret base64 string.
+    The secret should be a base64-encoded JSON string containing:
+    {
+        "url": "https://your-copilot-service-url",
+        "clusterId": "your-cluster-id",
+        "password": "your-secret-password"
+    }
+    """,
+    )
+    parser_daemon.set_defaults(func=daemon_start)
 
     # Add the upmap command
     add_command_upmap(cluster_subparsers)
