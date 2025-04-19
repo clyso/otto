@@ -1,0 +1,249 @@
+---
+
+operating_systems:
+  'CentOS Linux 7 (Core)':
+    status: End of Life
+    detail: CentOS Linux 7 has reached end of life (EOL) on June 30, 2024. Ceph Octopus (v15, already EOL) is only partially supported on CentOS Linux 7. Pacific (v16) and beyond do not support CentOS Linux 7 at all.
+    recommend: It is strongly recommended to upgrade to RHEL 8+ or a clone (Alma, Rocky). Note that CentOS Stream 8 is not recommended for bare-metal Ceph clusters.
+  'CentOS Linux 8':
+    status: End of Life
+    detail: CentOS Linux 8 reached end of life (EOL) on December 31, 2021. It is no longer receiving any security or bug fixes.
+    recommend: It is strongly recommended to upgrade to RHEL 8+ or a clone (Alma, Rocky). Note that CentOS Stream 8 is not recommended for bare-metal Ceph clusters.
+  'CentOS Stream 8':
+    status: Supported
+    recommend: It is recommended to upgrade to CentOS Stream 9.
+    detail: CentOS Stream 8 reached its end-of-life on May 31, 2024. After this date, no further updates or builds will be provided for CentOS Stream 8.
+  'CentOS Stream 9':
+    status: Supported
+    detail: CentOS Stream 9 is the latest version and has an expected EOL date of May 31, 2027.
+  'Red Hat Enterprise Linux 8 (Ootpa)':
+    status: Out of Date
+    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
+  'Red Hat Enterprise Linux 8.1 (Ootpa)':
+    status: Out of Date
+    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
+  'Red Hat Enterprise Linux 8.2 (Ootpa)':
+    status: Out of Date
+    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
+  'Red Hat Enterprise Linux 8.3 (Ootpa)':
+    status: Out of Date
+    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
+  'Red Hat Enterprise Linux 8.4 (Ootpa)':
+    status: Out of Date
+    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
+  'Red Hat Enterprise Linux 8.5 (Ootpa)':
+    status: Out of Date
+    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
+  'Red Hat Enterprise Linux 8.6 (Ootpa)':
+    status: Out of Date
+    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
+  'Red Hat Enterprise Linux 8.7 (Ootpa)':
+    status: Out of Date
+    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
+  'Red Hat Enterprise Linux 8.8 (Ootpa)':
+    status: Out of Date
+    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
+  'Red Hat Enterprise Linux 8.9 (Ootpa)':
+    status: Out of Date
+    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
+  'Red Hat Enterprise Linux 8.10 (Ootpa)':
+    status: Supported
+  'Red Hat Enterprise Linux 9.4 (Plow)':
+    status: Supported
+    detail: This is the latest release of RHEL 9 as of April 30, 2024.
+    recommend: This is the most up-to-date version of RHEL 9 and is recommended for use.
+  'Red Hat Enterprise Linux 9.3 (Plow)':
+    status: Out of Date
+    detail: A newer version (9.4) is available as of April 30, 2024.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 9.4.
+  'Red Hat Enterprise Linux 9.2 (Plow)':
+    status: Out of Date
+    detail: Newer versions (9.3 and 9.4) are available.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 9.4.
+  'Red Hat Enterprise Linux 9.1 (Plow)':
+    status: Out of Date
+    detail: Newer versions (9.2, 9.3, and 9.4) are available.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 9.4.
+  'Red Hat Enterprise Linux 9.0 (Plow)':
+    status: Out of Date
+    detail: This was the initial release of RHEL 9 on May 17, 2022. Newer versions are available.
+    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 9.4.
+  
+  'Rocky Linux 8 (Green Obsidian)':
+    status: Out of Date
+    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
+    recommend: It is recommended to upgrade to Rocky Linux 8.10.
+  'Rocky Linux 8.1 (Green Obsidian)':
+    status: Out of Date
+    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
+    recommend: It is recommended to upgrade to Rocky Linux 8.10.
+  'Rocky Linux 8.2 (Green Obsidian)':
+    status: Out of Date
+    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
+    recommend: It is recommended to upgrade to Rocky Linux 8.10.
+  'Rocky Linux 8.3 (Green Obsidian)':
+    status: Out of Date
+    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
+    recommend: It is recommended to upgrade to Rocky Linux 8.10.
+  'Rocky Linux 8.4 (Green Obsidian)':
+    status: Out of Date
+    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
+    recommend: It is recommended to upgrade to Rocky Linux 8.10.
+  'Rocky Linux 8.5 (Green Obsidian)':
+    status: Out of Date
+    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
+    recommend: It is recommended to upgrade to Rocky Linux 8.10.
+  'Rocky Linux 8.6 (Green Obsidian)':
+    status: Out of Date
+    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
+    recommend: It is recommended to upgrade to Rocky Linux 8.10.
+  'Rocky Linux 8.7 (Green Obsidian)':
+    status: Out of Date
+    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
+    recommend: It is recommended to upgrade to Rocky Linux 8.10.
+  'Rocky Linux 8.8 (Green Obsidian)':
+    status: Out of Date
+    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
+    recommend: It is recommended to upgrade to Rocky Linux 8.10.
+  'Rocky Linux 8.9 (Green Obsidian)':
+    status: Out of Date
+    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
+    recommend: It is recommended to upgrade to Rocky Linux 8.10.
+  'Rocky Linux 8.10 (Green Obsidian)':
+    status: Supported
+    detail: This is an old version, but it is still maintained.
+  'Blue Onyx 9.0 (Blue Onyx)':
+    status: Unsupported
+    detail: Rocky Linux 9.0 was released on 2022-07-14 and is no longer supported.
+    recommend: It is recommended to upgrade to Rocky Linux 9.4.
+  'Blue Onyx 9.1 (Blue Onyx)':
+    status: Unsupported
+    detail: Rocky Linux 9.1 was released on 2022-11-26 and is no longer supported.
+    recommend: It is recommended to upgrade to Rocky Linux 9.4.
+  'Blue Onyx 9.2 (Blue Onyx)':
+    status: Unsupported
+    detail: Rocky Linux 9.2 was released on 2023-05-16 and is no longer supported.
+    recommend: It is recommended to upgrade to Rocky Linux 9.4.
+  'Blue Onyx 9.3 (Blue Onyx)':
+    status: Unsupported
+    detail: Rocky Linux 9.3 was released on 2023-11-20 and is no longer supported.
+    recommend: It is recommended to upgrade to Rocky Linux 9.4.
+  'Blue Onyx 9.4 (Blue Onyx)':
+    status: Supported
+    detail: Rocky Linux 9.4 was released on 2024-05-09 and is currently supported.
+  'SUSE Linux Enterprise Server 15':
+    status: Out of Date
+    detail: The latest SUSE Linux Enterprise Server 15 is SP6 as of June 26, 2024.
+    recommend: It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP6.
+  'SUSE Linux Enterprise Server 15 SP1':
+    status: Out of Date
+    detail: The latest SUSE Linux Enterprise Server 15 SP1 was released on 24 Jun 2019 and is no longer supported.
+    recommend: It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP6.
+  'SUSE Linux Enterprise Server 15 SP2':
+    status: Out of Date
+    detail: The latest SUSE Linux Enterprise Server 15 SP2 was released on 21 Jul 2020 and is no longer supported.
+    recommend: It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP6.
+  'SUSE Linux Enterprise Server 15 SP3':
+    status: Out of Date
+    detail: The latest SUSE Linux Enterprise Server 15 SP3 was released on 22 Jun 2021 and is no longer supported.
+    recommend: It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP6.
+  'SUSE Linux Enterprise Server 15 SP4':
+    status: Supported
+  'SUSE Linux Enterprise Server 15 SP5':
+    status: Supported
+  'SUSE Linux Enterprise Server 15 SP6':
+    status: Supported
+  'Ubuntu 18.04 LTS':
+    status: End of Life
+    detail: Ubuntu 18.04 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
+    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+  'Ubuntu 18.04.1 LTS':
+    status: End of Life
+    detail: Ubuntu 18.04.1 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
+    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+  'Ubuntu 18.04.2 LTS':
+    status: End of Life
+    detail: Ubuntu 18.04.2 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
+    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+  'Ubuntu 18.04.3 LTS':
+    status: End of Life
+    detail: Ubuntu 18.04.3 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
+    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+  'Ubuntu 18.04.4 LTS':
+    status: End of Life
+    detail: Ubuntu 18.04.4 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
+    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+  'Ubuntu 18.04.5 LTS':
+    status: End of Life
+    detail: Ubuntu 18.04.5 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
+    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+  'Ubuntu 18.04.6 LTS':
+    status: End of Life
+    detail: Ubuntu 18.04.6 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
+    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+  'Ubuntu 20.04 LTS':
+    status: Out of Date
+    detail: The latest 20.04 LTS release is 20.04.6 as of Mar 23, 2023.
+    recommend: It is recommended to upgrade to Ubuntu 20.04.6 LTS.
+  'Ubuntu 20.04.1 LTS':
+    status: Out of Date
+    detail: The latest 20.04 LTS release is 20.04.6 as of Mar 23, 2023.
+    recommend: It is recommended to upgrade to Ubuntu 20.04.6 LTS.
+  'Ubuntu 20.04.2 LTS':
+    status: Out of Date
+    detail: The latest 20.04 LTS release is 20.04.6 as of Mar 23, 2023.
+    recommend: It is recommended to upgrade to Ubuntu 20.04.6 LTS.
+  'Ubuntu 20.04.3 LTS':
+    status: Out of Date
+    detail: The latest 20.04 LTS release is 20.04.6 as of Mar 23, 2023.
+    recommend: It is recommended to upgrade to Ubuntu 20.04.6 LTS.
+  'Ubuntu 20.04.4 LTS':
+    status: Out of Date
+    detail: The latest 20.04 LTS release is 20.04.6 as of Mar 23, 2023.
+    recommend: It is recommended to upgrade to Ubuntu 20.04.6 LTS.
+  'Ubuntu 20.04.5 LTS':
+    status: Out of Date
+    detail: The latest 20.04 LTS release is 20.04.6 as of Mar 23, 2023.
+    recommend: It is recommended to upgrade to Ubuntu 20.04.6 LTS.
+  'Ubuntu 20.04.6 LTS':
+    status: Supported
+    detail: This is the latest point release for Ubuntu 20.04 LTS (Focal Fossa).
+    recommend: Continue using this version or consider upgrading to Ubuntu 22.04 LTS.
+  'Ubuntu 22.04 LTS':
+    status: Supported
+    detail: This is the initial release of Ubuntu 22.04 LTS (Jammy Jellyfish) from April 21, 2022.
+    recommend: Consider upgrading to the latest point release, Ubuntu 22.04.5 LTS.
+  'Ubuntu 22.04.1 LTS':
+    status: Out of Date
+    detail: Newer point releases are available for Ubuntu 22.04 LTS.
+    recommend: It is recommended to upgrade to Ubuntu 22.04.5 LTS.
+  'Ubuntu 22.04.2 LTS':
+    status: Out of Date
+    detail: Newer point releases are available for Ubuntu 22.04 LTS.
+    recommend: It is recommended to upgrade to Ubuntu 22.04.5 LTS.
+  'Ubuntu 22.04.3 LTS':
+    status: Out of Date
+    detail: A newer point release is available for Ubuntu 22.04 LTS.
+    recommend: It is recommended to upgrade to Ubuntu 22.04.5 LTS.
+  'Ubuntu 22.04.4 LTS':
+    status: Out of Date
+    detail: A newer point release is available for Ubuntu 22.04 LTS.
+    recommend: It is recommended to upgrade to Ubuntu 22.04.5 LTS.
+  'Ubuntu 22.04.5 LTS':
+    status: Supported
+    detail: This is the latest point release for Ubuntu 22.04 LTS (Jammy Jellyfish) as of September 12, 2024.
+    recommend: This is the most up-to-date version of Ubuntu 22.04 LTS.
+  'Debian GNU/Linux 12 (bookworm)':
+    status: Supported
+    detail: Debian 12 (Bookworm) was released on June 10, 2023 and is currently supported until June 2028.
+    recommend: This is a supported version for running Ceph clusters.

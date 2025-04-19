@@ -1,0 +1,627 @@
+#!/usr/bin/env python3
+
+# List rgw objects that have missing rados objects in the data pool.
+#
+# Copyright (C) 2023 Clyso GmbH
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 3
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+# 02110-1301, USA.
+
+import argparse
+import json
+import os
+import pickle
+import rados
+import re
+import signal
+import sys
+import subprocess
+
+from datetime import datetime
+from threading import Condition, Lock, RLock, Thread
+
+parser = argparse.ArgumentParser(
+        prog='clyso-rgw-find-missing',
+        description='Search for rgw objects missing rados objects in data pool',
+        epilog='''Example:
+           clyso-rgw-find-missing -b bucket1 bucket2 -- default.rgw.buckets.data
+        ''',
+)
+parser.add_argument(
+    'data_pool',
+    help='data pool name',
+    nargs='*',
+    default=None,
+)
+parser.add_argument(
+    '-b', '--bucket',
+    metavar='bucket',
+    help='bucket name',
+    nargs='*',
+    default=None,
+)
+parser.add_argument(
+    '-w', '--workers',
+    metavar='N',
+    help='number of workers (default: 64)',
+    type=int,
+    default=64,
+)
+parser.add_argument(
+    '-m', '--max-concurrent-ios',
+    metavar='N',
+    help='max concurrent ios for bucket radoslist (default: 512)',
+    type=int,
+    default=512,
+)
+parser.add_argument(
+    '-s', '--status-output',
+    metavar='file',
+    help='status output (default: stderr)',
+    default=None,
+)
+parser.add_argument(
+    '-d', '--processed-buckets-db',
+    metavar='file',
+    help='processed buckets db',
+    default=None,
+)
+parser.add_argument(
+    '-c', '--corrupted-objects',
+    metavar='object_name',
+    help='store corrupted objects list in bucket object with this name',
+    default=None,
+)
+parser.add_argument(
+    '-f', '--fix',
+    help='recreate missing rados objects (filled with zeros)',
+    action='store_true',
+    default=False,
+)
+parser.add_argument(
+    '-i', '--fix-bucket-index',
+    help='fix bucket index',
+    action='store_true',
+    default=False,
+)
+parser.add_argument(
+    '-n', '--dry-run',
+    help='do not do any changes, just print what would be done',
+    action='store_true',
+    default=False,
+)
+
+
+def get_pools():
+    cmd = ['radosgw-admin', 'zone', 'get']
+    zone = json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+    pools = []
+    for p in zone['placement_pools']:
+        for k, v in p['val']['storage_classes'].items():
+            pools.append(v['data_pool'])
+    return pools
+
+def get_buckets():
+    cmd = ['radosgw-admin', 'bucket', 'list']
+    return json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+
+
+class Output:
+    """
+    Output class for printing to stdout thread safely.
+    """
+
+    lock = Lock()
+
+    @staticmethod
+    def print(*args, **kwargs):
+        with Output.lock:
+            print(*args, **kwargs)
+
+
+class StatusOutput:
+    """
+    Status output class
+    """
+
+    def __init__(self, status_output):
+        self.status_output = status_output
+
+    def print(self, msg):
+        print(f'{datetime.now().strftime("%F %H:%M:%S")} {msg}',
+            file=self.status_output,
+            flush=True,
+        )
+
+
+class ProcessedBucketsDB:
+    """
+    Processed buckets db class
+    """
+
+    def __init__(self, file):
+        self.file = file
+        self.buckets = set()
+        if self.file and os.path.exists(self.file):
+            with open(self.file, 'rb') as f:
+                self.buckets = pickle.load(f)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.save()
+
+    def __contains__(self, bucket):
+        return bucket in self.buckets
+
+    def __len__(self):
+        return len(self.buckets)
+
+    def save(self):
+        if self.file:
+            with open(self.file, 'wb') as f:
+                pickle.dump(self.buckets, f)
+
+    def add(self, bucket):
+        self.buckets.add(bucket)
+
+
+class CorruptedObjects:
+    """
+    Corrupted objects class
+    """
+
+    lock = Lock()
+
+    def __init__(self, save_result_in_bucket_obj, fix_bucket_index, dry_run):
+        self.save_result_in_bucket_obj = save_result_in_bucket_obj
+        self.fix_bucket_index = fix_bucket_index
+        self.dry_run = dry_run
+        self.bucket = None
+        self.objects = set()
+        self.directory_path = 'corrupted'
+        os.makedirs(self.directory_path, exist_ok=True)
+
+    def reset(self, bucket):
+        with self.lock:
+            self.bucket = bucket
+            self.objects = set()
+
+    def add(self, obj):
+        with self.lock:
+            self.objects.add(obj)
+
+    def save(self):
+        if self.fix_bucket_index:
+            cmd = ['radosgw-admin', 'bucket', 'check', '--check-objects',
+                   '--fix', '--bucket', self.bucket]
+            if self.dry_run:
+                Output.print(f'dry run: would run {cmd}')
+            else:
+                result = subprocess.run(cmd,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE,
+                                        text=True)
+                if result.returncode != 0:
+                    # Continue anyway
+                    pass
+
+        file = os.path.join(self.directory_path, self.bucket)
+
+        with self.lock:
+            if not self.objects:
+                return True, None
+            try:
+                with open(file, 'w') as f:
+                    for obj in self.objects:
+                        f.write(f'{obj}\n')
+            except OSError as e:
+                return False, e
+
+        if self.save_result_in_bucket_obj:
+            cmd = ['radosgw-admin', 'object', 'put', '--bucket', self.bucket,
+                   '--object', self.save_result_in_bucket_obj, '--infile', file]
+
+            if self.dry_run:
+                Output.print(f'dry run: would run {cmd}')
+                return True, None
+
+            result = subprocess.run(cmd,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    text=True)
+            if result.returncode != 0:
+                return False, result.stderr
+
+        return True, None
+
+
+class PendingObjectsTracker:
+    """
+    Pending objects tracker class
+    """
+
+    def __init__(self):
+        self.lock = Lock()
+        self.cond = Condition(self.lock)
+        self.count = 0
+
+    def inc(self):
+        with self.lock:
+            self.count += 1
+
+    def dec(self):
+        with self.lock:
+            assert self.count > 0
+            self.count -= 1
+            if self.count == 0:
+                self.cond.notify_all()
+
+    def wait_for_pending(self):
+        with self.lock:
+            while self.count > 0:
+                self.cond.wait()
+
+
+class Object:
+    """
+    Rados object class
+    """
+
+    def __init__(self, bucket, rgw_obj, rados_obj, pending_objects_tracker):
+        self.bucket = bucket
+        self.rgw_obj = rgw_obj
+        self.rados_obj = rados_obj
+        self.pending_objects_tracker = pending_objects_tracker
+        self.pending_objects_tracker.inc()
+
+    def __del__(self):
+        self.pending_objects_tracker.dec()
+
+
+class ObjectsIterator:
+    """
+    Iterate over rados objects in a list of buckets.
+    """
+
+    lock = RLock()
+    fs = '\x1f'
+
+    def __init__(self, buckets, processed_buckets, status_output,
+                 corrupted_objects, max_concurrent_ios):
+        self.buckets = buckets
+        self.processed_buckets = processed_buckets
+        self.status_output = status_output
+        self.corrupted_objects = corrupted_objects
+        self.max_concurrent_ios = max_concurrent_ios
+        self.bucket_idx = 0
+        self.object_idx = 0
+        self.objects_processed = 0
+        self.process = None
+        self.last_objects_processed = 0
+        self.last_status_time = datetime.now()
+        self.interrupted = False
+        self.pending_objects_tracker = PendingObjectsTracker()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        with self.lock:
+            if self.interrupted:
+                raise StopIteration
+            rados_obj, bucket, rgw_obj = self.get_object()
+            if rados_obj:
+                self.object_idx += 1
+                self.objects_processed += 1
+                if self.objects_processed % 10000 == 0:
+                    self.print_progress_status()
+
+                self.missing_objects.discard(rgw_obj)
+                return Object(bucket, rgw_obj, rados_obj,
+                              self.pending_objects_tracker)
+            else:
+                if self.bucket_idx > 0:
+                    bucket = self.buckets[self.bucket_idx - 1]
+                    if bucket not in self.processed_buckets:
+                        self.pending_objects_tracker.wait_for_pending()
+                        self.processed_buckets.add(bucket)
+                        for obj in self.missing_objects:
+                            if obj.startswith('_multipart_'):
+                                # ignore incomplete multipart upload objects
+                                continue
+                            self.status_output.print(
+                                f'bucket {bucket} rgw_obj {obj} '
+                                f'missing HEAD rados object'
+                            )
+                            self.corrupted_objects.add(obj)
+                        res, err = self.corrupted_objects.save()
+                        if not res:
+                            self.status_output.print(
+                                f'Failed to save corrupted objects: {err}'
+                            )
+                if self.bucket_idx >= len(self.buckets):
+                    self.print_progress_status()
+                    raise StopIteration
+                else:
+                    self.print_progress_status()
+                    bucket = self.buckets[self.bucket_idx]
+                    if bucket in self.processed_buckets:
+                        self.status_output.print(
+                            f'Skipping bucket {bucket} as already processed'
+                        )
+                        self.bucket_idx += 1
+                        return self.__next__()
+                    self.missing_objects = self.list_bucket(bucket)
+                    self.get_objects_start(bucket)
+                    self.object_idx = 0
+                    self.bucket_idx += 1
+                    self.corrupted_objects.reset(bucket)
+                    return self.__next__()
+
+    def interrupt(self):
+        with self.lock:
+            self.interrupted = True
+
+    def list_bucket(self, bucket):
+        self.status_output.print(f'Listing bucket {bucket}')
+        objects = set()
+        cmd = ['radosgw-admin', 'bucket', 'list',
+               '--max-entries', '2147483647', '--bucket', bucket]
+        count = 0
+        try:
+            process = subprocess.Popen(cmd,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       text=True)
+            last_time = datetime.now()
+            report_status_interval = 100000
+            for line in process.stdout:
+                m = re.match(r'^\s*("name":\s.*),\s*$', line)
+                if not m:
+                    continue
+                item = '{' + m.group(1) + '}'
+                try:
+                    objects.add(json.loads(item)['name'])
+                except json.decoder.JSONDecodeError as e:
+                    self.status_output.print(
+                        f"Failed to decode '{line}' for {bucket}: {e}"
+                    )
+                    self.interrupt()
+                    return set()
+                count += 1
+                if count % report_status_interval == 0:
+                    current_time = datetime.now()
+                    period = (current_time - last_time).total_seconds()
+                    rate = report_status_interval / period
+                    last_time = current_time
+                    self.status_output.print(
+                        f'Listing bucket {bucket}: {count} objects processed'
+                        f', rate: {rate:g} obj/s'
+                    )
+
+            process.wait()
+        except subprocess.CalledProcessError as e:
+            self.status_output.print(
+                f'Failed to list bucket {bucket}: {e}'
+            )
+            self.interrupt()
+            return set()
+
+        if process.returncode != 0:
+            self.status_output.print(
+                f'Failed to list bucket {bucket}: {process.stderr}'
+            )
+            self.interrupt()
+            return set()
+
+        self.status_output.print(
+            f'{len(objects)} objects in bucket {bucket}'
+        )
+        return objects
+
+    def get_objects_start(self, bucket):
+        self.status_output.print(f'Discovering rados objects for {bucket}')
+        cmd = ['radosgw-admin', 'bucket', 'radoslist',
+               '--rgw-obj-fs', ObjectsIterator.fs, '--bucket', bucket,
+               '--max-concurrent-ios', str(self.max_concurrent_ios)]
+        try:
+            self.process = subprocess.Popen(cmd,
+                                            stdout=subprocess.PIPE,
+                                            stderr=subprocess.PIPE,
+                                            text=True)
+        except subprocess.CalledProcessError as e:
+            self.status_output.print(
+                f'Failed to discover rados objects for {bucket}: {e}'
+            )
+            self.interrupt()
+            return
+
+    def get_object(self):
+        if not self.process:
+            return (None, None, None)
+
+        try:
+            line = self.process.stdout.readline()
+            if not line:
+                self.get_objects_finish()
+                return (None, None, None)
+        except subprocess.CalledProcessError as e:
+            self.status_output.print(
+                f'Failed to get rados object: {e}'
+            )
+            self.interrupt()
+            return (None, None, None)
+
+        return tuple(line.rstrip().split(ObjectsIterator.fs))
+
+    def get_objects_finish(self):
+        bucket = self.buckets[self.bucket_idx - 1]
+        try:
+            self.process.wait()
+        except subprocess.CalledProcessError as e:
+            self.status_output.print(
+                f'Failed to list bucket {bucket}: {e}'
+            )
+            self.interrupt()
+            return
+
+        if self.process.returncode != 0:
+            self.status_output.print(
+                f'Failed to list bucket {bucket}: {process.stderr}'
+            )
+            self.interrupt()
+            return
+
+        self.process = None
+        self.status_output.print(
+            f'Found {self.object_idx} rados objects for {bucket}'
+        )
+
+
+    def print_progress_status(self):
+        num_objects = self.objects_processed - self.last_objects_processed
+        if num_objects == 0:
+            return
+        current_time = datetime.now()
+        period = (current_time - self.last_status_time).total_seconds()
+        rate = num_objects / period
+        self.last_objects_processed = self.objects_processed
+        self.last_status_time = current_time
+        self.status_output.print(
+            f'Processing bucket: {self.bucket_idx}/{len(self.buckets)}, ' \
+            f'objects processed: {self.objects_processed}, rate: {rate:g} obj/s'
+        )
+
+
+class Worker(Thread):
+    """
+    Worker thread that checks if rgw objects have missing rados objects.
+    """
+
+    def __init__(self, ioctxs, objects, corrupted_objects, fix, dry_run):
+        Thread.__init__(self)
+        self.ioctxs = ioctxs
+        self.objects = objects
+        self.corrupted_objects = corrupted_objects
+        self.fix = fix
+        self.dry_run = dry_run
+
+    def run(self):
+        for o in self.objects:
+            found = False
+            for ioctx in self.ioctxs:
+                try:
+                    ioctx.stat(o.rados_obj)
+                except rados.ObjectNotFound:
+                    pass
+                except rados.Error as e:
+                    Output.print(
+                        f'bucket {o.bucket} rgw_obj {o.rgw_obj} '
+                        f'error for rados object {o.rados_obj}: {e}'
+                    )
+                else:
+                    found = True
+                    break
+            if not found:
+                fixing = ' (fixing)' if self.fix else ''
+                Output.print(
+                    f'bucket {o.bucket} rgw_obj {o.rgw_obj} '
+                    f'missing rados object {o.rados_obj}'
+                    f'{" (fixing)" if self.fix else ""}'
+                )
+                if self.fix:
+                    self.fix_object(o.rados_obj)
+                self.corrupted_objects.add(o.rgw_obj)
+
+            # Explicitly delete object to notify tracker that we are done
+            del o
+
+    def fix_object(self, obj):
+        if self.dry_run:
+            Output.print(f'dry run: would write rados object {obj}')
+            return
+
+        ioctx = self.ioctxs[0]
+        try:
+            #ioctx.write(obj, b'\0', 4194304 - 1)
+            ioctx.write_full(obj, b'\0' * 4194304)
+        except rados.Error as e:
+            Output.print(
+                f'error for writing rados object {obj}: {e}'
+            )
+
+
+def main():
+    args = parser.parse_args()
+    pools = args.data_pool
+    if not pools:
+        pools = get_pools()
+        if not pools:
+           parser.error('no pools found')
+    buckets = args.bucket
+    if not buckets:
+        buckets = get_buckets()
+    if args.status_output:
+        status_output = StatusOutput(open(args.status_output, 'w'))
+    else:
+        status_output = StatusOutput(sys.stderr)
+    status_output.print(
+        f'Processing {len(buckets)} buckets on pools {pools} '
+        f'with {args.workers} workers'
+    )
+    corrupted_objects = CorruptedObjects(args.corrupted_objects,
+                                         args.fix_bucket_index,
+                                         args.dry_run)
+    with ProcessedBucketsDB(args.processed_buckets_db) as processed_buckets:
+        if args.processed_buckets_db:
+            status_output.print(
+                f'Processed buckets db: {args.processed_buckets_db}, '
+                f'processed buckets: {len(processed_buckets)}'
+            )
+        objects = ObjectsIterator(buckets,
+                                  processed_buckets,
+                                  status_output,
+                                  corrupted_objects,
+                                  args.max_concurrent_ios)
+        with rados.Rados(conffile="") as cluster:
+            ioctxs = []
+            for pool in pools:
+                ioctxs.append(cluster.open_ioctx(pool))
+            workers = []
+            for i in range(args.workers):
+                w = Worker(ioctxs, objects, corrupted_objects, args.fix,
+                           args.dry_run)
+                w.start()
+                workers.append(w)
+            def interrupt_handler(signum, frame):
+                status_output.print('Interrupted')
+                objects.interrupt()
+                for w in workers:
+                    w.join()
+                sys.exit(1)
+            signal.signal(signal.SIGINT, interrupt_handler)
+            for w in workers:
+                w.join()
+
+
+if __name__ == '__main__':
+    main()
+

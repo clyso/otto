@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+
+# List user's quota.
+#
+# Copyright (C) 2024 Clyso GmbH
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 3
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+# 02110-1301, USA.
+
+import argparse
+import json
+import prettytable
+import sys
+import subprocess
+
+verbose = False
+
+parser = argparse.ArgumentParser(
+        prog='clyso-rgw-user-quota',
+        description="List user's quota",
+)
+parser.add_argument(
+    '-v', '--verbose',
+    help='verbose output',
+    action='store_true',
+)
+parser.add_argument(
+    '-f', '--format',
+    metavar='format',
+    help='format (plain|json|json-pretty, default: plain)',
+    default='plain',
+)
+
+def get_human_readable(bytes, precision=2):
+    suffixes = ['', 'Ki', 'Mi', 'Gi', 'Ti']
+    suffix_index = 0
+    while bytes > 1024 and suffix_index < 4:
+        # increment the index of the suffix
+        suffix_index += 1
+        # apply the division
+        bytes = bytes / 1024.0
+    return '%.*f%s' % (precision, bytes, suffixes[suffix_index])
+
+def error(msg):
+    print(f'ERROR: {msg}', file=sys.stderr)
+
+def info(msg):
+    print(f'INFO: {msg}', file=sys.stderr)
+
+def debug(msg):
+    global verbose
+
+    if verbose:
+        print(f'DEBUG: {msg}', file=sys.stderr)
+
+def get_global_quota():
+    cmd = ['radosgw-admin', 'global', 'quota', 'get', '--format=json']
+    return json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+
+def get_users():
+    cmd = ['radosgw-admin', 'user', 'list', '--format=json']
+    return json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+
+def get_user_info(user):
+    cmd = ['radosgw-admin', 'user', 'info', '--uid', user, '--format=json']
+    return json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+
+
+def print_user_quota(user_quota_list):
+    tbl = prettytable.PrettyTable(
+        ('User ID', 'Bucket [size objects]', 'User [size objects]'),
+        hrules=prettytable.HEADER,
+        vrules=prettytable.NONE,
+    )
+    tbl.align['User ID'] = 'l'
+    for quota in user_quota_list:
+        if quota['bucket_quota']['enabled']:
+            if quota['bucket_quota']['max_size'] > 0:
+                bucket_quota = \
+                    f"{get_human_readable(quota['bucket_quota']['max_size'])} "
+            else:
+                bucket_quota = 'unlimited '
+            if quota['bucket_quota']['max_objects'] > 0:
+                bucket_quota += f"{quota['bucket_quota']['max_objects']}"
+            else:
+                bucket_quota += 'unlimited'
+        else:
+            bucket_quota = '--'
+        if quota['user_quota']['enabled']:
+            if quota['user_quota']['max_size'] > 0:
+                user_quota = \
+                    f"{get_human_readable(quota['user_quota']['max_size'])} "
+            else:
+                user_quota = 'unlimited '
+            if quota['user_quota']['max_objects'] > 0:
+                user_quota += f"{quota['user_quota']['max_objects']}"
+            else:
+                user_quota += 'unlimited'
+        else:
+            user_quota = '--'
+
+        tbl.add_row([quota['user_id'], bucket_quota, user_quota])
+
+    print(tbl)
+
+
+def main():
+    global verbose
+
+    args = parser.parse_args()
+    verbose = args.verbose
+
+    user_quota_list = []
+
+    global_quota = get_global_quota()
+    debug(f'global quota: {global_quota}')
+
+    users = get_users()
+    debug(f'users: {users}')
+
+    for user in users:
+        user_info = get_user_info(user)
+        debug(f'user: {user} info: {user_info}')
+        bucket_quota = user_info['bucket_quota']
+        user_quota = user_info['user_quota']
+        if not bucket_quota['enabled']:
+            bucket_quota = global_quota['bucket quota']
+        if not user_quota['enabled']:
+            user_quota = global_quota['user quota']
+        user_quota_list.append({
+            'user_id': user,
+            'bucket_quota': bucket_quota,
+            'user_quota': user_quota
+        })
+
+    if args.format == 'json':
+        print(json.dumps(user_quota_list))
+    elif args.format == 'json-pretty':
+        print(json.dumps(user_quota_list, indent=4))
+    else:
+        print_user_quota(user_quota_list)
+
+if __name__ == '__main__':
+    main()

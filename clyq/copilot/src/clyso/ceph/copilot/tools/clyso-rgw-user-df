@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+
+# Calculate user's usage stats.
+#
+# Copyright (C) 2024 Clyso GmbH
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 3
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+# 02110-1301, USA.
+
+import argparse
+import json
+import os
+import sys
+import subprocess
+
+verbose = False
+zonegroups = {}
+zones = {}
+osdmap = None
+crushmap = None
+pools = {}
+pool_osd_class = None
+ec_profiles = {}
+
+categories = {
+    0 : 'rgw.none',
+    1 : 'rgw.main', # b-i entries for standard objs
+    2 : 'rgw.shadow', # presumably intended for multipart shadow uploads; not currently used in the codebase
+    3 : 'rgw.multimeta', # b-i entries for multipart upload metadata objs
+    4 : 'rgw.cloudtiered', # b-i entries which are tiered to external cloud
+}
+
+parser = argparse.ArgumentParser(
+        prog='clyso-rgw-user-df',
+        description="Calculate user's usage stats",
+        epilog='''Example:
+           clyso-rgw-user-df user1 user2
+        ''',
+)
+parser.add_argument(
+    'user',
+    help='user name',
+    nargs='+',
+)
+parser.add_argument(
+    '-v', '--verbose',
+    help='verbose output',
+    action='store_true',
+)
+parser.add_argument(
+    '-o', '--process-objects',
+    help='get stats from listing objects as well as from bucket stats',
+    action='store_true',
+)
+
+def error(msg):
+    print(f'ERROR: {msg}', file=sys.stderr)
+
+def info(msg):
+    print(f'INFO: {msg}', file=sys.stderr)
+
+def debug(msg):
+    global verbose
+
+    if verbose:
+        print(f'DEBUG: {msg}', file=sys.stderr)
+
+def category_name(category_id):
+    if category_id in categories:
+        return categories[category_id]
+    return 'unknown'
+
+def _get_osdmap():
+    cmd = ['ceph', 'osd', 'dump', '--format=json']
+    return json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+
+def get_pools():
+    global osdmap, pools
+
+    if not osdmap:
+        osdmap = _get_osdmap()
+        pools = {}
+        for pool in osdmap['pools']:
+            pools[pool['pool_name']] = pool
+
+    return pools
+
+def get_pool(pool_name):
+    return get_pools()[pool_name]
+
+def get_ec_profile(profile_name):
+    global osdmap, ec_profiles
+
+    if not osdmap:
+        osdmap = _get_osdmap()
+        ec_profiles = osdmap['erasure_code_profiles']
+
+    return ec_profiles[profile_name]
+
+def get_storage_amplification(pool_name):
+    pool = get_pool(pool_name)
+    if pool['type'] == 3:
+        profile_name = pool['erasure_code_profile']
+        profile = get_ec_profile(profile_name)
+        k = int(profile['k'])
+        m = int(profile['m'])
+    else:
+        k = 1
+        m = pool['size'] - 1
+
+    return (k + m) / k
+
+def get_crush_rule_by_id(crushmap, rule_id):
+    for rule in crushmap['rules']:
+        if rule['rule_id'] == rule_id:
+            return rule
+    return None
+
+def get_crush_rule_root(crushmap, rule_id):
+        rule = get_crush_rule_by_id(crushmap, rule_id)
+        if not rule:
+            return None
+        for step in rule['steps']:
+            if step['op'] == 'take':
+                root_name = step['item_name']
+                for item in crushmap['buckets']:
+                    if item['name'] == root_name:
+                        return item['id']
+        return None
+
+def get_osds_under_crush_root(crushmap, root_id):
+    osds = []
+    for item in crushmap['buckets']:
+        if item['id'] != root_id:
+            continue
+        for item in item['items']:
+            if item['id'] < 0:
+                osds += get_osds_under_crush_root(crushmap, item['id'])
+            else:
+                osds.append(item['id'])
+    return osds
+
+def _get_crushmap():
+    cmd = ['ceph', 'osd', 'crush', 'dump', '--format=json']
+    return json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+
+def _get_pool_osd_class_map():
+    global crushmap
+
+    if not crushmap:
+        crushmap = _get_crushmap()
+
+    pool_osd_class = {}
+    crush_rule_class = {}
+    pools = get_pools()
+
+    for name, pool in pools.items():
+        if pool['crush_rule'] in crush_rule_class:
+            osd_class = crush_rule_class[pool['crush_rule']]
+        else:
+            root_id = get_crush_rule_root(crushmap, pool['crush_rule'])
+            if not root_id:
+                error(f'Pool {name} has no crush rule root')
+                continue
+            osds = get_osds_under_crush_root(crushmap, root_id)
+            osd_class = None
+            for osd in osds:
+                for device in crushmap['devices']:
+                    if device['id'] == osd:
+                        osd_class = device['class']
+                        break
+                if osd_class:
+                    break
+            if not osd_class:
+                osd_class = 'unknown'
+            crush_rule_class[pool['crush_rule']] = osd_class
+
+        pool_osd_class[name] = osd_class
+
+    return pool_osd_class
+
+def get_pool_osd_class(pool_name):
+    global pool_osd_class
+
+    if pool_osd_class is None:
+        pool_osd_class = _get_pool_osd_class_map()
+
+    return pool_osd_class[pool_name]
+
+def _get_zone(zone_id):
+    cmd = ['radosgw-admin', 'zone', 'get', '--zone-id', zone_id]
+    return json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+
+def get_zone(zone_id):
+    global zones
+
+    if zone_id not in zones:
+        zone = _get_zone(zone_id)
+        placement_pools = {}
+        for p in zone['placement_pools']:
+            placement_pools[p['key']] = p['val']
+        zone['placement_pools'] = placement_pools
+        zones[zone_id] = zone
+
+    return zones[zone_id]
+
+def _get_zonegroup(zonegroup_id):
+    cmd = ['radosgw-admin', 'zonegroup', 'get', '--zonegroup-id', zonegroup_id]
+    return json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+
+def get_zonegroup(zonegroup_id):
+    global zonegroups
+
+    if zonegroup_id not in zonegroups:
+        zonegroups[zonegroup_id] = _get_zonegroup(zonegroup_id)
+    return zonegroups[zonegroup_id]
+
+def get_buckets(user):
+    cmd = ['radosgw-admin', 'bucket', 'stats', '--uid', user,
+           '--max-entries', '2147483647']
+    return json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+
+def get_bucket(bucket):
+    cmd = ['radosgw-admin', 'bucket', 'list', '--bucket', bucket,
+           '--max-entries', '2147483647']
+    return json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+
+def main():
+    global verbose
+
+    args = parser.parse_args()
+    verbose = args.verbose
+
+    for user in args.user:
+        debug(f'Processing user: {user}')
+        usage = {
+            'from_stats': {},
+            'from_objects': {},
+        }
+        buckets = get_buckets(user)
+        for bucket in buckets:
+            name = bucket['bucket']
+            if bucket['tenant']:
+                name = f'{bucket["tenant"]}/{name}'
+            debug(f'Bucket: {name}')
+
+            placement_rule = bucket['placement_rule']
+            zonegroup = get_zonegroup(bucket['zonegroup'])
+            zone = get_zone(zonegroup['master_zone'])
+            placement_pools = zone['placement_pools'][placement_rule]
+            data_pool = placement_pools['storage_classes']['STANDARD']['data_pool']
+            if data_pool not in usage['from_stats']:
+                usage['from_stats'][data_pool] = {}
+            u = usage['from_stats'][data_pool]
+
+            for category, stats in bucket['usage'].items():
+                if category not in u:
+                    u[category] = {'size': 0, 'num_objects': 0}
+                u[category]['size'] += stats['size']
+                u[category]['num_objects'] += stats['num_objects']
+
+            if not args.process_objects:
+                continue
+
+            debug(f'Processing objects for bucket: {name}')
+            objects = get_bucket(name)
+            debug(f'Got {len(objects)} objects for bucket: {name}')
+            for obj in objects:
+                storage_class = obj['meta']['storage_class']
+                if not storage_class:
+                    storage_class = 'STANDARD'
+                data_pool = placement_pools['storage_classes'][storage_class]['data_pool']
+                if data_pool not in usage['from_objects']:
+                    usage['from_objects'][data_pool] = {}
+                u = usage['from_objects'][data_pool]
+                category = category_name(obj['meta']['category'])
+                if category not in u:
+                    u[category] = {'size': 0, 'num_objects': 0}
+                u[category]['size'] += obj['meta']['size']
+                u[category]['num_objects'] += 1
+
+        debug(f'User: {user}: Usage: {usage}')
+
+        def print_stats(stats_type, stats_name=None):
+            prefix = ''
+            if stats_name:
+                print(f'  {stats_name}:')
+                prefix = '  '
+            for pool_name, s in usage[stats_type].items():
+                print(f'{prefix}  Pool: {pool_name} '
+                      f'({get_pool_osd_class(pool_name)})')
+                stats = s.get('rgw.main', {'size': 0, 'num_objects': 0})
+                amplification = get_storage_amplification(pool_name)
+                print(f'{prefix}    Bytes: {stats["size"]} '
+                     f'(stored {int(stats["size"] * amplification)})')
+                print(f'{prefix}    Num objects: {stats["num_objects"]}')
+
+        print(f'User: {user}')
+        if args.process_objects:
+            print_stats('from_stats', 'From bucket stats')
+            print_stats('from_objects', 'From bucket object listing')
+        else:
+            print_stats('from_stats')
+
+
+if __name__ == '__main__':
+    main()
