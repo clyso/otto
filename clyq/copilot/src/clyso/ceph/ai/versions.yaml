@@ -1,0 +1,51 @@
+---
+
+# versions: x.y.z are supportable ceph version clyso recommends
+# a version is marked old if there is no 'version' key
+# recommended: is default to false, put true if the version is recommended
+
+releases:
+  v9:
+    name: infernalis
+  v10:
+    name: jewel
+  v11:
+    name: kraken
+  v12:
+    name: luminous
+  v13:
+    name: mimic
+  v14:
+    name: nautilus
+    version: 14.2.22
+  v15:
+    name: octopus
+    version: 15.2.17
+  v16:
+    name: pacific
+    version: 16.2.15
+  v17:
+    name: quincy
+    version: 17.2.8
+    recommended: true
+  v18:
+    name: reef
+    version: 18.2.4
+    recommended: true
+  v19:
+    name: squid
+    version: 19.2.0
+  v20:
+    name: t
+  v21:
+    name: u
+  v22:
+    name: v
+  v23:
+    name: w
+  v24:
+    name: x
+  v25:
+    name: y
+  v26:
+    name: z
