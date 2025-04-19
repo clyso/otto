@@ -1,0 +1,23 @@
+---
+last_updated: '21 Mar 2025'
+bugs:
+  - name: PG Splitting/Merging Causes OSD Out-Of-Memory
+    description: A bug in the PG splitting and merging code can cause the OSD to go out-of-memory, a condition which persists even after restart. Offline tools are available in fixed releases to workaround the issue. See https://tracker.ceph.com/issues/53729.
+    recommendation: Do not change pg_num for any pool until after upgrade to a fixed release. Disable the pg autoscaler. Fixed in v16.2.11 and v17.2.4.
+    severity: high
+    affected_versions:
+      - 15.2.*
+      - 16.2.[0-10]
+      - 17.2.[0-3]
+  - name: Pacific Broken Hotfixes
+    description: Version 16.2.11 has a bug in ceph-volume osd activation, which was meant to be hotfixed in 16.2.12 but that release was built incorrectly, including changes which did not pass the rigorous QA testing.
+    severity: high
+    recommendation: It is recommended to upgrade to version 16.2.13 or later.
+    affected_versions:
+      - 16.2.[11-12]
+  - name: Squid deployed OSDs are crashing
+    description: The issue affects only newly deployed OSDs using Squid, while previously deployed OSDs run fine. It is likely caused by the Elastic Shared Blob implementation introduced in this PR https://github.com/ceph/ceph/pull/53178, and ceph-bluestore-tool repair cannot fix it.
+    severity: critical
+    recommendation: For now, run "ceph config set osd bluestore_elastic_shared_blobs 0" on any Squid cluster before adding new OSDs. Unfortunately, this will not help OSDs already deployed in Squid—the only known fix for them is redeployment.
+    affected_versions:
+      - 19.*.*
