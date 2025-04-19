@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ceph-copilot"
+description = "Ceph AI Copilot Assistant"
+readme = "README.md"
+license = "LicenseRef-Proprietary"
+authors = [{ name = "Clyso GmbH", email = "support@clyso.com" }]
+requires-python = ">=3.11"
+dynamic = ["version"]
+dependencies = [
+  "humanize",
+  "packaging",
+  "PyYaml"
+]
+
+[project.scripts]
+ceph-copilot = "clyso.ceph.copilot:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "clyso.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = [
+  "clyso/ceph/ai/*.yaml",
+  "clyso/ceph/copilot/tools/cern",
+  "clyso/ceph/copilot/tools/cern/README.md",
+  "clyso/ceph/copilot/tools/cern/upmap-remapped.py",
+  "clyso/ceph/copilot/tools/clyso-ceph-diagnostics-collect",
+  "clyso/ceph/copilot/tools/clyso-cephfs-recover-metadata",
+  "clyso/ceph/copilot/tools/clyso-cephfs-session-top",
+  "clyso/ceph/copilot/tools/clyso-rados-bulk",
+  "clyso/ceph/copilot/tools/clyso-rgw-find-missing",
+  "clyso/ceph/copilot/tools/clyso-rgw-incomplete-multipart-list",
+  "clyso/ceph/copilot/tools/clyso-rgw-user-df",
+  "clyso/ceph/copilot/tools/clyso-rgw-user-quota",
+  "clyso/ceph/copilot/tools/contrib",
+  "clyso/ceph/copilot/tools/contrib/README.md",
+  "clyso/ceph/copilot/tools/contrib/jj_ceph_balancer"
+]
+

@@ -1,0 +1,403 @@
+#!/usr/bin/env python3
+
+import argparse
+import errno
+import os
+import rados
+import signal
+import sys
+import time
+
+from datetime import datetime
+from threading import Condition, Lock, RLock, Thread
+
+#
+# Global
+#
+
+cmd_description='run a rados command for many objects'
+
+parser = argparse.ArgumentParser(prog='rados-bulk', description=cmd_description)
+parser.add_argument(
+    'command',
+    metavar='get|put|rm|stat',
+    help='rados command',
+    nargs=1,
+)
+parser.add_argument(
+    'objects',
+    metavar='object',
+    help='objects',
+    nargs='*',
+)
+parser.add_argument(
+    '-p', '--pool',
+    metavar='pool',
+    help='pool',
+    required=True,
+)
+parser.add_argument(
+    '-N', '--namespace',
+    metavar='namespace',
+    help='namespace',
+    default='',
+)
+parser.add_argument(
+    '-d', '--object-dir',
+    metavar='dir',
+    help='object directory',
+    default='.',
+)
+parser.add_argument(
+    '-l', '--object-list',
+    metavar='file',
+    help='object list',
+    default='-',
+)
+parser.add_argument(
+    '-w', '--workers',
+    metavar='N',
+    help='number of workers',
+    type=int,
+    default=1,
+)
+parser.add_argument(
+    '-q', '--queue-depth',
+    metavar='N',
+    help='queue depth',
+    type=int,
+    default=1024,
+)
+parser.add_argument(
+    '-s', '--log-file',
+    metavar='file',
+    help='log output (default: stderr)',
+    default=None,
+)
+parser.add_argument(
+    '-i', '--ignore-rados-errors',
+    help='continue on rados error',
+    action='store_true',
+    default=False,
+)
+parser.add_argument(
+    '-n', '--dry-run',
+    help='do not do any changes, just print what would be done',
+    action='store_true',
+    default=False,
+)
+parser.add_argument(
+    '-v', '--verbose',
+    help='verbose',
+    action='store_true',
+    default=False,
+)
+
+
+def description():
+    print(cmd_description)
+
+def help():
+    parser.print_help()
+
+class Log:
+    """
+    Log class.
+    """
+
+    def __init__(self, file, verbose):
+        self.file = file
+        self.verbose = verbose
+
+    def log(self, msg):
+        print(f'{datetime.now().strftime("%F %H:%M:%S")} {msg}',
+              file=self.file, flush=True)
+
+    def info(self, msg):
+        self.log(f'INFO: {msg}')
+
+    def error(self, msg):
+        self.log(f'ERROR: {msg}')
+
+    def debug(self, msg):
+        if not self.verbose:
+            return
+        self.log(f'DEBUG: {msg}')
+
+
+class ObjectIter:
+    """
+    Iterator for objects.
+    """
+
+    lock = RLock()
+
+    def __init__(self):
+        self.objects = self._get_objects()
+        self.i = 0
+        self.interrupted = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        with self.lock:
+            if self.interrupted:
+                raise StopIteration
+
+            if self.i < len(self.objects):
+                self.i += 1
+                return self.objects[self.i - 1]
+            else:
+                raise StopIteration
+
+    def interrupt(self):
+        with self.lock:
+            self.interrupted = True
+
+class ListIter(ObjectIter):
+    """
+    Iterator for objects in a list.
+    """
+
+    def __init__(self, objects):
+        self.objects = objects
+        super().__init__()
+
+    def _get_objects(self):
+        return self.objects
+
+
+class ListDirIter(ObjectIter):
+    """
+    Iterator for objects in a directory.
+    """
+
+    def __init__(self, object_dir):
+        self.object_dir = object_dir
+        super().__init__()
+
+    def _get_objects(self):
+        return os.listdir(self.object_dir)
+
+
+class ReadFileIter(ObjectIter):
+    """
+    Iterator for objects in a file.
+    """
+
+    def __init__(self, object_list):
+        self.object_list = object_list
+        super().__init__()
+
+    def _get_objects(self):
+        if self.object_list == '-':
+            return sys.stdin.read().splitlines()
+        else:
+            with open(self.object_list, 'r') as f:
+                return f.read().splitlines()
+
+
+class Worker(Thread):
+    """
+    Worker thread that runs rados command for objects.
+    """
+
+    def __init__(self, command, ioctx, objects, log, object_dir,
+                 queue_depth, ignore_rados_errors, dry_run):
+        Thread.__init__(self)
+        self.command = command
+        self.ioctx = ioctx
+        self.objects = objects
+        self.log = log
+        self.object_dir = object_dir
+        self.queue_depth = queue_depth
+        self.ignore_rados_errors = ignore_rados_errors
+        self.dry_run = dry_run
+        self.lock = Lock()
+        self.cond = Condition(self.lock)
+        self.inflight = 0
+
+    def run(self):
+        self.log_debug('Starting')
+
+        for o in self.objects:
+            if self.dry_run:
+                self.log_info(f'dry run: would {self.command} {o}')
+                continue
+
+            with self.lock:
+                while self.inflight >= self.queue_depth:
+                    self.cond.wait()
+                self.inflight += 1
+
+            def cb(comp):
+                with self.lock:
+                    assert self.inflight > 0
+                    self.inflight -= 1
+                    self.log_debug(
+                        f'{self.command} {o} (complete with {comp}) '
+                        f'(inflight: {self.inflight})'
+                    )
+                    self.cond.notify()
+                if not self.ignore_rados_errors and \
+                   comp.get_return_value() not in (0, -errno.ENOENT):
+                    raise rados.OSError(f'{self.command} {o} failed',
+                                        comp.get_return_value())
+
+            self.log_info(f'{self.command} {o}')
+            self.log_debug(f'{self.command} {o} (started) (inflight: {self.inflight})')
+            try:
+                if self.command == 'get':
+                    self.get(o, cb)
+                elif self.command == 'put':
+                    self.put(o, cb)
+                elif self.command == 'rm':
+                    self.rm(o, cb)
+                elif self.command == 'stat':
+                    self.stat(o, cb)
+                else:
+                    assert False
+            except rados.ObjectNotFound:
+                self.log_error(f'object {o} not found')
+            except rados.Error as e:
+                self.log_error(f'{self.command} {o} failed: {e}')
+                if not self.ignore_rados_errors:
+                    raise
+
+        with self.lock:
+            while self.inflight > 0:
+                self.log_debug(
+                    f'Waiting for inflight ops to complete ({self.inflight})'
+                )
+                self.cond.wait()
+
+        self.log_debug('Done')
+
+
+    def log_info(self, msg):
+        self.log.info(f'{self}: {msg}')
+
+    def log_error(self, msg):
+        self.log.error(f'{self}: {msg}')
+
+    def log_debug(self, msg):
+        self.log.debug(f'{self}: {msg}')
+
+    def get(self, oid, cb):
+        def get_size_cb(comp, size, mtime):
+            if (comp.get_return_value() != 0):
+                cb(comp)
+                return
+
+            def read_cb(comp, data):
+                try:
+                    with open(f'{self.object_dir}/{oid}', 'wb') as f:
+                        f.write(data)
+                except Exception as e:
+                    self.log_error(
+                        f'writing to {self.object_dir}/{oid} failed: {e}'
+                    )
+                    cb(comp)
+                    return
+                cb(comp)
+
+            self.ioctx.aio_read(oid, size, 0, read_cb)
+
+        self.ioctx.aio_stat(oid, get_size_cb)
+
+    def put(self, oid, cb):
+        with open(f'{self.object_dir}/{oid}', 'rb') as f:
+            data = f.read()
+        self.ioctx.aio_write_full(oid, data, cb)
+
+    def rm(self, oid, cb):
+        self.ioctx.aio_remove(oid, cb)
+
+    def stat(self, oid, cb):
+        def stat_cb(comp, size, mtime):
+            if (comp.get_return_value() == 0):
+                mtime = time.strftime("%Y-%m-%d %H:%M:%S", mtime)
+                self.log_info(f'{oid} size: {size}, mtime: {mtime}')
+            elif (comp.get_return_value() == -errno.ENOENT):
+                self.log_info(f'{oid} not found')
+            cb(comp)
+
+        self.ioctx.aio_stat(oid, stat_cb)
+
+
+def main():
+    if len(sys.argv) > 1:
+        if sys.argv[1] == 'description':
+            description()
+            exit(0)
+        elif sys.argv[1] == 'help':
+            help()
+            exit(0)
+
+    args = parser.parse_args()
+    command = args.command[0]
+
+    if command not in ['get', 'put', 'rm', 'stat']:
+        print(f'invalid command: {command}', file=sys.stderr)
+        exit(1)
+
+    if args.workers < 1:
+        print(f'invalid workers: {args.workers}', file=sys.stderr)
+        exit(1)
+
+    if args.queue_depth < 1:
+        print(f'invalid queue depth: {args.queue_depth}', file=sys.stderr)
+        exit(1)
+
+    if args.log_file:
+        log = Log(open(args.log_file, 'w'), args.verbose)
+    else:
+        log = Log(sys.stderr, args.verbose)
+
+    if command in ['get', 'put']:
+        if not os.path.isdir(args.object_dir):
+            log.error(f'object directory {args.object_dir} does not exist')
+            exit(1)
+
+    if command in ['put']:
+        objects = ListDirIter(args.object_dir)
+    else:
+        if args.objects:
+            objects = ListIter(args.objects)
+        else:
+            objects = ReadFileIter(args.object_list)
+
+    log.info(
+        f'Running {command} on pool {args.pool} with {args.workers} workers'
+    )
+
+    with rados.Rados(conffile="") as cluster:
+        ioctx =cluster.open_ioctx(args.pool)
+        if args.namespace:
+            ioctx.set_namespace(args.namespace)
+
+        workers = []
+        for i in range(args.workers):
+            w = Worker(command, ioctx, objects, log, args.object_dir,
+                       args.queue_depth, args.ignore_rados_errors, args.dry_run)
+            w.start()
+            workers.append(w)
+        def interrupt_handler(signum, frame):
+            log.info('*** Interrupted ***')
+            objects.interrupt()
+            for w in workers:
+                w.join()
+            ioctx.aio_flush()
+            sys.exit(1)
+        signal.signal(signal.SIGINT, interrupt_handler)
+        for w in workers:
+            w.join()
+        ioctx.aio_flush()
+
+
+#
+# main
+#
+
+main()

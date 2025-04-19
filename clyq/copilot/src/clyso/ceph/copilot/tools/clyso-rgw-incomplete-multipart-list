@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+
+# List incomplete multipat uploads.
+#
+# Copyright (C) 2024 Clyso GmbH
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 3
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+# 02110-1301, USA.
+
+import argparse
+import json
+import re
+import sys
+import subprocess
+
+MULTIPART_UPLOAD_ID_PREFIX = '2~'
+
+verbose = False
+
+parser = argparse.ArgumentParser(
+        prog='clyso-rgw-incomplete-multipart-list',
+        description="List incomplete multipat uploads",
+        epilog='''Example:
+           clyso-rgw-incomplete-multipart-list bucket1 bucket2
+        ''',
+)
+parser.add_argument(
+    'bucket',
+    help='bucket name',
+    nargs='*',
+    default=None,
+)
+parser.add_argument(
+    '-v', '--verbose',
+    help='verbose output',
+    action='store_true',
+)
+parser.add_argument(
+    '-f', '--format',
+    metavar='format',
+    help='format (plain|json|json-pretty, default: plain)',
+    default='plain',
+)
+parser.add_argument(
+    '-r', '--rados-objects',
+    help='list rados objects too',
+    action='store_true',
+)
+
+def error(msg):
+    print(f'ERROR: {msg}', file=sys.stderr)
+
+def info(msg):
+    print(f'INFO: {msg}', file=sys.stderr)
+
+def debug(msg):
+    global verbose
+
+    if verbose:
+        print(f'DEBUG: {msg}', file=sys.stderr)
+
+def get_buckets():
+    cmd = ['radosgw-admin', 'bucket', 'list']
+    return json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+
+def list_incomplete_multipart(bucket):
+    cmd = ['radosgw-admin', 'bucket', 'list', '--bucket', bucket]
+    objects = json.loads(
+        subprocess.check_output(cmd).decode('utf-8')
+    )
+
+    incomplete_multipart = {}
+
+    regex = re.compile(f'^_multipart_(.+)\.({MULTIPART_UPLOAD_ID_PREFIX}.+)\.(meta|\d+)$')
+
+    for obj in objects:
+        match = regex.match(obj['name'])
+        if match:
+            debug(f'Found mp object: {bucket}/{obj["name"]}')
+            obj_name = match.group(1)
+            upload_id = match.group(2)
+            what = match.group(3)
+            if upload_id not in incomplete_multipart:
+                incomplete_multipart[upload_id] = {
+                    'name': obj_name,
+                    'parts': [],
+                }
+            if what != 'meta':
+                incomplete_multipart[upload_id]['parts'].append(
+                    obj['name']
+                )
+
+    return incomplete_multipart
+
+def list_rados_objects(bucket, incomplete_multipart):
+    fs = '\x1f'
+    regex = re.compile(f'^(.+)\.({MULTIPART_UPLOAD_ID_PREFIX}.+)\.(\d+)$')
+    cmd = ['radosgw-admin', 'bucket', 'radoslist',
+        '--rgw-obj-fs', fs, '--bucket', bucket]
+    try:
+        process = subprocess.Popen(cmd,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE,
+                                   universal_newlines=True)
+        while True:
+            line = process.stdout.readline()
+            if not line:
+                return
+            rados_obj, _bucket, name = tuple(line.rstrip().split(fs))
+            debug(f'Got {rados_obj} {_bucket} {name}')
+            match = regex.match(name)
+            if match:
+                debug(f'Processing {rados_obj} {name}')
+                obj_name = match.group(1)
+                upload_id = match.group(2)
+                if upload_id not in incomplete_multipart:
+                    continue
+                upload = incomplete_multipart[upload_id]
+                if 'rados_objects' not in upload:
+                    upload['rados_objects'] = []
+                debug(f'Adding {rados_obj} to upload {upload_id}')
+                upload['rados_objects'].append(rados_obj)
+
+    except Exception as e:
+        error(f'Failed to list rados objects: {e}')
+        return
+
+def print_incomplete_multipart(incomplete_multipart):
+    for bucket in incomplete_multipart:
+        print(f'Bucket: {bucket}')
+        for upload_id, upload in incomplete_multipart[bucket].items():
+            print(f'  Upload ID: {upload_id}')
+            print(f'    Name: {upload["name"]}')
+            print(f'    Parts:')
+            for part in upload['parts']:
+                print(f'      {part}')
+            if 'rados_objects' in upload:
+                print(f'    Rados objects:')
+                for rados_obj in upload['rados_objects']:
+                    print(f'      {rados_obj}')
+
+def main():
+    global verbose
+
+    args = parser.parse_args()
+    verbose = args.verbose
+
+    buckets = args.bucket
+    if not buckets:
+        buckets = get_buckets()
+
+    debug(f'Buckets: {buckets}')
+
+    incomplete_multipart = {}
+
+    for bucket in buckets:
+        incomplete_multipart[bucket] = list_incomplete_multipart(bucket)
+
+    if args.rados_objects:
+        for bucket in incomplete_multipart:
+            if not incomplete_multipart[bucket]:
+                continue
+            list_rados_objects(bucket, incomplete_multipart[bucket])
+
+    if args.format == 'json':
+        print(json.dumps(incomplete_multipart))
+    elif args.format == 'json-pretty':
+        print(json.dumps(incomplete_multipart, indent=4))
+    else:
+        print_incomplete_multipart(incomplete_multipart)
+
+if __name__ == '__main__':
+    main()
