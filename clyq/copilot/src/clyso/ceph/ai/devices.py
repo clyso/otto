@@ -1,4 +1,2 @@
-
-
-def update_result(airesult, devices_json):
+def update_result(airesult, devices_json) -> None:
     pass
