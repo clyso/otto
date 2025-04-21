@@ -29,12 +29,12 @@ https://github.com/bitly/data_hacks
 
 from decimal import Decimal
 import math
-from optparse import OptionParser
 from collections import namedtuple
 
 
 class MVSD(object):
     "A class that calculates a running Mean / Variance / Standard Deviation"
+
     def __init__(self):
         self.is_started = False
         self.ss = Decimal(0)  # (running) sum of square deviations from mean
@@ -52,8 +52,7 @@ class MVSD(object):
             self.is_started = True
         else:
             temp_w = self.total_w + w
-            self.ss += (self.total_w * w * (x - self.m) *
-                        (x - self.m)) / temp_w
+            self.ss += (self.total_w * w * (x - self.m) * (x - self.m)) / temp_w
             self.m += (x - self.m) / temp_w
             self.total_w = temp_w
 
@@ -66,29 +65,31 @@ class MVSD(object):
     def mean(self):
         return self.m
 
-DataPoint = namedtuple('DataPoint', ['value', 'count'])
+
+DataPoint = namedtuple("DataPoint", ["value", "count"])
+
 
 def test_mvsd():
     mvsd = MVSD()
     for x in range(10):
         mvsd.add(x)
 
-    assert '%.2f' % mvsd.mean() == "4.50"
-    assert '%.2f' % mvsd.var() == "8.25"
-    assert '%.14f' % mvsd.sd() == "2.87228132326901"
+    assert "%.2f" % mvsd.mean() == "4.50"
+    assert "%.2f" % mvsd.var() == "8.25"
+    assert "%.14f" % mvsd.sd() == "2.87228132326901"
+
 
 def median(values, key=None):
     if not key:
         key = None  # map and sort accept None as identity
     length = len(values)
     if length % 2:
-        median_indeces = [length//2]
+        median_indeces = [length // 2]
     else:
-        median_indeces = [length//2-1, length//2]
+        median_indeces = [length // 2 - 1, length // 2]
 
     values = sorted(values, key=key)
-    return sum(map(key,
-                   [values[i] for i in median_indeces])) / len(median_indeces)
+    return sum(map(key, [values[i] for i in median_indeces])) / len(median_indeces)
 
 
 def test_median():
@@ -124,7 +125,7 @@ def histogram(stream, options):
         max_v = max_v.value
 
     if not max_v > min_v:
-        raise ValueError('max must be > min. max:%s min:%s' % (max_v, min_v))
+        raise ValueError("max must be > min. max:%s min:%s" % (max_v, min_v))
     diff = max_v - min_v
 
     boundaries = []
@@ -132,7 +133,7 @@ def histogram(stream, options):
     buckets = 0
 
     if options.custom_bins:
-        bound = options.custom_bins.split(',')
+        bound = options.custom_bins.split(",")
         bound_sort = sorted(map(Decimal, bound))
 
         # if the last value is smaller than the maximum, replace it
@@ -154,7 +155,7 @@ def histogram(stream, options):
     elif options.logscale:
         buckets = options.bins and int(options.bins) or 10
         if buckets <= 0:
-            raise ValueError('# of buckets must be > 0')
+            raise ValueError("# of buckets must be > 0")
 
         def first_bucket_size(k, n):
             # Logarithmic buckets means, the size of bucket i+1 is twice
@@ -165,23 +166,24 @@ def histogram(stream, options):
             #     x * \sum_{i=0}^{k} 2^i = n
             #     x * (2^{k+1} - 1)      = n
             #     x = n/(2^{k+1} - 1)
-            
-            return n/(2**(k+1)-1)
+
+            return n / (2 ** (k + 1) - 1)
 
         def log_steps(k, n):
             "k logarithmic steps whose sum is n"
-            x = first_bucket_size(k-1, n)
+            x = first_bucket_size(k - 1, n)
             sum = 0
             for i in range(k):
                 sum += 2**i * x
                 yield sum
+
         bucket_counts = [0 for x in range(buckets)]
         for step in log_steps(buckets, diff):
             boundaries.append(min_v + step)
     else:
         buckets = options.bins and int(options.bins) or 10
         if buckets <= 0:
-            raise ValueError('# of buckets must be > 0')
+            raise ValueError("# of buckets must be > 0")
         step = diff / buckets
         bucket_counts = [0 for x in range(buckets)]
         for x in range(buckets):
@@ -209,20 +211,28 @@ def histogram(stream, options):
     if max(bucket_counts) > 75:
         bucket_scale = int(max(bucket_counts) / 75)
 
-    print(("# NumSamples = %d; Min = %0.2f; Max = %0.2f" %
-          (samples, min_v, max_v)))
+    print(("# NumSamples = %d; Min = %0.2f; Max = %0.2f" % (samples, min_v, max_v)))
     if skipped:
-        print(("# %d value%s outside of min/max" %
-              (skipped, skipped > 1 and 's' or '')))
+        print(
+            ("# %d value%s outside of min/max" % (skipped, skipped > 1 and "s" or ""))
+        )
     if options.no_mvsd:
-        print(("# Mean = %f; Variance = %f; SD = %f; Median %f" %
-              (mvsd.mean(), mvsd.var(), mvsd.sd(),
-               median(accepted_data, key=lambda x: x.value))))
+        print(
+            (
+                "# Mean = %f; Variance = %f; SD = %f; Median %f"
+                % (
+                    mvsd.mean(),
+                    mvsd.var(),
+                    mvsd.sd(),
+                    median(accepted_data, key=lambda x: x.value),
+                )
+            )
+        )
     print("# each " + options.dot + " represents a count of %d" % bucket_scale)
     bucket_min = min_v
     bucket_max = min_v
     percentage = ""
-    format_string = options.bin_format + ' - ' + options.bin_format + ' [%6d]: %s%s'
+    format_string = options.bin_format + " - " + options.bin_format + " [%6d]: %s%s"
     for bucket in range(buckets):
         bucket_min = bucket_max
         bucket_max = boundaries[bucket]
@@ -231,7 +241,14 @@ def histogram(stream, options):
         if bucket_count:
             star_count = bucket_count // bucket_scale
         if options.percentage:
-            percentage = " (%0.2f%%)" % (100 * Decimal(bucket_count) /
-                                         Decimal(samples))
-        print(format_string % (bucket_min, bucket_max, bucket_count, options.dot *
-                               star_count, percentage))
+            percentage = " (%0.2f%%)" % (100 * Decimal(bucket_count) / Decimal(samples))
+        print(
+            format_string
+            % (
+                bucket_min,
+                bucket_max,
+                bucket_count,
+                options.dot * star_count,
+                percentage,
+            )
+        )
