@@ -3,6 +3,7 @@
 
 # Desciption: Crush class to get crush settings.
 
+
 class Crush(object):
     """
     Crush class to get crush settings.
@@ -15,8 +16,8 @@ class Crush(object):
         """
         Get crush rule by rule id.
         """
-        for rule in self.crushmap['rules']:
-            if rule['rule_id'] == rule_id:
+        for rule in self.crushmap["rules"]:
+            if rule["rule_id"] == rule_id:
                 return rule
         return None
 
@@ -24,8 +25,8 @@ class Crush(object):
         """
         Get crush rule by rule id.
         """
-        for rule in self.crushmap['rules']:
-            if rule['rule_name'] == rule_name:
+        for rule in self.crushmap["rules"]:
+            if rule["rule_name"] == rule_name:
                 return rule
         return None
 
@@ -38,9 +39,9 @@ class Crush(object):
             return None
 
         failure_domain = None
-        for step in rule['steps']:
-            if step['op'].startswith('choose'):
-                failure_domain = step['type']
+        for step in rule["steps"]:
+            if step["op"].startswith("choose"):
+                failure_domain = step["type"]
         return failure_domain
 
     def get_rule_root(self, rule_name):
@@ -50,12 +51,12 @@ class Crush(object):
         rule = self.get_rule_by_name(rule_name)
         if not rule:
             return None
-        for step in rule['steps']:
-            if step['op'] == 'take':
-                root_name = step['item_name']
-                for item in self.crushmap['buckets']:
-                    if item['name'] == root_name:
-                        return item['id']
+        for step in rule["steps"]:
+            if step["op"] == "take":
+                root_name = step["item_name"]
+                for item in self.crushmap["buckets"]:
+                    if item["name"] == root_name:
+                        return item["id"]
         return None
 
     def get_osds_under(self, root_id):
@@ -63,14 +64,14 @@ class Crush(object):
         Get osds under root.
         """
         osds = []
-        for item in self.crushmap['buckets']:
-            if item['id'] != root_id:
+        for item in self.crushmap["buckets"]:
+            if item["id"] != root_id:
                 continue
-            for item in item['items']:
-                if item['id'] < 0:
-                    osds += self.get_osds_under(item['id'])
+            for item in item["items"]:
+                if item["id"] < 0:
+                    osds += self.get_osds_under(item["id"])
                 else:
-                    osds.append(item['id'])
+                    osds.append(item["id"])
         return osds
 
     def get_items_of_type_under(self, item_type, root_id):
@@ -78,18 +79,18 @@ class Crush(object):
         Get items of specified type under root.
         """
         items = []
-        for item in self.crushmap['buckets']:
-            if item['id'] != root_id:
+        for item in self.crushmap["buckets"]:
+            if item["id"] != root_id:
                 continue
-            if item['type_name'] == item_type:
-                items.append(item['id'])
+            if item["type_name"] == item_type:
+                items.append(item["id"])
                 break
-            for item in item['items']:
-                if item['id'] >= 0:
-                    if item_type == 'osd':
-                        items.append(item['id'])
+            for item in item["items"]:
+                if item["id"] >= 0:
+                    if item_type == "osd":
+                        items.append(item["id"])
                 else:
-                    items += self.get_items_of_type_under(item_type, item['id'])
+                    items += self.get_items_of_type_under(item_type, item["id"])
             break
 
         return items
@@ -99,15 +100,15 @@ class Crush(object):
         Get zero weight buckets under root.
         """
         items = []
-        for item in self.crushmap['buckets']:
-            if item['id'] != root_id:
+        for item in self.crushmap["buckets"]:
+            if item["id"] != root_id:
                 continue
-            if item['weight'] == 0:
-                items.append(item['id'])
+            if item["weight"] == 0:
+                items.append(item["id"])
                 break
-            for item in item['items']:
-                if item['id'] < 0:
-                    items += self.get_zero_weight_buckets_under(item['id'])
+            for item in item["items"]:
+                if item["id"] < 0:
+                    items += self.get_zero_weight_buckets_under(item["id"])
             break
 
         return items
@@ -116,10 +117,10 @@ class Crush(object):
         """
         Get bucket weight.
         """
-        for item in self.crushmap['buckets']:
-            if item_id < 0 and item['id'] == item_id:
-                return item['weight']
-            for item in item['items']:
-                if item['id'] == item_id:
-                    return item['weight']
+        for item in self.crushmap["buckets"]:
+            if item_id < 0 and item["id"] == item_id:
+                return item["weight"]
+            for item in item["items"]:
+                if item["id"] == item_id:
+                    return item["weight"]
         return 0
