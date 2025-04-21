@@ -49,3 +49,7 @@ where = ["src"]
   "tools/contrib/",
 ]
 
+[tool.ruff]
+exclude = [
+  "src/clyso/ceph/copilot/tools"
+]
