@@ -1,4 +1,2 @@
-
-
-def update_result(airesult, perf_json):
+def update_result(airesult, perf_json) -> None:
     pass
