@@ -229,4 +229,7 @@ for pg in remapped:
   num += 1
 
 print(r'wait; sleep 4; while ceph status | grep -q "peering\|activating\|laggy"; do sleep 2; done')
-cluster.shutdown()
+try:
+  cluster.shutdown()
+except:
+  pass

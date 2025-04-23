@@ -13,6 +13,7 @@ from clyso.__version__ import __version__
 from clyso.ceph.ai import generate_result
 from clyso.ceph.ai.common import CopilotParser, json_load, jsoncmd
 from clyso.ceph.ai.pg import add_command_pg
+from clyso.ceph.copilot.upmap import add_command_upmap
 
 CONFIG_FILE = "copilot.yaml"
 
@@ -381,6 +382,9 @@ def main():
     )
     parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
     parser_checkup.set_defaults(func=subcommand_checkup)
+
+    # Add the upmap command
+    add_command_upmap(cluster_subparsers)
 
     # HIDE THE PLANNER and PROFILE COMMANDS FOR NOW
 
