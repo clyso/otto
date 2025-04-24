@@ -48,7 +48,8 @@ class PGHistogram:
             if self.flags.pools and poolid not in self.flags.pools:
                 continue
             for osd in pg['acting']:
-                osds[osd] += 1
+                if osd >= 0 and osd < 1000000:
+                    osds[osd] += 1
         
         return osds
-         
+
