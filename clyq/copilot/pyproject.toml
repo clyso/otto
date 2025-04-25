@@ -13,7 +13,9 @@ dynamic = ["version"]
 dependencies = [
   "humanize",
   "packaging",
-  "PyYaml"
+  "pandas>=2.2.3",
+  "prettytable>=3.16.0",
+  "PyYaml",
 ]
 
 [project.scripts]
