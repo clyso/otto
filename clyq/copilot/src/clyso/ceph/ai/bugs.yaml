@@ -1,5 +1,5 @@
 ---
-last_updated: '21 Mar 2025'
+last_updated: '1 May 2025'
 bugs:
   - name: PG Splitting/Merging Causes OSD Out-Of-Memory
     description: A bug in the PG splitting and merging code can cause the OSD to go out-of-memory, a condition which persists even after restart. Offline tools are available in fixed releases to workaround the issue. See https://tracker.ceph.com/issues/53729.
@@ -21,3 +21,11 @@ bugs:
     recommendation: For now, run "ceph config set osd bluestore_elastic_shared_blobs 0" on any Squid cluster before adding new OSDs. Unfortunately, this will not help OSDs already deployed in Squid—the only known fix for them is redeployment.
     affected_versions:
       - 19.*.*
+  - name: BlueStore Potential Corruption
+    description: Some versions of Ceph were released with a bug that may cause OSDs to crash and corrupt the on-disk data. Upstream ticket https://tracker.ceph.com/issues/69764
+    severity: critical
+    recommendation: Upgrade to a fixed version (17.2.9 or 18.2.7) as soon as possible.
+    affected_versions:
+      - 17.2.8
+      - 18.2.5
+      - 18.2.6
