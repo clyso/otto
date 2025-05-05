@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -21,8 +21,16 @@ dependencies = [
 [project.scripts]
 ceph-copilot = "clyso.ceph.copilot:main"
 
-[tool.setuptools.dynamic]
-version = { attr = "clyso.__version__" }
+[tool.uv]
+cache-keys = [
+  { file = "pyproject.toml" }, 
+  { git = { commit = true, tags = true } }
+]
+
+[tool.setuptools_scm]
+root = ".."
+fallback_version = "0.0.0"
+version_scheme = "only-version"
 
 [tool.setuptools.packages.find]
 where = ["src"]
