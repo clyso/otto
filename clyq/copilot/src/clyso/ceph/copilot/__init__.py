@@ -6,11 +6,11 @@ import sys
 
 import yaml
 
-from clyso.__version__ import __version__
 from clyso.ceph.ai import generate_result
 from clyso.ceph.ai.common import CopilotParser, json_load, jsoncmd
 from clyso.ceph.ai.pg import add_command_pg
 from clyso.ceph.copilot.upmap import add_command_upmap
+from clyso.__version__ import __version__
 
 CONFIG_FILE = "copilot.yaml"
 
