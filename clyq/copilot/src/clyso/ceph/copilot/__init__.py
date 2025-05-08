@@ -369,7 +369,7 @@ def main():
         "checkup", help="Perform an overall health and safety check on the cluster"
     )
     parser_checkup.add_argument(
-        "--ceph_report_json", type=str, help="analyze this `ceph.report` file"
+        "--ceph_report_json", "-i", type=str, help="analyze this `ceph.report` file"
     )
     parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
     parser_checkup.set_defaults(func=subcommand_checkup)
