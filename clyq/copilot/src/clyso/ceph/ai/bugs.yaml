@@ -29,9 +29,3 @@ bugs:
       - 17.2.8
       - 18.2.5
       - 18.2.6
-  - name: "v19.2.1 bdev_async_discard incompatibility and CPU usage"
-    description: "Ceph v19.2.1 replaced bdev_async_discard with bdev_async_discard_thread (https://github.com/ceph/ceph/pull/59065), breaking backward compatibility. Old settings are ignored, disabling async discards. New settings via automation (e.g., Rook) can fail. Setting bdev_async_discard_thread > 1 causes 100% OSD CPU usage. Upstream tracker: https://tracker.ceph.com/issues/70327"
-    recommendation: "Upgrade to Ceph v19.2.3 or later where this is resolved. A PR (https://github.com/ceph/ceph/pull/62254) was also made to reintroduce the bdev_async_discard parameter."
-    severity: "high"
-    affected_versions:
-      - "19.2.1"
