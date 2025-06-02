@@ -26,11 +26,11 @@ releases:
     version: 16.2.15
   v17:
     name: quincy
-    version: 17.2.8
+    version: 17.2.9
     recommended: true
   v18:
     name: reef
-    version: 18.2.4
+    version: 18.2.7
     recommended: true
   v19:
     name: squid
