@@ -8,16 +8,31 @@ from . import config as aiconfig
 from . import report as aireport
 
 
-def generate_result(report_json=None, config_dump_json=None):
-    if config_dump_json is None:
-        config_dump_json = {}
-    if report_json is None:
-        report_json = {}
-    data = CephData()
-    data.add_ceph_report(report_json)
-    data.add_ceph_config_dump(config_dump_json)
+def generate_result(
+    ceph_data: CephData | None = None,
+    report_json: dict[str, object] | None = None,
+    config_dump_json: list[dict[str, object]] | None = None,
+) -> AIResult:
+    """
+    Args:
+        ceph_data: CephData object (preferred method)
+        report_json: Legacy parameter for backward compatibility
+        config_dump_json: Legacy parameter for backward compatibility
+    """
 
-    res = AIResult()
+    if ceph_data is not None:
+        data = ceph_data
+    else:
+        # Backward compatibility: create CephData from individual parameters
+        if config_dump_json is None:
+            config_dump_json = []
+        if report_json is None:
+            report_json = {}
+        data = CephData()
+        data.add_ceph_report(ceph_report=report_json)
+        data.add_ceph_config_dump(ceph_config_dump=config_dump_json)
+
+    res: AIResult = AIResult()
 
     res.add_section("Cluster")  # Report on the cluster info and health
     res.add_section("Version")  # Check the running versions
@@ -27,6 +42,7 @@ def generate_result(report_json=None, config_dump_json=None):
     res.add_section("CephFS")  # Check the Filesystems
     res.add_section("MON Health")  # Check the MONs
     res.add_section("OSD Health")  # Check the OSDs
+    res.add_section("Configuration")  # Check configuration settings
 
     aireport.update_result(res, data)
     aiconfig.update_result(res, data)
