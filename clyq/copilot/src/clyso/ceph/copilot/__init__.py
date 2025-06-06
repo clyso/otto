@@ -14,6 +14,7 @@ import yaml
 
 from clyso.ceph.ai import generate_result
 from clyso.ceph.ai.common import CopilotParser, json_load, jsoncmd
+from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.pg import add_command_pg
 from clyso.ceph.copilot.upmap import add_command_upmap
 from clyso.__version__ import __version__
@@ -31,6 +32,141 @@ CONFIG_FILE = "copilot.yaml"
 
 def collect():
     return jsoncmd("ceph report")
+
+
+def collect_data_source(
+    explicit_file, file_patterns, cli_command, data_source_name, verbose=False
+):
+    """
+    1. Check if file is explicitly provided via CLI argument
+    2. Check if file exists in current directory (using file patterns)
+    3. Fall back to running ceph CLI command
+    """
+    if explicit_file:
+        try:
+            with open(explicit_file, "r") as file:
+                return json.load(file)
+        except Exception as e:
+            if verbose:
+                print(
+                    f"Warning: Failed to read {data_source_name} from {explicit_file}: {e}",
+                    file=sys.stderr,
+                )
+            return None
+
+    for pattern in file_patterns:
+        if os.path.exists(pattern):
+            try:
+                with open(pattern, "r") as file:
+                    return json.load(file)
+            except Exception as e:
+                if verbose:
+                    print(
+                        f"Warning: Failed to read {data_source_name} from {pattern}: {e}",
+                        file=sys.stderr,
+                    )
+                continue
+
+    if cli_command:
+        try:
+            return jsoncmd(cli_command)
+        except Exception as e:
+            if verbose:
+                print(
+                    f"Warning: Failed to collect {data_source_name} via CLI command '{cli_command}': {e}",
+                    file=sys.stderr,
+                )
+
+    return None
+
+
+def collect_all_data(args):
+    """
+    Returns a populated CephData object and a list of warnings.
+    """
+    data = CephData()
+    warnings = []
+    verbose = getattr(args, "verbose", False)
+
+    # Collect Ceph report (existing logic, maintain backward compatibility)
+    if args.ceph_report_json:
+        try:
+            with open(args.ceph_report_json, "r") as file:
+                report = json_load(file)
+                data.add_ceph_report(report)
+        except Exception as e:
+            print(
+                f"Error: Failed to read ceph report from {args.ceph_report_json}: {e}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    elif os.path.exists("cluster_health-report"):
+        try:
+            with open("cluster_health-report", "r") as file:
+                report = json_load(file)
+                data.add_ceph_report(report)
+        except Exception as e:
+            print(
+                f"Error: Failed to read ceph report from cluster_health-report: {e}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    else:
+        try:
+            report = collect()
+            data.add_ceph_report(report)
+        except Exception as e:
+            print(f"Error: Failed to collect ceph report via CLI: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Collect Config Dump
+    config_dump = collect_data_source(
+        getattr(args, "ceph_config_dump", None),
+        ["ceph_cluster_info-config_dump.json"],
+        "ceph config dump -f json",
+        "config dump",
+        verbose,
+    )
+    if config_dump:
+        data.add_ceph_config_dump(config_dump)
+    else:
+        warnings.append(
+            "Config dump analysis skipped - unable to collect configuration data"
+        )
+
+    # TODO: add diagnostics for osd tree and pg dump in cluster checkup
+    # json file size is somewhat big and slows down loading it
+    # # Collect OSD Tree
+    # osd_tree = collect_data_source(
+    #     getattr(args, "ceph_osd_tree", None),
+    #     ["osd_info-tree.json"],
+    #     "ceph osd tree -f json",
+    #     "OSD tree",
+    #     verbose,
+    # )
+    # if osd_tree:
+    #     data.add_ceph_osd_tree(osd_tree)
+    # else:
+    #     warnings.append(
+    #         "OSD tree analysis skipped - unable to collect OSD topology data"
+    #     )
+    #
+    # # Collect PG Dump
+    # pg_dump = collect_data_source(
+    #     getattr(args, "ceph_pg_dump", None),
+    #     ["pg_info-dump.json"],
+    #     "ceph pg dump -f json",
+    #     "PG dump",
+    #     verbose,
+    # )
+    # if pg_dump:
+    #     data.add_ceph_pg_dump(pg_dump)
+    # else:
+    #     warnings.append(
+    #         "PG dump analysis skipped - unable to collect placement group data"
+    #     )
+
+    return data, warnings
 
 
 def render_progress_bar(data):
@@ -125,24 +261,27 @@ def verbose_result(result):
 
 
 def subcommand_checkup(args):
-    if args.ceph_report_json:
-        with open(args.ceph_report_json, "r") as file:
-            report = json_load(file)
-    elif os.path.exists("cluster_health-report"):
-        with open("cluster_health-report", "r") as file:
-            report = json_load(file)
-    else:
-        report = collect()
+    # CephData creation
+    data, warnings = collect_all_data(args)
 
-    result = generate_result(report_json=report)
+    if args.verbose:
+        for warning in warnings:
+            print(f"Warning: {warning}")
+
+    result = generate_result(ceph_data=data)
+
     if args.verbose:
         verbose_result(result.dump())
     else:
         compact_result(result.dump())
 
+
 def get_analyzer_report_json(args):
     report = collect()
-    r = generate_result(report_json=report)
+    data = CephData()
+    data.add_ceph_report(report)
+
+    r = generate_result(ceph_data=data)
     print(r.data)
     return r.data
 
@@ -348,6 +487,7 @@ def run_ceph_command(args):
         print(f"Error: {e.output.decode('utf-8')}")
         exit(1)
 
+
 def daemon_start(args):
     """Start the copilot daemon"""
     print("Starting ceph copilot daemon...")
@@ -421,6 +561,7 @@ Stopping daemon...")
     while True:
         time.sleep(1)
 
+
 def main():
     # Create the top-level parser
     parser = CopilotParser(
@@ -469,6 +610,16 @@ def main():
     parser_checkup.add_argument(
         "--ceph_report_json", "-i", type=str, help="analyze this `ceph.report` file"
     )
+    parser_checkup.add_argument(
+        "--ceph-config-dump", type=str, help="analyze this config dump file"
+    )
+    # TODO: add back once we start collecting for this
+    # parser_checkup.add_argument(
+    #     "--ceph-osd-tree", type=str, help="analyze this OSD tree file"
+    # )
+    # parser_checkup.add_argument(
+    #     "--ceph-pg-dump", type=str, help="analyze this PG dump file"
+    # )
     parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
     parser_checkup.set_defaults(func=subcommand_checkup)
 
