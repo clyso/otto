@@ -21,13 +21,13 @@ with open(os_file) as file:
     osdb = yaml.safe_load(file)
 
 
-def to_version(version):
+def to_version(version: str) -> str:
     # e.g. map 16.2.13-0 to 16.2.13
     #      map v16 to 16
     return version.split("-")[0].replace("v", "")
 
 
-def to_major(version):
+def to_major(version: str) -> str:
     # e.g. map 16.2.13-0 to v16
     x = to_version(version).split(".")[0]
     if x.startswith("v"):
@@ -35,7 +35,7 @@ def to_major(version):
     return "v" + x
 
 
-def to_release(version):
+def to_release(version: str) -> str:
     major = to_major(version)
     return versiondb["releases"][major].get("name")
 
