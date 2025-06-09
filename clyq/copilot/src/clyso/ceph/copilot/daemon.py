@@ -639,7 +639,7 @@ class CopilotDaemon:
             # Process command if present
             if "command" in decrypted_data and decrypted_data["command"] is not None:
                 cmd_data = decrypted_data["command"]
-                
+
                 # Validate required fields and their types
                 if not isinstance(cmd_data.get("name"), str):
                     self.logger.error("Command name must be a string")
@@ -647,7 +647,7 @@ class CopilotDaemon:
                 if not isinstance(cmd_data.get("uuid"), str):
                     self.logger.error("Command UUID must be a string")
                     return
-                
+
                 # Args is optional but must be a valid json string
                 args = {}
                 if "args" in cmd_data and cmd_data["args"] is not None:
@@ -659,7 +659,7 @@ class CopilotDaemon:
                     except json.JSONDecodeError as e:
                         self.logger.error(f"Invalid JSON in command args: {e}")
                         return
-                
+
                 command = Command(
                     name=cmd_data["name"],
                     uuid=cmd_data["uuid"],
