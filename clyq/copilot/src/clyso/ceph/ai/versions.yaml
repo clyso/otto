@@ -34,7 +34,7 @@ releases:
     recommended: true
   v19:
     name: squid
-    version: 19.2.0
+    version: 19.2.2
   v20:
     name: t
   v21:
