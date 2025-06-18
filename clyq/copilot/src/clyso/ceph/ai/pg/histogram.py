@@ -99,12 +99,15 @@ def test_median():
     assert "4.50" == "%.2f" % median([4.0, 5, 2, 1, 9, 10])
 
 
-def histogram(stream, options):
+def calculate_histogram(stream, options):
     """
-    Loop over the stream and add each entry to the dataset, printing out at the
-    end.
+    Calculate the histogram data from DataPoint objects
+    Args:
+        stream: Collection of DataPoint(value, count) objects
+        options: Config object with bins, min/max, custom_bins, logscale, no_mvsd attributes
 
-    stream yields Decimal()
+    Returns:
+        dict: Histogram data with boundaries, bucket_counts, statistics, and metadata
     """
     if not options.min or not options.max:
         # glob the iterator here so we can do min/max on it
@@ -211,6 +214,37 @@ def histogram(stream, options):
     if max(bucket_counts) > 75:
         bucket_scale = int(max(bucket_counts) / 75)
 
+    # Return all the calculated data
+    return {
+        "min_v": min_v,
+        "max_v": max_v,
+        "diff": diff,
+        "boundaries": boundaries,
+        "bucket_counts": bucket_counts,
+        "buckets": buckets,
+        "skipped": skipped,
+        "samples": samples,
+        "mvsd": mvsd,
+        "accepted_data": accepted_data,
+        "bucket_scale": bucket_scale,
+    }
+
+
+def print_histogram(histogram_data, options):
+    """
+    Print the histogram.
+    """
+    min_v = histogram_data["min_v"]
+    max_v = histogram_data["max_v"]
+    boundaries = histogram_data["boundaries"]
+    bucket_counts = histogram_data["bucket_counts"]
+    buckets = histogram_data["buckets"]
+    skipped = histogram_data["skipped"]
+    samples = histogram_data["samples"]
+    mvsd = histogram_data["mvsd"]
+    accepted_data = histogram_data["accepted_data"]
+    bucket_scale = histogram_data["bucket_scale"]
+
     print(("# NumSamples = %d; Min = %0.2f; Max = %0.2f" % (samples, min_v, max_v)))
     if skipped:
         print(
@@ -252,3 +286,11 @@ def histogram(stream, options):
                 percentage,
             )
         )
+
+
+def histogram(stream, options):
+    """
+    Complete histogram workflow: calculate data and print visualization. Main entry point for the CLI tool
+    """
+    histogram_data = calculate_histogram(stream, options)
+    print_histogram(histogram_data, options)
