@@ -18,15 +18,15 @@ class PGHistogram:
         self.osd_weights = self.get_weights()
         self.osds = self.get_pg_stats()
 
+    def print_ascii_histogram(self):
         if self.flags.normalize:
-            values = [
+            self.values = [
                 DataPoint(self.osds[osd] / self.osd_weights[osd]["crush_weight"], 1)
                 for osd in self.osds
             ]
         else:
-            values = [DataPoint(self.osds[osd], 1) for osd in self.osds]
-
-        histogram(values, self.flags)
+            self.values = [DataPoint(self.osds[osd], 1) for osd in self.osds]
+        histogram(self.values, self.flags)
 
     def get_weights(self):
         osd_weights = dict()
