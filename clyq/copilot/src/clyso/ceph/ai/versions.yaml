@@ -3,6 +3,7 @@
 # versions: x.y.z are supportable ceph version clyso recommends
 # a version is marked old if there is no 'version' key
 # recommended: is default to false, put true if the version is recommended
+# IMPORTANT: Don't forget to update the Customer Support Portal FAQ article at: https://support.clyso.com/otrs/index.pl?Action=AgentFAQZoom;ItemID=35
 
 releases:
   v9:
