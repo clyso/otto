@@ -7,10 +7,6 @@ import json
 import os
 
 
-def print_histogram(osd_tree: dict, pg_dump: dict, flags: dict):
-    PGHistogram(osd_tree, pg_dump, flags)
-
-
 def add_command_pg(subparsers):
     # Create the parser for "pg" command
     parser_pg = subparsers.add_parser(
@@ -94,4 +90,5 @@ def pg_distribution(args):
     else:
         pg_stats = jsoncmd("ceph pg dump --format=json")
 
-    print_histogram(osd_weights, pg_stats, args)
+    pg_histogram = PGHistogram(osd_weights, pg_stats, args)
+    pg_histogram.print_ascii_histogram()
