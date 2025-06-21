@@ -5,6 +5,7 @@ from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.pg.histogram import histogram, calculate_histogram, DataPoint, median
 from collections import defaultdict
 from types import SimpleNamespace
+import json
 
 
 class PGHistogram:
@@ -143,10 +144,11 @@ class PGHistogram:
         if pool_id is not None:
             # Single pool case
             osds_dict, total_pgs = self._get_per_pool_pg_stats(pool_id)
-            pool_json = self._generate_histogram_json(
+            pool_data = self._generate_histogram_dict(
                 osds_dict, total_pgs, normalize, bins
             )
-            return {"pools": {str(pool_id): pool_json}}
+            result = {"pools": {str(pool_id): pool_data}}
+            return json.dumps(result, indent=2)
         else:
             # All pools case
             pools_data = self._get_per_pool_pg_stats()
@@ -155,23 +157,23 @@ class PGHistogram:
 
             # Create individual pool summaries
             for pool_id, pool_data in pools_data.items():
-                pool_json = self._generate_histogram_json(
+                pool_data_dict = self._generate_histogram_dict(
                     pool_data["osds"], pool_data["total_pgs"], normalize, bins
                 )
-                result["pools"][pool_id] = pool_json
+                result["pools"][pool_id] = pool_data_dict
 
-            return result
+            return json.dumps(result, indent=2)
 
-    def _generate_histogram_json(self, osds_dict, total_pgs, normalize, bins):
+    def _generate_histogram_dict(self, osds_dict, total_pgs, normalize, bins):
         """
-        Generate histogram data in JSON format.
+        Generate histogram data and get the resulting   dictionary.
         Args:
             osds_dict: PG count per OSD like {0: 85, 1: 92}
             total_pgs: Total number of PGs
             normalize: Apply crush weight normalization
             bins: Number of histogram bins
         Returns:
-            JSON object with summary, bins, and metadata
+            Dictionary with summary, bins, and metadata
         """
         values = self._create_datapoints_for_osds(osds_dict, normalize)
         options = SimpleNamespace(
@@ -183,16 +185,16 @@ class PGHistogram:
             no_mvsd=True,
         )
         histogram_data = calculate_histogram(values, options)
-        return self._convert_histogram_data_to_json(histogram_data, total_pgs)
+        return self._convert_histogram_data_to_dict(histogram_data, total_pgs)
 
-    def _convert_histogram_data_to_json(self, histogram_data, total_pgs):
+    def _convert_histogram_data_to_dict(self, histogram_data, total_pgs):
         """
-        Convert histogram data to JSON format.
+        Convert histogram data to dictionary format.
         Args:
             histogram_data: Dictionary containing histogram data
             total_pgs: Total number of PGs
         Returns:
-            JSON object with summary, bins, and metadata
+            Dictionary with summary, bins, and metadata
         """
         min_v = float(histogram_data["min_v"])
         max_v = float(histogram_data["max_v"])
