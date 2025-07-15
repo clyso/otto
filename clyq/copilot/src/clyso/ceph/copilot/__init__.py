@@ -214,7 +214,62 @@ def compact_result(result):
 
     if warned:
         print("
-Use --verbose for details and recommendations")
+Use --verbose or --summary for details and recommendations")
+
+
+def compact_result_summary(result):
+    # Load the JSON data
+    json_data = json.loads(result)
+
+    # Print the summary
+    print(
+        f"Overall score: {json_data['summary']['score']:g} out of {json_data['summary']['max_score']} ({json_data['summary']['grade']})
+"
+    )
+
+    # Loop over the sections
+    for section in json_data["sections"]:
+        # Only show checks that failed or have warnings
+        failed_checks = [
+            check for check in section["checks"] if check["result"] != "PASS"
+        ]
+
+        if failed_checks:
+            print(f"Section: {section['id']}")
+            print(
+                f"Score: {section['score']:g} out of {section['max_score']} ({section['grade']})"
+            )
+
+            # Show info for context
+            if section["info"]:
+                print("Info:")
+                for info in section["info"]:
+                    print(f"  - ID: {info['id']}")
+                    print(f"    Summary: {info['summary']}")
+                    print("    Details:")
+                    for detail in info["detail"]:
+                        print(f"      - {detail}")
+                    if not info["detail"]:
+                        print("      - None")
+
+            print("Failed/Warning Checks:")
+            for check in failed_checks:
+                print(f"  - ID: {check['id']}")
+                print(f"    Result: {check['result']}")
+                print(f"    Summary: {check['summary']}")
+                print("    Details:")
+                for detail in check["detail"]:
+                    print(f"      - {detail}")
+                if not check["detail"]:
+                    print("      - None")
+                print("    Recommendations:")
+                for recommend in check["recommend"]:
+                    print(f"      - {recommend}")
+                if not check["recommend"]:
+                    print("      - None")
+                print("")
+
+            print("")
 
 
 def verbose_result(result):
@@ -269,13 +324,16 @@ def subcommand_checkup(args):
     # CephData creation
     data, warnings = collect_all_data(args)
 
-    if args.verbose:
+    # Show warnings for both verbose and summary modes
+    if args.verbose or args.summary:
         for warning in warnings:
             print(f"Warning: {warning}")
 
     result = generate_result(ceph_data=data)
 
-    if args.verbose:
+    if args.summary:
+        compact_result_summary(result.dump())
+    elif args.verbose:
         verbose_result(result.dump())
     else:
         compact_result(result.dump())
@@ -685,6 +743,7 @@ def main():
     # parser_checkup.add_argument(
     #     "--ceph-pg-dump", type=str, help="analyze this PG dump file"
     # )
+    parser_checkup.add_argument("--summary", action="store_true", help="Summary output")
     parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
     parser_checkup.set_defaults(func=subcommand_checkup)
 
