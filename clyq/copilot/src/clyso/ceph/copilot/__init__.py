@@ -27,6 +27,11 @@ from clyso.ceph.copilot.daemon import (
 )
 from clyso.ceph.copilot.command_registry import CommandRegistry
 
+from clyso.ceph.ai.osd.perf import OSDPerf
+from clyso.ceph.ai.osd.topology import OSDTopology
+from clyso.ceph.ai.osd.sampler import calculate_sample_size, stratified_sample_osds
+import math
+
 CONFIG_FILE = "copilot.yaml"
 
 
@@ -284,6 +289,66 @@ def get_analyzer_report_json(args):
     r = generate_result(ceph_data=data)
     print(r.data)
     return r.data
+
+
+def subcommand_osd_perf(args):
+    print("Analyzing OSD onode performance across cluster...")
+
+    try:
+        topology = OSDTopology()
+        host_to_osds, device_class_to_osds, up_osds, osd_metadata = (
+            topology.get_topology_info()
+        )
+    except Exception as e:
+        print(f"Error loading cluster information: {e}")
+        return
+
+    # Calculate sample size
+    user_specified = getattr(args, "num_osds", None)
+    sample_size = calculate_sample_size(len(up_osds), user_specified)
+
+    print(f"Cluster has {len(up_osds)} UP OSDs, sampling {sample_size} OSDs")
+
+    sampled_osds = stratified_sample_osds(device_class_to_osds, up_osds, sample_size)
+
+    print(f"Sampled OSDs: {sorted(sampled_osds)}")
+
+    # Collect performance metrics
+    print("Collecting onode performance metrics...")
+    osd_metrics, failed_osds = OSDPerf.collect_osd_performance_metrics(
+        sampled_osds, osd_metadata
+    )
+
+    if not osd_metrics:
+        print("No performance metrics collected")
+        return
+
+    # Analyze and display results
+    analysis = OSDPerf.analyze_onode_distribution(osd_metrics)
+    display_onode_results(analysis, osd_metrics, failed_osds)
+
+
+def display_onode_results(analysis: dict, osd_metrics: list, failed_osds: list):
+    """Display onode performance analysis"""
+
+    print(f"
+{'=' * 50}")
+    print("ONODE PERFORMANCE ANALYSIS")
+    print(f"{'=' * 50}")
+
+    overall = analysis["overall"]
+    print(f"
+Onode Hit Rate Distribution:")
+    print(f"  Sampled OSDs: {overall['count']}")
+    print(f"  Average: {overall['mean']:.2%}")
+    print(f"  Median:  {overall['median']:.2%}")
+    print(f"  Min:     {overall['min']:.2%}")
+    print(f"  Max:     {overall['max']:.2%}")
+    print(f"  Std Dev: {overall['std_dev']:.2%}")
+
+    if failed_osds:
+        print(f"
+Failed to collect metrics from OSDs: {sorted(failed_osds)}")
 
 
 def get_tuning_profiles():
@@ -622,6 +687,18 @@ def main():
     # )
     parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
     parser_checkup.set_defaults(func=subcommand_checkup)
+
+    # Create the parser for the "osd-perf" command
+    parser_osd_perf = cluster_subparsers.add_parser(
+        "osd-perf", help="Analyze OSD performance metrics across the cluster"
+    )
+    parser_osd_perf.add_argument(
+        "--num-osds",
+        type=int,
+        default=5,
+        help="Number of random OSDs to sample (default: 5)",
+    )
+    parser_osd_perf.set_defaults(func=subcommand_osd_perf)
 
     # Create the parser for the "daemon" command
     parser_daemon = subparsers.add_parser(
