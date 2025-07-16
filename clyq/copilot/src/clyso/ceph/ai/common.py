@@ -5,6 +5,12 @@ import sys
 import argparse
 import math
 
+CEPH_FILES = {
+    "ceph-report": "cluster_health-report",
+    "config_dump": "ceph_cluster_info-config_dump.json",
+    "osd_tree": "osd_info-tree.json",
+    "pg_dump": "pg_info-dump.json",
+}
 
 def json_loads(json_data):
     def parse_json_constants(arg):
@@ -44,6 +50,18 @@ def jsoncmd(command, timeout=30):
         sys.exit(1)
     return json_loads(out)
 
+
+def load_ceph_report_file(filepath):
+    """Load and parse ceph report file"""
+    try:
+        with open(filepath, "r") as file:
+            return json_load(file)
+    except Exception as e:
+        print(
+            f"Error: Failed to read ceph report from {filepath}: {e}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 class CopilotParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
