@@ -38,18 +38,25 @@ import math
 CONFIG_FILE = "copilot.yaml"
 
 
-def collect():
-    return jsoncmd("ceph report")
+def collect(args=None):
+    skip_confirmation = getattr(args, "yes", False) if args else False
+    return jsoncmd("ceph report", skip_confirmation=skip_confirmation)
 
 
 def collect_data_source(
-    explicit_file, file_patterns, cli_command, data_source_name, verbose=False
+    explicit_file,
+    file_patterns,
+    cli_command,
+    data_source_name,
+    verbose=False,
+    args=None,
 ):
     """
     1. Check if file is explicitly provided via CLI argument
     2. Check if file exists in current directory (using file patterns)
     3. Fall back to running ceph CLI command
     """
+    skip_confirmation = getattr(args, "yes", False) if args else False
     if explicit_file:
         try:
             with open(explicit_file, "r") as file:
@@ -76,7 +83,7 @@ def collect_data_source(
                 continue
 
     if cli_command:
-        return jsoncmd(cli_command)
+        return jsoncmd(cli_command, skip_confirmation=skip_confirmation)
 
     return None
 
@@ -85,6 +92,7 @@ def collect_all_data(args):
     """
     Returns a populated CephData object and a list of warnings.
     """
+    skip_confirmation = getattr(args, "yes", False)
     data = CephData()
     warnings = []
     verbose = getattr(args, "verbose", False)
@@ -100,7 +108,7 @@ def collect_all_data(args):
         data.add_ceph_report(report)
     else:
         try:
-            report = collect()
+            report = collect(args)
             data.add_ceph_report(report)
         except Exception as e:
             print(f"Error: Failed to collect ceph report via CLI: {e}", file=sys.stderr)
@@ -113,6 +121,7 @@ def collect_all_data(args):
         None if using_static_report else "ceph config dump -f json",
         "config dump",
         verbose,
+        args,
     )
     if config_dump:
         data.add_ceph_config_dump(config_dump)
@@ -285,7 +294,7 @@ def subcommand_checkup(args):
 
 
 def get_analyzer_report_json(args):
-    report = collect()
+    report = collect(args)
     data = CephData()
     data.add_ceph_report(report)
 
@@ -520,8 +529,9 @@ def toolkit_run(args):
         exit(1)
 
     cmd = [os.path.join(tools_dir, args.tool)] + args.args
-    print(f"Running tool: {args.tool} {' '.join(args.args)}")
+    cmd_str = f"{args.tool} {' '.join(args.args)}"
 
+    print(f"Running tool: {cmd_str}")
     subprocess.run(cmd, check=False)
 
 
@@ -540,9 +550,23 @@ def planner_replacement(args):
     return
 
 
+# note: use jsoncmd to run ceph comamnds with json
 def run_ceph_command(args):
+    skip_confirmation = getattr(args, "yes", False)
     command = ["ceph"]
     command.extend(args)
+    cmd_str = " ".join(command)
+
+    if not skip_confirmation:
+        try:
+            response = input(f"+ {cmd_str} [y/n]: ").strip().lower()
+            if response not in ("y", "yes"):
+                print("Command execution cancelled by user.")
+                return
+        except (KeyboardInterrupt, EOFError):
+            print("\nOperation cancelled by user.")
+            return
+
     try:
         output = subprocess.check_output(command)
         print(output.decode("utf-8"))
@@ -629,6 +653,14 @@ def main():
     parser = CopilotParser(
         prog="ceph-copilot", description="Ceph Copilot: Your Expert Ceph Assistant."
     )
+
+    parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Automatically confirm all interactive prompts",
+    )
+
     subparsers = parser.add_subparsers(
         title="subcommands",
         description="valid subcommands",
