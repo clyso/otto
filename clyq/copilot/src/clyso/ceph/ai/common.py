@@ -15,6 +15,7 @@ CEPH_FILES = {
     "pg_dump": "pg_info-dump.json",
 }
 
+
 def json_loads(json_data):
     def parse_json_constants(arg):
         if arg == "Infinity":
@@ -39,7 +40,28 @@ def json_load(f):
     return json_loads(f.read())
 
 
-def jsoncmd(command, timeout=30):
+def jsoncmd(command, timeout=30, skip_confirmation=False):
+    """Execute a Ceph command and return JSON output with optional interactive confirmation.
+
+    Args:
+        command: The ceph command to execute
+        timeout: Command timeout in seconds
+        skip_confirmation: If True, skip interactive confirmation
+
+    Returns:
+        Parsed JSON output from the command
+    """
+    if not skip_confirmation:
+        try:
+            response = input(f"+ {command} [y/n]: ").strip().lower()
+            if response not in ("y", "yes"):
+                print("Command execution cancelled by user.")
+                sys.exit(1)
+        except (KeyboardInterrupt, EOFError):
+            print("
+Operation cancelled by user.")
+            sys.exit(1)
+
     try:
         with open(os.devnull, "w") as devnull:
             out = subprocess.check_output(
@@ -65,6 +87,7 @@ def load_ceph_report_file(filepath):
             file=sys.stderr,
         )
         sys.exit(1)
+
 
 class CopilotParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
