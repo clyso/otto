@@ -10,7 +10,13 @@ import signal
 import yaml
 
 from clyso.ceph.ai import generate_result
-from clyso.ceph.ai.common import CopilotParser, json_load, jsoncmd
+from clyso.ceph.ai.common import (
+    CopilotParser,
+    json_load,
+    jsoncmd,
+    load_ceph_report_file,
+    CEPH_FILES,
+)
 from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.pg import add_command_pg
 from clyso.ceph.copilot.upmap import add_command_upmap
@@ -70,14 +76,7 @@ def collect_data_source(
                 continue
 
     if cli_command:
-        try:
-            return jsoncmd(cli_command)
-        except Exception as e:
-            if verbose:
-                print(
-                    f"Warning: Failed to collect {data_source_name} via CLI command '{cli_command}': {e}",
-                    file=sys.stderr,
-                )
+        return jsoncmd(cli_command)
 
     return None
 
@@ -90,29 +89,15 @@ def collect_all_data(args):
     warnings = []
     verbose = getattr(args, "verbose", False)
 
-    # Collect Ceph report (existing logic, maintain backward compatibility)
-    if args.ceph_report_json:
-        try:
-            with open(args.ceph_report_json, "r") as file:
-                report = json_load(file)
-                data.add_ceph_report(report)
-        except Exception as e:
-            print(
-                f"Error: Failed to read ceph report from {args.ceph_report_json}: {e}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-    elif os.path.exists("cluster_health-report"):
-        try:
-            with open("cluster_health-report", "r") as file:
-                report = json_load(file)
-                data.add_ceph_report(report)
-        except Exception as e:
-            print(
-                f"Error: Failed to read ceph report from cluster_health-report: {e}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+    """Load Ceph report from specified file or default location."""
+    using_static_report = bool(args.ceph_report_json)
+
+    if using_static_report:
+        report = load_ceph_report_file(args.ceph_report_json)
+        data.add_ceph_report(report)
+    elif os.path.exists(CEPH_FILES["ceph-report"]):
+        report = load_ceph_report_file(CEPH_FILES["ceph-report"])
+        data.add_ceph_report(report)
     else:
         try:
             report = collect()
@@ -121,11 +106,11 @@ def collect_all_data(args):
             print(f"Error: Failed to collect ceph report via CLI: {e}", file=sys.stderr)
             sys.exit(1)
 
-    # Collect Config Dump
+    # Collect Config Dump - avoid CLI commands when using static report
     config_dump = collect_data_source(
         getattr(args, "ceph_config_dump", None),
-        ["ceph_cluster_info-config_dump.json"],
-        "ceph config dump -f json",
+        [CEPH_FILES["config_dump"]],
+        None if using_static_report else "ceph config dump -f json",
         "config dump",
         verbose,
     )
@@ -135,38 +120,6 @@ def collect_all_data(args):
         warnings.append(
             "Config dump analysis skipped - unable to collect configuration data"
         )
-
-    # TODO: add diagnostics for osd tree and pg dump in cluster checkup
-    # json file size is somewhat big and slows down loading it
-    # # Collect OSD Tree
-    # osd_tree = collect_data_source(
-    #     getattr(args, "ceph_osd_tree", None),
-    #     ["osd_info-tree.json"],
-    #     "ceph osd tree -f json",
-    #     "OSD tree",
-    #     verbose,
-    # )
-    # if osd_tree:
-    #     data.add_ceph_osd_tree(osd_tree)
-    # else:
-    #     warnings.append(
-    #         "OSD tree analysis skipped - unable to collect OSD topology data"
-    #     )
-    #
-    # # Collect PG Dump
-    # pg_dump = collect_data_source(
-    #     getattr(args, "ceph_pg_dump", None),
-    #     ["pg_info-dump.json"],
-    #     "ceph pg dump -f json",
-    #     "PG dump",
-    #     verbose,
-    # )
-    # if pg_dump:
-    #     data.add_ceph_pg_dump(pg_dump)
-    # else:
-    #     warnings.append(
-    #         "PG dump analysis skipped - unable to collect placement group data"
-    #     )
 
     return data, warnings
 
