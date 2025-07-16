@@ -493,7 +493,7 @@ class CopilotDaemon:
     def _get_ceph_fsid(self) -> str:
         """Get ceph FSID"""
         try:
-            result = jsoncmd("ceph fsid --format=json")
+            result = jsoncmd("ceph fsid --format=json", skip_confirmation=True)
             return result["fsid"]
         except KeyError as e:
             self.logger.error(f"Missing 'fsid' key in Ceph command result: {e}")
@@ -508,7 +508,7 @@ class CopilotDaemon:
     def _get_ceph_health(self) -> str:
         """Get Ceph cluster health status"""
         try:
-            result = jsoncmd("ceph health --format=json")
+            result = jsoncmd("ceph health --format=json", skip_confirmation=True)
             return result["status"]
         except KeyError as e:
             self.logger.error(f"Missing 'status' key in Ceph health result: {e}")
