@@ -558,6 +558,14 @@ def check_report_capacity_overfull(result, data) -> None:
     humanize.naturalsize(osd_sum["kb"] * 1024, binary=True)
     humanize.naturalsize(osd_sum["kb_used"] * 1024, binary=True)
 
+    if osd_sum["kb"] == 0:
+        passfail = "WARN"
+        summary = "Unable to calculate cluster capacity"
+        detail.append("Cluster capacity data is unavailable or zero.")
+        recommend.append("Check cluster status and ensure OSDs are properly configured.")
+        result.add_check_result(section, check, passfail, summary, detail, recommend)
+        return
+
     percent_used = osd_sum["kb_used"] / osd_sum["kb"]
 
     if percent_used > 0.9:
@@ -1389,10 +1397,18 @@ def check_report_host_memory(result, data) -> None:
 
     if passfail == "PASS":
         summary = "All OSD hosts have enough memory"
-        detail.append(
-            f"Minimum {humanize.naturalsize(MEM_PER_OSD_WARNING * len(host['osds']), binary=True)} "
-            f"memory per OSD is recommended for expected performance.",
-        )
+        if hosts:
+            # Use the first host's OSD count as representative
+            sample_host = next(iter(hosts.values()))
+            detail.append(
+                f"Minimum {humanize.naturalsize(MEM_PER_OSD_WARNING * len(sample_host['osds']), binary=True)} "
+                f"memory per OSD is recommended for expected performance.",
+            )
+        else:
+            detail.append(
+                f"Minimum {humanize.naturalsize(MEM_PER_OSD_WARNING, binary=True)} "
+                f"memory per OSD is recommended for expected performance.",
+            )
     else:
         how_many = "All" if len(hosts) == failed_hosts_count else "Some"
         summary = f"{how_many} OSD hosts have insufficient memory"
@@ -1603,7 +1619,21 @@ def check_report_osd_cluster_network(result, data) -> None:
     section = "OSD Health"
     check = "Dedicated Cluster Network"
 
-    first = report["osdmap"]["osds"][0]
+    # Check if there are any OSDs in the osdmap
+    osds = report["osdmap"]["osds"]
+    if not osds:
+        passfail = "WARN"
+        summary = "No OSDs found in cluster"
+        detail = [
+            "No OSDs found in osdmap. Unable to check network configuration."
+        ]
+        recommend = [
+            "Ensure OSDs are properly configured and running."
+        ]
+        result.add_check_result(section, check, passfail, summary, detail, recommend)
+        return
+
+    first = osds[0]
     public_ip = first["public_addr"].split(":")[0]
     cluster_ip = first["cluster_addr"].split(":")[0]
     if public_ip == cluster_ip:
