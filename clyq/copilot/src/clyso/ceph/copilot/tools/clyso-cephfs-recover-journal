@@ -1,0 +1,97 @@
+#!/bin/sh -e
+#
+# This script will recover dentry recovery from journal and reset it
+# using a procedure described in:
+#
+# https://docs.ceph.com/en/quincy/cephfs/disaster-recovery-experts/#dentry-recovery-from-journal
+#
+
+#
+# Globals
+#
+CEPHFS=
+RANKS=
+LOGDIR=recover_journal_logs
+BACKUP_JOURNAL="${BACKUP_JOURNAL:-}"
+
+
+#
+# Functions
+#
+
+usage() {
+    echo "$0 <cephfs> [ranks ...]"
+}
+
+set_ranks() {
+    local nranks rank
+
+    nranks=$(ceph fs get ${CEPHFS} --format json |
+		 jq '.mdsmap.max_mds')
+
+    if [ -n "${RANKS}" ]; then
+	for rank in ${RANKS}; do
+	    if [ "${rank}" -lt 0 ] || [ "${rank}" -ge "${nranks}" ]; then
+		echo "invalid rank: ${rank}" 2>&2
+		return 1
+	    fi
+	done
+
+	return 0
+    fi
+
+    RANKS=$(seq 0 $((nranks - 1)))
+}
+
+
+#
+# Main
+#
+
+case $1 in
+    --help|-h)
+	usage
+	exit 0
+        ;;
+    "")
+	usage >&2
+	exit 1
+        ;;
+    *)
+        CEPHFS=$1
+	shift
+        ;;
+esac
+
+RANKS="$@"
+set_ranks
+
+if [ -n "${BACKUP_JOURNAL}" ]; then
+    echo "BACKING JOURNAL UP TO ${BACKUP_JOURNAL}" >&2
+    for rank in ${RANKS}; do
+	echo "Backing journal up for rank ${rank}" 2>&2
+        cephfs-journal-tool --rank=${CEPHFS}:${rank} journal export \
+			    "${BACKUP_JOURNAL}".${rank}
+    done
+    echo "BACKING JOURNAL UP DONE" >&2
+fi
+
+echo "RECOVERING JOURNAL DENTRIES" >&2
+
+for rank in ${RANKS}; do
+
+    # try to recover whatever is possible from journal and reset it
+    cephfs-journal-tool --rank=${CEPHFS}:${rank} event recover_dentries summary || true
+done
+
+echo "RECOVERING JOURNAL DENTRIES DONE" >&2
+
+echo "RESETTING JOURNAL" >&2
+
+for rank in ${RANKS}; do
+    cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force
+done
+
+echo "RESETTING JOURNAL DONE" >&2
+
+echo "OK" >&2

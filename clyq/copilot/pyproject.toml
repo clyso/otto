@@ -50,6 +50,7 @@ where = ["src"]
   "tools/cern/",
   "tools/clyso-ceph-diagnostics-collect",
   "tools/clyso-cephfs-recover-metadata",
+  "tools/clyso-cephfs-recover-journal",
   "tools/clyso-cephfs-session-top",
   "tools/clyso-rados-bulk",
   "tools/clyso-rgw-find-missing",
