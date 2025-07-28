@@ -16,11 +16,11 @@ bugs:
     affected_versions:
       - 16.2.[11-12]
   - name: Squid deployed OSDs are crashing
-    description: The issue affects only newly deployed OSDs using Squid, while previously deployed OSDs run fine. It is likely caused by the Elastic Shared Blob implementation introduced in this PR https://github.com/ceph/ceph/pull/53178, and ceph-bluestore-tool repair cannot fix it.
+    description: OSDs created in v19 may crash. See https://tracker.ceph.com/issues/70390. The issue affects only newly deployed OSDs using Squid, while previously deployed OSDs run fine. It is likely caused by the Elastic Shared Blob implementation introduced in this PR https://github.com/ceph/ceph/pull/53178, and ceph-bluestore-tool repair cannot fix it.
     severity: critical
     recommendation: For now, run "ceph config set osd bluestore_elastic_shared_blobs 0" on any Squid cluster before adding new OSDs. Unfortunately, this will not help OSDs already deployed in Squid—the only known fix for them is redeployment.
     affected_versions:
-      - 19.*.*
+      - 19.2.*
   - name: BlueStore Potential Corruption
     description: Some versions of Ceph were released with a bug that may cause OSDs to crash and corrupt the on-disk data. Upstream ticket https://tracker.ceph.com/issues/69764
     severity: critical
