@@ -29,3 +29,15 @@ bugs:
       - 17.2.8
       - 18.2.5
       - 18.2.6
+  - name: S3 DeleteBucketLifecycle Does Not Delete Config
+    description:
+      The S3 DeleteBucketLifecycle API call fails to actually delete the
+      lifecycle configuration from the bucket, causing S3 compatibility issues.
+      This is a regression introduced in squid 19.2.3. See
+      https://tracker.ceph.com/issues/71083.
+    severity: medium
+    recommendation:
+      Upgrade to a fixed version when available, or avoid using
+      DeleteBucketLifecycle API in affected versions.
+    affected_versions:
+      - 19.2.3
