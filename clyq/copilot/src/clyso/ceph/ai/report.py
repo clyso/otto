@@ -565,7 +565,9 @@ def check_report_capacity_overfull(result, data) -> None:
         passfail = "WARN"
         summary = "Unable to calculate cluster capacity"
         detail.append("Cluster capacity data is unavailable or zero.")
-        recommend.append("Check cluster status and ensure OSDs are properly configured.")
+        recommend.append(
+            "Check cluster status and ensure OSDs are properly configured."
+        )
         result.add_check_result(section, check, passfail, summary, detail, recommend)
         return
 
@@ -1627,12 +1629,8 @@ def check_report_osd_cluster_network(result, data) -> None:
     if not osds:
         passfail = "WARN"
         summary = "No OSDs found in cluster"
-        detail = [
-            "No OSDs found in osdmap. Unable to check network configuration."
-        ]
-        recommend = [
-            "Ensure OSDs are properly configured and running."
-        ]
+        detail = ["No OSDs found in osdmap. Unable to check network configuration."]
+        recommend = ["Ensure OSDs are properly configured and running."]
         result.add_check_result(section, check, passfail, summary, detail, recommend)
         return
 
