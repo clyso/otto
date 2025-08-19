@@ -1,0 +1,46 @@
+pre-commit:
+  jobs:
+    - name: markdown
+      group:
+        piped: false
+        jobs:
+          - name: check 'yarn' exists
+            run: yarn --version >/dev/null
+            fail_text: "'yarn' not installed"
+          - name: setup node environment
+            run: yarn add -D prettier pretty-quick markdownlint-cli2
+          - name: lint markdown
+            glob: "*.md"
+            run: yarn markdownlint-cli2
+          - name: check markdown formatting
+            glob: "*.md"
+            run: yarn pretty-quick --staged --no-restage
+
+    - name: shell script
+      group:
+        piped: true
+        jobs:
+          - name: check 'go' exists
+            run: go version >/dev/null
+            fail_text: "Go not installed"
+          - name: setup shfmt
+            env:
+              GOPATH: $PWD/.go
+            run: |
+              mkdir $GOPATH 2>/dev/null || true && \
+              go install mvdan.cc/sh/v3/cmd/shfmt@latest && \
+              chmod -R +x $GOPATH
+          - name: check shell formatting
+            glob: "*.sh"
+            run: $PWD/.go/bin/shfmt -w -s {staged_files}
+
+    - name: python
+      group:
+        parallel: true
+        jobs:
+          - name: python linting
+            run: "ruff check --statistics --select ALL || true"
+          - name: python formatting
+            run: ruff format --check
+          - name: python type checking
+            run: basedpyright .

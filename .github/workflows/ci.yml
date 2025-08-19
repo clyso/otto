@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  GIT_DEPTH: 50
+
+jobs:
+  run_tests:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/astral-sh/uv:python3.11-alpine
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ env.GIT_DEPTH }}
+
+      - name: Install dependencies
+        run: |
+          apk add nmap-ncat
+          apk add bash
+          apk add git
+          git config --global --add safe.directory .
+
+      - name: Setup Python environment and run tests
+        run: |
+          uv --no-cache venv
+          source .venv/bin/activate
+          ./run_tests.sh
+
+      - name: Generate version
+        run: |
+          git describe --tags --long --always | awk -F'-' '{ printf "%s+g%s.d%s\n", $1, $3, strftime("%Y%m%d") }' > GIT_VERSION
+
+      - name: Upload version artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: git-version
+          path: GIT_VERSION
+
+  build_rpm:
+    runs-on: ubuntu-latest
+    needs: run_tests
+    container:
+      image: rockylinux:9
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ env.GIT_DEPTH }}
+
+      - name: Download version artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: git-version
+
+      - name: Install dependencies
+        run: |
+          dnf install -y epel-release
+          dnf config-manager --enable crb
+          dnf install -y git rpm-build rpmdevtools python3-devel
+          curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/bin UV_DISABLE_UPDATE=1 UV_NO_MODIFY_PATH=1 /bin/sh
+
+      - name: Build RPM
+        run: ./build_rpm.sh
+
+      - name: Test RPM installation
+        run: |
+          dnf install -y ./ceph-copilot-*.x86_64.rpm
+          ceph-copilot --help
+          ceph-copilot --version
+          ceph-copilot toolkit list
+
+  build_binary:
+    runs-on: ubuntu-latest
+    needs: run_tests
+    container:
+      image: centos:8
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ env.GIT_DEPTH }}
+
+      - name: Download version artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: git-version
+
+      - name: Setup CentOS repositories
+        run: |
+          cd /etc/yum.repos.d/
+          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+
+      - name: Install dependencies
+        run: |
+          yum install -y curl git
+          curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/bin UV_DISABLE_UPDATE=1 UV_NO_MODIFY_PATH=1 /bin/sh
+
+      - name: Build binary
+        run: ./build.sh
+
+      - name: Test binary
+        run: |
+          ./dist/ceph-copilot --version
+          ./dist/ceph-copilot --help
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-dist
+          path: dist/
+          retention-days: 1
+
+  test_binary:
+    runs-on: ubuntu-latest
+    needs: build_binary
+    container:
+      image: rockylinux:9
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ env.GIT_DEPTH }}
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-dist
+          path: dist/
+
+      - name: Run binary tests
+        run: |
+          chmod +x tests/test_binary.sh
+          ./tests/test_binary.sh

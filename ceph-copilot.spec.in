@@ -1,0 +1,37 @@
+%define name ceph-copilot
+%define version @VERSION@
+%define release @RELEASE@
+
+Name: %{name}
+Version:%{version}
+Release: %{release}%{?dist}clyso 
+Summary: Clyso Ceph Copilot
+
+License: TBD
+URL: https://www.clyso.com/
+Source0: %{name}-%{version}.tar.bz2
+
+BuildArch: x86_64
+
+%description
+Clyso Ceph Copilot.
+
+%global debug_package %{nil}
+
+%prep
+%setup -q -n %{name}-%{version}
+
+%build
+
+%install
+install -m 755 -t %{buildroot}/%{_bindir} -D ceph-copilot
+
+%files
+%license LICENSE
+%doc README.md
+%{_bindir}/ceph-copilot
+
+%changelog
+
+* Sun Apr 20 2025 Joao Eduardo Luis <joao@clyso.com>
+- Package python binary instead of python sources
