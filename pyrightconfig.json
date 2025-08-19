@@ -1,0 +1,6 @@
+{
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "all",
+  "exclude": ["**/__pycache__", ".venv/", "**/build"],
+  "baselineFile": ".basedpyright/baseline.json"
+}

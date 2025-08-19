@@ -1,0 +1,63 @@
+[project]
+name = "ceph-copilot-monorepo"
+version = "0.0.0"
+description = "Monorepo containing ceph-copilot projects"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv.workspace]
+members = ["copilot"]
+
+[dependency-groups]
+dev = ["basedpyright>=1.29.0", "lefthook>=1.11.11", "ruff>=0.11.6"]
+
+[tool.ruff.lint]
+select = [
+  # pycodestyle
+  "E", # errors
+  "W", # warnings
+  # pyflakes
+  "F",
+  # pyupgrade
+  "UP",
+  # flake8-bugbear
+  "B",
+  # flake8-simplify
+  "SIM",
+  # isort
+  "I",
+  # pep8 naming
+  "N",
+  # pydocstyle
+  "D",
+  "D211",
+  "D213",
+  # ruff-specific
+  "RUF",
+  # tryceratops
+  "TRY",
+  # flake8-executable
+  "EXE",
+  # flake8-datetimez
+  "DTZ",
+  # flake8-copyright notice
+  "CPY",
+  # flake8-comprehensions
+  "C4",
+  # flake8-commas
+  "COM",
+  # flake8-blind-except
+  "BLE",
+  # flake8-bandit
+  "S",
+]
+ignore = [
+  "ANN",    # annotations
+  "D10",    # missing docstring in public modules, etc
+  "D203",   # mutually exclusive with D211
+  "D212",   # mutually exclusive with D213
+  "COM812", # ignore missing trailing comma
+  "CPY001", # missing copyright notice
+  "S101",   # use of assert
+]
