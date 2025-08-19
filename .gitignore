@@ -1,0 +1,13 @@
+__pycache__
+**/build
+*.egg-info
+**/.env
+dist/
+ceph-copilot.spec
+**/.venv
+*.rpm
+node_modules
+package.json
+yarn.lock
+.ruff_cache
+.go/

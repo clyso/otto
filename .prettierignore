@@ -1,0 +1,10 @@
+*.py
+*.toml
+*.json
+.editorconfig
+.basedpyright/baseline.json
+.venv
+tests/**/*.json
+copilot/src/clyso/ceph/copilot/tools/
+.go/
+__pycache__
