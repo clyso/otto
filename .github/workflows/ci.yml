@@ -2,9 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
     branches: [ main ]
+  pull_request:
 
 env:
   GIT_DEPTH: 50
@@ -42,6 +41,7 @@ jobs:
         with:
           name: git-version
           path: GIT_VERSION
+
 
   build_rpm:
     runs-on: ubuntu-latest
