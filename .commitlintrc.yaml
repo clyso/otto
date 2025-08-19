@@ -1,0 +1,3 @@
+commitlint:
+  rules:
+    body-empty: [0, "always"]

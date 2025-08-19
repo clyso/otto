@@ -1,0 +1,5 @@
+[*.sh]
+indent_style = space
+indent_size = 2
+indent_final_newline = true
+switch_case_indent = true
