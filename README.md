@@ -23,11 +23,6 @@ utilities. The repository is organized in the following fashion:
 
 - `copilot/`, containing the Copilot library
 - `copilot/src/clyso/ceph/copilot/`, containing the Ceph Copilot utility
-- `copilot_netcat`, a network server for Copilot
-- `copilot_rest_api`, a REST interface for Copilot and logic for the clyso
-  Analyzer
-- `copilot_backend` - wip modifications of copilot_rest_api
-- `copilot_config_diff` - a tool with a REST API for comparing Ceph configuration files 
 
 ### Prerequisites
 
@@ -189,10 +184,6 @@ Use --verbose for details and recommendations
 
 <!-- markdownlint-enable -->
 
-### Restful API
-
-...
-
 ### Testing rpm builds using podman
 
 Assume podman is setup and works correctly. Being in the copilot source repo
@@ -228,55 +219,6 @@ docker pull harbor.clyso.com/ces/copilot/copilot:latest
 ```
 
 [_copilot_download_url]: https://get.copilot.clyso.com
-
-## Agent Daemon
-
-The Ceph Copilot Agent Daemon is a background service that runs on your Ceph
-cluster nodes to enable remote management and monitoring capabilities. It
-establishes a secure connection with the Clyso Copilot service and handles
-command execution, health monitoring, and webhook registration.
-
-### Prerequisites
-
-Before setting up the agent daemon, ensure you have:
-
-1. A running Ceph cluster
-2. Python 3.11 or later installed
-3. Access to the webhook
-
-### Configuration
-
-The agent daemon requires a base64-encoded secret for authentication with the
-Clyso Copilot service. You can provide the secret directly when running the
-daemon:
-
-```bash
-ceph-copilot agent-daemon --secret="BASE64_ENCODED_SECRET"
-```
-
-The secret should be a base64-encoded JSON string containing:
-
-```json
-{
-  "url": "https://your-copilot-service-url",
-  "clusterId": "your-cluster-id",
-  "password": "your-secret-password"
-}
-```
-
-To create the base64-encoded secret:
-
-```bash
-echo '{"url": "https://your-copilot-service-url", "clusterId": "your-cluster-id", "password": "your-secret-password"}' | base64
-```
-
-### Running the Daemon
-
-Start the daemon with your base64-encoded secret:
-
-```bash
-sudo ceph-copilot agent-daemon --secret="BASE64_ENCODED_SECRET"
-```
 
 ## Roadmap
 
