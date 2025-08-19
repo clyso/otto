@@ -1,0 +1,19 @@
+{
+  "fix": true,
+  "config": {
+    "default": true,
+    "MD013": {
+      "stern": true,
+    },
+    "MD033": false,
+  },
+  "ignores": [
+    "node_modules",
+    "copilot/src/clyso/ceph/copilot/tools",
+    ".go",
+    ".venv",
+    ".ruff_cache",
+    ".pytest_cache",
+  ],
+  "globs": ["**/*.md"],
+}
