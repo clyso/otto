@@ -1,0 +1,3686 @@
+{
+    "cluster_fingerprint": "6b1f87f6-32be-4b66-a7f8-e87803cfee7b",
+    "version": "19.3.0-4619-g2c345e1c",
+    "commit": "2c345e1c2501ad3e94a4042a112d076bf6f888aa",
+    "timestamp": "2024-09-22T18:58:27.092502+0000",
+    "tag": "",
+    "health": {
+        "status": "HEALTH_ERR",
+        "checks": {
+            "CEPHADM_FAILED_DAEMON": {
+                "severity": "HEALTH_WARN",
+                "summary": {
+                    "message": "1 failed cephadm daemon(s)",
+                    "count": 1
+                },
+                "detail": [
+                    {
+                        "message": "daemon osd.0 on cph-test-josh-1 is in error state"
+                    }
+                ],
+                "muted": false
+            },
+            "MON_DISK_LOW": {
+                "severity": "HEALTH_WARN",
+                "summary": {
+                    "message": "mon cph-test-josh-1 is low on available space",
+                    "count": 1
+                },
+                "detail": [
+                    {
+                        "message": "mon.cph-test-josh-1 has 24% avail"
+                    }
+                ],
+                "muted": false
+            },
+            "OSD_UNREACHABLE": {
+                "severity": "HEALTH_ERR",
+                "summary": {
+                    "message": "11 osds(s) are not reachable",
+                    "count": 11
+                },
+                "detail": [
+                    {
+                        "message": "osd.1's public address is not in '2a01:4f8:d0::/48' subnet"
+                    },
+                    {
+                        "message": "osd.2's public address is not in '2a01:4f8:d0::/48' subnet"
+                    },
+                    {
+                        "message": "osd.3's public address is not in '2a01:4f8:d0::/48' subnet"
+                    },
+                    {
+                        "message": "osd.4's public address is not in '2a01:4f8:d0::/48' subnet"
+                    },
+                    {
+                        "message": "osd.5's public address is not in '2a01:4f8:d0::/48' subnet"
+                    },
+                    {
+                        "message": "osd.6's public address is not in '2a01:4f8:d0::/48' subnet"
+                    },
+                    {
+                        "message": "osd.7's public address is not in '2a01:4f8:d0::/48' subnet"
+                    },
+                    {
+                        "message": "osd.8's public address is not in '2a01:4f8:d0::/48' subnet"
+                    },
+                    {
+                        "message": "osd.9's public address is not in '2a01:4f8:d0::/48' subnet"
+                    },
+                    {
+                        "message": "osd.10's public address is not in '2a01:4f8:d0::/48' subnet"
+                    },
+                    {
+                        "message": "osd.11's public address is not in '2a01:4f8:d0::/48' subnet"
+                    }
+                ],
+                "muted": false
+            },
+            "POOL_TOO_FEW_PGS": {
+                "severity": "HEALTH_WARN",
+                "summary": {
+                    "message": "1 pools have too few placement groups",
+                    "count": 1
+                },
+                "detail": [
+                    {
+                        "message": "Pool cephfs.cephfs.meta has 16 placement groups, should have 256"
+                    }
+                ],
+                "muted": false
+            },
+            "POOL_TOO_MANY_PGS": {
+                "severity": "HEALTH_WARN",
+                "summary": {
+                    "message": "1 pools have too many placement groups",
+                    "count": 1
+                },
+                "detail": [
+                    {
+                        "message": "Pool cephfs.cephfs.data has 512 placement groups, should have 256"
+                    }
+                ],
+                "muted": false
+            }
+        },
+        "mutes": []
+    },
+    "monmap_first_committed": 1,
+    "monmap_last_committed": 3,
+    "monmap": {
+        "epoch": 3,
+        "fsid": "1f0177f6-66fb-11ef-8000-d97c6183ef66",
+        "modified": "2024-08-30T20:13:09.627662Z",
+        "created": "2024-08-30T20:10:24.303952Z",
+        "min_mon_release": 19,
+        "min_mon_release_name": "squid",
+        "election_strategy": 1,
+        "disallowed_leaders: ": "",
+        "stretch_mode": false,
+        "tiebreaker_mon": "",
+        "removed_ranks: ": "",
+        "features": {
+            "persistent": [
+                "kraken",
+                "luminous",
+                "mimic",
+                "osdmap-prune",
+                "nautilus",
+                "octopus",
+                "pacific",
+                "elector-pinging",
+                "quincy",
+                "reef",
+                "squid"
+            ],
+            "optional": []
+        },
+        "mons": [
+            {
+                "rank": 0,
+                "name": "cph-test-josh-1",
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:3300",
+                            "nonce": 0
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6789",
+                            "nonce": 0
+                        }
+                    ]
+                },
+                "addr": "[2a01:4f8:d0:4401:3::27]:6789/0",
+                "public_addr": "[2a01:4f8:d0:4401:3::27]:6789/0",
+                "priority": 0,
+                "weight": 0,
+                "crush_location": "{}"
+            },
+            {
+                "rank": 1,
+                "name": "cph-test-josh-2",
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:3300",
+                            "nonce": 0
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6789",
+                            "nonce": 0
+                        }
+                    ]
+                },
+                "addr": "[2a01:4f8:d0:4401:3::28]:6789/0",
+                "public_addr": "[2a01:4f8:d0:4401:3::28]:6789/0",
+                "priority": 0,
+                "weight": 0,
+                "crush_location": "{}"
+            },
+            {
+                "rank": 2,
+                "name": "cph-test-josh-3",
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:3300",
+                            "nonce": 0
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6789",
+                            "nonce": 0
+                        }
+                    ]
+                },
+                "addr": "[2a01:4f8:d0:4401:3::29]:6789/0",
+                "public_addr": "[2a01:4f8:d0:4401:3::29]:6789/0",
+                "priority": 0,
+                "weight": 0,
+                "crush_location": "{}"
+            }
+        ]
+    },
+    "quorum": [
+        0,
+        1,
+        2
+    ],
+    "osdmap": {
+        "epoch": 401,
+        "fsid": "1f0177f6-66fb-11ef-8000-d97c6183ef66",
+        "created": "2024-08-30T20:10:27.509277+0000",
+        "modified": "2024-09-22T13:11:33.961714+0000",
+        "last_up_change": "2024-09-13T22:34:58.309964+0000",
+        "last_in_change": "2024-09-13T22:45:00.356169+0000",
+        "flags": "sortbitwise,recovery_deletes,purged_snapdirs,pglog_hardlimit",
+        "flags_num": 5799936,
+        "flags_set": [
+            "pglog_hardlimit",
+            "purged_snapdirs",
+            "recovery_deletes",
+            "sortbitwise"
+        ],
+        "crush_version": 38,
+        "full_ratio": 0.94999998807907104,
+        "backfillfull_ratio": 0.89999997615814209,
+        "nearfull_ratio": 0.85000002384185791,
+        "cluster_snapshot": "",
+        "pool_max": 3,
+        "max_osd": 12,
+        "require_min_compat_client": "luminous",
+        "min_compat_client": "luminous",
+        "require_osd_release": "squid",
+        "allow_crimson": false,
+        "pools": [
+            {
+                "pool": 1,
+                "pool_name": ".mgr",
+                "create_time": "2024-08-30T20:14:22.290187+0000",
+                "flags": 1,
+                "flags_names": "hashpspool",
+                "type": 1,
+                "size": 3,
+                "min_size": 2,
+                "crush_rule": 0,
+                "peering_crush_bucket_count": 0,
+                "peering_crush_bucket_target": 0,
+                "peering_crush_bucket_barrier": 0,
+                "peering_crush_bucket_mandatory_member": 2147483647,
+                "is_stretch_pool": false,
+                "object_hash": 2,
+                "pg_autoscale_mode": "on",
+                "pg_num": 1,
+                "pg_placement_num": 1,
+                "pg_placement_num_target": 1,
+                "pg_num_target": 1,
+                "pg_num_pending": 1,
+                "last_pg_merge_meta": {
+                    "source_pgid": "0.0",
+                    "ready_epoch": 0,
+                    "last_epoch_started": 0,
+                    "last_epoch_clean": 0,
+                    "source_version": "0'0",
+                    "target_version": "0'0"
+                },
+                "last_change": "26",
+                "last_force_op_resend": "0",
+                "last_force_op_resend_prenautilus": "0",
+                "last_force_op_resend_preluminous": "0",
+                "auid": 0,
+                "snap_mode": "selfmanaged",
+                "snap_seq": 0,
+                "snap_epoch": 0,
+                "pool_snaps": [],
+                "removed_snaps": "[]",
+                "quota_max_bytes": 0,
+                "quota_max_objects": 0,
+                "tiers": [],
+                "tier_of": -1,
+                "read_tier": -1,
+                "write_tier": -1,
+                "cache_mode": "none",
+                "target_max_bytes": 0,
+                "target_max_objects": 0,
+                "cache_target_dirty_ratio_micro": 400000,
+                "cache_target_dirty_high_ratio_micro": 600000,
+                "cache_target_full_ratio_micro": 800000,
+                "cache_min_flush_age": 0,
+                "cache_min_evict_age": 0,
+                "erasure_code_profile": "",
+                "hit_set_params": {
+                    "type": "none"
+                },
+                "hit_set_period": 0,
+                "hit_set_count": 0,
+                "use_gmt_hitset": true,
+                "min_read_recency_for_promote": 0,
+                "min_write_recency_for_promote": 0,
+                "hit_set_grade_decay_rate": 0,
+                "hit_set_search_last_n": 0,
+                "grade_table": [],
+                "stripe_width": 0,
+                "expected_num_objects": 0,
+                "fast_read": false,
+                "options": {
+                    "pg_num_max": 32,
+                    "pg_num_min": 1
+                },
+                "application_metadata": {
+                    "mgr": {}
+                },
+                "read_balance": {
+                    "score_type": "Fair distribution",
+                    "score_acting": 12,
+                    "score_stable": 12,
+                    "optimal_score": 0.25,
+                    "raw_score_acting": 3,
+                    "raw_score_stable": 3,
+                    "primary_affinity_weighted": 0.99999988079071045,
+                    "average_primary_affinity": 1,
+                    "average_primary_affinity_weighted": 1
+                }
+            },
+            {
+                "pool": 2,
+                "pool_name": "cephfs.cephfs.meta",
+                "create_time": "2024-09-09T17:16:14.177649+0000",
+                "flags": 1,
+                "flags_names": "hashpspool",
+                "type": 1,
+                "size": 3,
+                "min_size": 2,
+                "crush_rule": 0,
+                "peering_crush_bucket_count": 0,
+                "peering_crush_bucket_target": 0,
+                "peering_crush_bucket_barrier": 0,
+                "peering_crush_bucket_mandatory_member": 2147483647,
+                "is_stretch_pool": false,
+                "object_hash": 2,
+                "pg_autoscale_mode": "warn",
+                "pg_num": 16,
+                "pg_placement_num": 16,
+                "pg_placement_num_target": 16,
+                "pg_num_target": 16,
+                "pg_num_pending": 16,
+                "last_pg_merge_meta": {
+                    "source_pgid": "0.0",
+                    "ready_epoch": 0,
+                    "last_epoch_started": 0,
+                    "last_epoch_clean": 0,
+                    "source_version": "0'0",
+                    "target_version": "0'0"
+                },
+                "last_change": "212",
+                "last_force_op_resend": "0",
+                "last_force_op_resend_prenautilus": "0",
+                "last_force_op_resend_preluminous": "164",
+                "auid": 0,
+                "snap_mode": "selfmanaged",
+                "snap_seq": 0,
+                "snap_epoch": 0,
+                "pool_snaps": [],
+                "removed_snaps": "[]",
+                "quota_max_bytes": 0,
+                "quota_max_objects": 0,
+                "tiers": [],
+                "tier_of": -1,
+                "read_tier": -1,
+                "write_tier": -1,
+                "cache_mode": "none",
+                "target_max_bytes": 0,
+                "target_max_objects": 0,
+                "cache_target_dirty_ratio_micro": 400000,
+                "cache_target_dirty_high_ratio_micro": 600000,
+                "cache_target_full_ratio_micro": 800000,
+                "cache_min_flush_age": 0,
+                "cache_min_evict_age": 0,
+                "erasure_code_profile": "",
+                "hit_set_params": {
+                    "type": "none"
+                },
+                "hit_set_period": 0,
+                "hit_set_count": 0,
+                "use_gmt_hitset": true,
+                "min_read_recency_for_promote": 0,
+                "min_write_recency_for_promote": 0,
+                "hit_set_grade_decay_rate": 0,
+                "hit_set_search_last_n": 0,
+                "grade_table": [],
+                "stripe_width": 0,
+                "expected_num_objects": 0,
+                "fast_read": false,
+                "options": {
+                    "pg_autoscale_bias": 4,
+                    "pg_num_min": 16,
+                    "recovery_priority": 5,
+                    "target_size_ratio": 0.29999999999999999
+                },
+                "application_metadata": {
+                    "cephfs": {
+                        "metadata": "cephfs"
+                    }
+                },
+                "read_balance": {
+                    "score_type": "Fair distribution",
+                    "score_acting": 2.2400000095367432,
+                    "score_stable": 2.2400000095367432,
+                    "optimal_score": 0.92000001668930054,
+                    "raw_score_acting": 2.059999942779541,
+                    "raw_score_stable": 2.059999942779541,
+                    "primary_affinity_weighted": 0.99999988079071045,
+                    "average_primary_affinity": 1,
+                    "average_primary_affinity_weighted": 1
+                }
+            },
+            {
+                "pool": 3,
+                "pool_name": "cephfs.cephfs.data",
+                "create_time": "2024-09-09T17:16:14.478873+0000",
+                "flags": 131073,
+                "flags_names": "hashpspool,bulk",
+                "type": 1,
+                "size": 3,
+                "min_size": 2,
+                "crush_rule": 0,
+                "peering_crush_bucket_count": 0,
+                "peering_crush_bucket_target": 0,
+                "peering_crush_bucket_barrier": 0,
+                "peering_crush_bucket_mandatory_member": 2147483647,
+                "is_stretch_pool": false,
+                "object_hash": 2,
+                "pg_autoscale_mode": "warn",
+                "pg_num": 512,
+                "pg_placement_num": 512,
+                "pg_placement_num_target": 512,
+                "pg_num_target": 512,
+                "pg_num_pending": 512,
+                "last_pg_merge_meta": {
+                    "source_pgid": "0.0",
+                    "ready_epoch": 0,
+                    "last_epoch_started": 0,
+                    "last_epoch_clean": 0,
+                    "source_version": "0'0",
+                    "target_version": "0'0"
+                },
+                "last_change": "206",
+                "last_force_op_resend": "0",
+                "last_force_op_resend_prenautilus": "0",
+                "last_force_op_resend_preluminous": "176",
+                "auid": 0,
+                "snap_mode": "selfmanaged",
+                "snap_seq": 0,
+                "snap_epoch": 0,
+                "pool_snaps": [],
+                "removed_snaps": "[]",
+                "quota_max_bytes": 0,
+                "quota_max_objects": 0,
+                "tiers": [],
+                "tier_of": -1,
+                "read_tier": -1,
+                "write_tier": -1,
+                "cache_mode": "none",
+                "target_max_bytes": 0,
+                "target_max_objects": 0,
+                "cache_target_dirty_ratio_micro": 400000,
+                "cache_target_dirty_high_ratio_micro": 600000,
+                "cache_target_full_ratio_micro": 800000,
+                "cache_min_flush_age": 0,
+                "cache_min_evict_age": 0,
+                "erasure_code_profile": "",
+                "hit_set_params": {
+                    "type": "none"
+                },
+                "hit_set_period": 0,
+                "hit_set_count": 0,
+                "use_gmt_hitset": true,
+                "min_read_recency_for_promote": 0,
+                "min_write_recency_for_promote": 0,
+                "hit_set_grade_decay_rate": 0,
+                "hit_set_search_last_n": 0,
+                "grade_table": [],
+                "stripe_width": 0,
+                "expected_num_objects": 0,
+                "fast_read": false,
+                "options": {
+                    "target_size_ratio": 0.97999999999999998
+                },
+                "application_metadata": {
+                    "cephfs": {
+                        "data": "cephfs"
+                    }
+                },
+                "read_balance": {
+                    "score_type": "Fair distribution",
+                    "score_acting": 1.2400000095367432,
+                    "score_stable": 1.2400000095367432,
+                    "optimal_score": 0.92000001668930054,
+                    "raw_score_acting": 1.1399999856948853,
+                    "raw_score_stable": 1.1399999856948853,
+                    "primary_affinity_weighted": 0.99999988079071045,
+                    "average_primary_affinity": 1,
+                    "average_primary_affinity_weighted": 1
+                }
+            }
+        ],
+        "osds": [
+            {
+                "osd": 0,
+                "uuid": "7d88cccd-7f50-4ee1-8c62-c6d9c10caa99",
+                "up": 0,
+                "in": 0,
+                "weight": 0,
+                "primary_affinity": 1,
+                "last_clean_begin": 238,
+                "last_clean_end": 286,
+                "up_from": 302,
+                "up_thru": 302,
+                "down_at": 321,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6808",
+                            "nonce": 1468464221
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6811",
+                            "nonce": 1468464221
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6814",
+                            "nonce": 1468464221
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6816",
+                            "nonce": 1468464221
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6822",
+                            "nonce": 1468464221
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6823",
+                            "nonce": 1468464221
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6819",
+                            "nonce": 1468464221
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6821",
+                            "nonce": 1468464221
+                        }
+                    ]
+                },
+                "public_addr": "[2a01:4f8:d0:4401:3::27]:6811/1468464221",
+                "cluster_addr": "[2a01:4f8:d0:4401:3::27]:6816/1468464221",
+                "heartbeat_back_addr": "[2a01:4f8:d0:4401:3::27]:6823/1468464221",
+                "heartbeat_front_addr": "[2a01:4f8:d0:4401:3::27]:6821/1468464221",
+                "state": [
+                    "autoout",
+                    "exists"
+                ]
+            },
+            {
+                "osd": 1,
+                "uuid": "86c3a603-646c-4499-946c-860874e2387c",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 98,
+                "last_clean_end": 239,
+                "up_from": 274,
+                "up_thru": 323,
+                "down_at": 240,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6816",
+                            "nonce": 2398169567
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6817",
+                            "nonce": 2398169567
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6818",
+                            "nonce": 2398169567
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6819",
+                            "nonce": 2398169567
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6822",
+                            "nonce": 2398169567
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6823",
+                            "nonce": 2398169567
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6820",
+                            "nonce": 2398169567
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6821",
+                            "nonce": 2398169567
+                        }
+                    ]
+                },
+                "public_addr": "[2a01:4f8:d0:4401:3::29]:6817/2398169567",
+                "cluster_addr": "[2a01:4f8:d0:4401:3::29]:6819/2398169567",
+                "heartbeat_back_addr": "[2a01:4f8:d0:4401:3::29]:6823/2398169567",
+                "heartbeat_front_addr": "[2a01:4f8:d0:4401:3::29]:6821/2398169567",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 2,
+                "uuid": "b6040e76-5555-4938-879b-7587bafacfb0",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 100,
+                "last_clean_end": 243,
+                "up_from": 261,
+                "up_thru": 323,
+                "down_at": 244,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6800",
+                            "nonce": 217956382
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6801",
+                            "nonce": 217956382
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6802",
+                            "nonce": 217956382
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6803",
+                            "nonce": 217956382
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6806",
+                            "nonce": 217956382
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6807",
+                            "nonce": 217956382
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6804",
+                            "nonce": 217956382
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6805",
+                            "nonce": 217956382
+                        }
+                    ]
+                },
+                "public_addr": "[2a01:4f8:d0:4401:3::27]:6801/217956382",
+                "cluster_addr": "[2a01:4f8:d0:4401:3::27]:6803/217956382",
+                "heartbeat_back_addr": "[2a01:4f8:d0:4401:3::27]:6807/217956382",
+                "heartbeat_front_addr": "[2a01:4f8:d0:4401:3::27]:6805/217956382",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 3,
+                "uuid": "6af2ab14-7f6d-4529-86ae-f6260056f4d6",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 99,
+                "last_clean_end": 245,
+                "up_from": 271,
+                "up_thru": 323,
+                "down_at": 246,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6800",
+                            "nonce": 3362973164
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6801",
+                            "nonce": 3362973164
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6802",
+                            "nonce": 3362973164
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6803",
+                            "nonce": 3362973164
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6806",
+                            "nonce": 3362973164
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6807",
+                            "nonce": 3362973164
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6804",
+                            "nonce": 3362973164
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6805",
+                            "nonce": 3362973164
+                        }
+                    ]
+                },
+                "public_addr": "[2a01:4f8:d0:4401:3::29]:6801/3362973164",
+                "cluster_addr": "[2a01:4f8:d0:4401:3::29]:6803/3362973164",
+                "heartbeat_back_addr": "[2a01:4f8:d0:4401:3::29]:6807/3362973164",
+                "heartbeat_front_addr": "[2a01:4f8:d0:4401:3::29]:6805/3362973164",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 4,
+                "uuid": "ceb2cf10-13b4-4c1a-b6e6-18ad6a363086",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 99,
+                "last_clean_end": 249,
+                "up_from": 266,
+                "up_thru": 323,
+                "down_at": 250,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6809",
+                            "nonce": 185683642
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6810",
+                            "nonce": 185683642
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6812",
+                            "nonce": 185683642
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6813",
+                            "nonce": 185683642
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6818",
+                            "nonce": 185683642
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6820",
+                            "nonce": 185683642
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6815",
+                            "nonce": 185683642
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6817",
+                            "nonce": 185683642
+                        }
+                    ]
+                },
+                "public_addr": "[2a01:4f8:d0:4401:3::27]:6810/185683642",
+                "cluster_addr": "[2a01:4f8:d0:4401:3::27]:6813/185683642",
+                "heartbeat_back_addr": "[2a01:4f8:d0:4401:3::27]:6820/185683642",
+                "heartbeat_front_addr": "[2a01:4f8:d0:4401:3::27]:6817/185683642",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 5,
+                "uuid": "1e879736-6546-4ef2-a1e2-556de0c1dddf",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 99,
+                "last_clean_end": 247,
+                "up_from": 271,
+                "up_thru": 323,
+                "down_at": 248,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6808",
+                            "nonce": 3867822320
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6809",
+                            "nonce": 3867822320
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6810",
+                            "nonce": 3867822320
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6811",
+                            "nonce": 3867822320
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6814",
+                            "nonce": 3867822320
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6815",
+                            "nonce": 3867822320
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6812",
+                            "nonce": 3867822320
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6813",
+                            "nonce": 3867822320
+                        }
+                    ]
+                },
+                "public_addr": "[2a01:4f8:d0:4401:3::29]:6809/3867822320",
+                "cluster_addr": "[2a01:4f8:d0:4401:3::29]:6811/3867822320",
+                "heartbeat_back_addr": "[2a01:4f8:d0:4401:3::29]:6815/3867822320",
+                "heartbeat_front_addr": "[2a01:4f8:d0:4401:3::29]:6813/3867822320",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 6,
+                "uuid": "f79cc92a-f013-44f3-babc-2c46e732c002",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 99,
+                "last_clean_end": 251,
+                "up_from": 269,
+                "up_thru": 323,
+                "down_at": 252,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6824",
+                            "nonce": 2643030024
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6825",
+                            "nonce": 2643030024
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6826",
+                            "nonce": 2643030024
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6827",
+                            "nonce": 2643030024
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6830",
+                            "nonce": 2643030024
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6831",
+                            "nonce": 2643030024
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6828",
+                            "nonce": 2643030024
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6829",
+                            "nonce": 2643030024
+                        }
+                    ]
+                },
+                "public_addr": "[2a01:4f8:d0:4401:3::27]:6825/2643030024",
+                "cluster_addr": "[2a01:4f8:d0:4401:3::27]:6827/2643030024",
+                "heartbeat_back_addr": "[2a01:4f8:d0:4401:3::27]:6831/2643030024",
+                "heartbeat_front_addr": "[2a01:4f8:d0:4401:3::27]:6829/2643030024",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 7,
+                "uuid": "b11cd46e-a105-4acc-9047-d206062a4cad",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 99,
+                "last_clean_end": 253,
+                "up_from": 277,
+                "up_thru": 323,
+                "down_at": 254,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6824",
+                            "nonce": 2098959520
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6825",
+                            "nonce": 2098959520
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6826",
+                            "nonce": 2098959520
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6827",
+                            "nonce": 2098959520
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6830",
+                            "nonce": 2098959520
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6831",
+                            "nonce": 2098959520
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6828",
+                            "nonce": 2098959520
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6829",
+                            "nonce": 2098959520
+                        }
+                    ]
+                },
+                "public_addr": "[2a01:4f8:d0:4401:3::29]:6825/2098959520",
+                "cluster_addr": "[2a01:4f8:d0:4401:3::29]:6827/2098959520",
+                "heartbeat_back_addr": "[2a01:4f8:d0:4401:3::29]:6831/2098959520",
+                "heartbeat_front_addr": "[2a01:4f8:d0:4401:3::29]:6829/2098959520",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 8,
+                "uuid": "f9dd0997-8704-40d4-bebc-630b65ef6e7e",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 58,
+                "last_clean_end": 91,
+                "up_from": 100,
+                "up_thru": 323,
+                "down_at": 99,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6808",
+                            "nonce": 903598675
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6809",
+                            "nonce": 903598675
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6810",
+                            "nonce": 903598675
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6811",
+                            "nonce": 903598675
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6814",
+                            "nonce": 903598675
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6815",
+                            "nonce": 903598675
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6812",
+                            "nonce": 903598675
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6813",
+                            "nonce": 903598675
+                        }
+                    ]
+                },
+                "public_addr": "[2a01:4f8:d0:4401:3::28]:6809/903598675",
+                "cluster_addr": "[2a01:4f8:d0:4401:3::28]:6811/903598675",
+                "heartbeat_back_addr": "[2a01:4f8:d0:4401:3::28]:6815/903598675",
+                "heartbeat_front_addr": "[2a01:4f8:d0:4401:3::28]:6813/903598675",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 9,
+                "uuid": "635047d2-1203-483e-be0a-5bea0ad69469",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 60,
+                "last_clean_end": 91,
+                "up_from": 100,
+                "up_thru": 323,
+                "down_at": 99,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6816",
+                            "nonce": 2305611088
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6817",
+                            "nonce": 2305611088
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6818",
+                            "nonce": 2305611088
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6819",
+                            "nonce": 2305611088
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6822",
+                            "nonce": 2305611088
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6823",
+                            "nonce": 2305611088
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6820",
+                            "nonce": 2305611088
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6821",
+                            "nonce": 2305611088
+                        }
+                    ]
+                },
+                "public_addr": "[2a01:4f8:d0:4401:3::28]:6817/2305611088",
+                "cluster_addr": "[2a01:4f8:d0:4401:3::28]:6819/2305611088",
+                "heartbeat_back_addr": "[2a01:4f8:d0:4401:3::28]:6823/2305611088",
+                "heartbeat_front_addr": "[2a01:4f8:d0:4401:3::28]:6821/2305611088",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 10,
+                "uuid": "988a44fa-2eda-46a8-8fb5-3e3fcd8aa8c6",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 51,
+                "last_clean_end": 91,
+                "up_from": 100,
+                "up_thru": 323,
+                "down_at": 99,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6800",
+                            "nonce": 4069689014
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6801",
+                            "nonce": 4069689014
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6802",
+                            "nonce": 4069689014
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6803",
+                            "nonce": 4069689014
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6806",
+                            "nonce": 4069689014
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6807",
+                            "nonce": 4069689014
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6804",
+                            "nonce": 4069689014
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6805",
+                            "nonce": 4069689014
+                        }
+                    ]
+                },
+                "public_addr": "[2a01:4f8:d0:4401:3::28]:6801/4069689014",
+                "cluster_addr": "[2a01:4f8:d0:4401:3::28]:6803/4069689014",
+                "heartbeat_back_addr": "[2a01:4f8:d0:4401:3::28]:6807/4069689014",
+                "heartbeat_front_addr": "[2a01:4f8:d0:4401:3::28]:6805/4069689014",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 11,
+                "uuid": "677a84ed-00a8-4ec3-a00f-4e622085cfdb",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 54,
+                "last_clean_end": 91,
+                "up_from": 101,
+                "up_thru": 323,
+                "down_at": 100,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6824",
+                            "nonce": 1716897490
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6825",
+                            "nonce": 1716897490
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6826",
+                            "nonce": 1716897490
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6827",
+                            "nonce": 1716897490
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6830",
+                            "nonce": 1716897490
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6831",
+                            "nonce": 1716897490
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6828",
+                            "nonce": 1716897490
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6829",
+                            "nonce": 1716897490
+                        }
+                    ]
+                },
+                "public_addr": "[2a01:4f8:d0:4401:3::28]:6825/1716897490",
+                "cluster_addr": "[2a01:4f8:d0:4401:3::28]:6827/1716897490",
+                "heartbeat_back_addr": "[2a01:4f8:d0:4401:3::28]:6831/1716897490",
+                "heartbeat_front_addr": "[2a01:4f8:d0:4401:3::28]:6829/1716897490",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            }
+        ],
+        "osd_xinfo": [
+            {
+                "osd": 0,
+                "down_stamp": "2024-09-04T16:09:20.035197+0000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540719139924082687,
+                "old_weight": 65536,
+                "last_purged_snaps_scrub": "2024-09-13T15:23:16.799823+0000",
+                "dead_epoch": 320
+            },
+            {
+                "osd": 1,
+                "down_stamp": "2024-09-04T16:09:18.972712+0000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540719139924082687,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2024-09-22T01:24:12.708190+0000",
+                "dead_epoch": 239
+            },
+            {
+                "osd": 2,
+                "down_stamp": "2024-09-04T16:09:21.059433+0000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540719139924082687,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2024-09-21T15:44:50.581197+0000",
+                "dead_epoch": 243
+            },
+            {
+                "osd": 3,
+                "down_stamp": "2024-09-04T16:09:20.035197+0000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540719139924082687,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2024-09-22T05:15:31.771851+0000",
+                "dead_epoch": 245
+            },
+            {
+                "osd": 4,
+                "down_stamp": "2024-09-04T16:09:20.035197+0000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540719139924082687,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2024-09-22T00:11:46.863888+0000",
+                "dead_epoch": 249
+            },
+            {
+                "osd": 5,
+                "down_stamp": "2024-09-04T16:09:20.035197+0000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540719139924082687,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2024-09-22T11:39:17.183313+0000",
+                "dead_epoch": 247
+            },
+            {
+                "osd": 6,
+                "down_stamp": "2024-09-04T16:09:20.035197+0000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540719139924082687,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2024-09-22T02:27:27.119848+0000",
+                "dead_epoch": 250
+            },
+            {
+                "osd": 7,
+                "down_stamp": "2024-09-04T16:09:20.035197+0000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540719139924082687,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2024-09-22T02:24:40.660521+0000",
+                "dead_epoch": 253
+            },
+            {
+                "osd": 8,
+                "down_stamp": "2024-09-04T16:09:21.059433+0000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540719139924082687,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2024-09-21T17:21:12.714807+0000",
+                "dead_epoch": 0
+            },
+            {
+                "osd": 9,
+                "down_stamp": "2024-09-04T16:09:21.059433+0000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540719139924082687,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2024-09-22T13:11:33.870595+0000",
+                "dead_epoch": 0
+            },
+            {
+                "osd": 10,
+                "down_stamp": "2024-09-04T16:09:21.059433+0000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540719139924082687,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2024-09-21T19:19:07.184681+0000",
+                "dead_epoch": 0
+            },
+            {
+                "osd": 11,
+                "down_stamp": "2024-09-04T16:09:22.077728+0000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540719139924082687,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2024-09-21T16:03:43.280387+0000",
+                "dead_epoch": 0
+            }
+        ],
+        "pg_upmap": [],
+        "pg_upmap_items": [
+            {
+                "pgid": "3.8",
+                "mappings": [
+                    {
+                        "from": 11,
+                        "to": 9
+                    }
+                ]
+            },
+            {
+                "pgid": "3.26",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "3.3a",
+                "mappings": [
+                    {
+                        "from": 4,
+                        "to": 2
+                    }
+                ]
+            },
+            {
+                "pgid": "3.45",
+                "mappings": [
+                    {
+                        "from": 10,
+                        "to": 9
+                    }
+                ]
+            },
+            {
+                "pgid": "3.51",
+                "mappings": [
+                    {
+                        "from": 11,
+                        "to": 9
+                    }
+                ]
+            },
+            {
+                "pgid": "3.53",
+                "mappings": [
+                    {
+                        "from": 10,
+                        "to": 9
+                    }
+                ]
+            },
+            {
+                "pgid": "3.79",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 3
+                    }
+                ]
+            },
+            {
+                "pgid": "3.90",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 3
+                    }
+                ]
+            },
+            {
+                "pgid": "3.c8",
+                "mappings": [
+                    {
+                        "from": 11,
+                        "to": 9
+                    }
+                ]
+            },
+            {
+                "pgid": "3.d8",
+                "mappings": [
+                    {
+                        "from": 10,
+                        "to": 9
+                    }
+                ]
+            },
+            {
+                "pgid": "3.12a",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "3.142",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "3.145",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "3.163",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "3.16e",
+                "mappings": [
+                    {
+                        "from": 11,
+                        "to": 9
+                    }
+                ]
+            },
+            {
+                "pgid": "3.181",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 3
+                    }
+                ]
+            },
+            {
+                "pgid": "3.185",
+                "mappings": [
+                    {
+                        "from": 11,
+                        "to": 9
+                    }
+                ]
+            },
+            {
+                "pgid": "3.188",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 3
+                    }
+                ]
+            },
+            {
+                "pgid": "3.1b7",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "3.1c4",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "3.1dc",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 3
+                    }
+                ]
+            },
+            {
+                "pgid": "3.1df",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "3.1ee",
+                "mappings": [
+                    {
+                        "from": 1,
+                        "to": 3
+                    }
+                ]
+            }
+        ],
+        "pg_upmap_primaries": [],
+        "pg_temp": [],
+        "primary_temp": [],
+        "blocklist": {},
+        "range_blocklist": {},
+        "erasure_code_profiles": {
+            "default": {
+                "k": "2",
+                "m": "2",
+                "plugin": "jerasure",
+                "technique": "reed_sol_van"
+            }
+        },
+        "removed_snaps_queue": [],
+        "new_removed_snaps": [],
+        "new_purged_snaps": [],
+        "crush_node_flags": {},
+        "device_class_flags": {},
+        "stretch_mode": {
+            "stretch_mode_enabled": false,
+            "stretch_bucket_count": 0,
+            "degraded_stretch_mode": 0,
+            "recovering_stretch_mode": 0,
+            "stretch_mode_bucket": 0
+        }
+    },
+    "osd_metadata": [
+        {
+            "id": 0,
+            "arch": "x86_64",
+            "back_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6814/1468464221,v1:[2a01:4f8:d0:4401:3::27]:6816/1468464221]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_allocation_from_file": "0",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-0",
+            "bluestore_bdev_devices": "sdc",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_optimal_io_size": "0",
+            "bluestore_bdev_partition_path": "/dev/dm-0",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "536866717696",
+            "bluestore_bdev_support_discard": "1",
+            "bluestore_bdev_type": "hdd",
+            "bluestore_min_alloc_size": "4096",
+            "ceph_release": "squid",
+            "ceph_version": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "ceph_version_short": "19.3.0-4619-g2c345e1c",
+            "ceph_version_when_created": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "container_hostname": "cph-test-josh-1",
+            "container_image": "quay.ceph.io/ceph-ci/ceph@sha256:e1106e86f2c5b44314bbf001898c687e03884c35fb59071216e0f0e854f60079",
+            "cpu": "AMD EPYC 7413 24-Core Processor",
+            "created_at": "2024-08-30T20:13:34.871783Z",
+            "default_device_class": "hdd",
+            "device_ids": "sdc=QEMU_HARDDISK_drive-scsi0-0-2-0",
+            "device_paths": "sdc=/dev/disk/by-path/pci-0000:00:04.0-scsi-0:0:2:0",
+            "devices": "sdc",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 9",
+            "distro_version": "9",
+            "front_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6808/1468464221,v1:[2a01:4f8:d0:4401:3::27]:6811/1468464221]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6822/1468464221,v1:[2a01:4f8:d0:4401:3::27]:6823/1468464221]",
+            "hb_front_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6819/1468464221,v1:[2a01:4f8:d0:4401:3::27]:6821/1468464221]",
+            "hostname": "cph-test-josh-1",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP PREEMPT_DYNAMIC Debian 6.7.12-1~bpo12+1 (2024-05-06)",
+            "kernel_version": "6.7.12+bpo-amd64",
+            "mem_swap_kb": "4028412",
+            "mem_total_kb": "4019248",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "sdc",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-0",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "osd_using_paths",
+            "rotational": "1"
+        },
+        {
+            "id": 1,
+            "arch": "x86_64",
+            "back_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6818/2398169567,v1:[2a01:4f8:d0:4401:3::29]:6819/2398169567]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_allocation_from_file": "0",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-0",
+            "bluestore_bdev_devices": "sdb",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_optimal_io_size": "0",
+            "bluestore_bdev_partition_path": "/dev/dm-0",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "536866717696",
+            "bluestore_bdev_support_discard": "1",
+            "bluestore_bdev_type": "hdd",
+            "bluestore_min_alloc_size": "4096",
+            "ceph_release": "squid",
+            "ceph_version": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "ceph_version_short": "19.3.0-4619-g2c345e1c",
+            "ceph_version_when_created": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "container_hostname": "cph-test-josh-3",
+            "container_image": "quay.ceph.io/ceph-ci/ceph@sha256:e1106e86f2c5b44314bbf001898c687e03884c35fb59071216e0f0e854f60079",
+            "cpu": "AMD EPYC 7413 24-Core Processor",
+            "created_at": "2024-08-30T20:13:35.083447Z",
+            "default_device_class": "hdd",
+            "device_ids": "sdb=QEMU_HARDDISK_drive-scsi0-0-1-0",
+            "device_paths": "sdb=/dev/disk/by-path/pci-0000:00:04.0-scsi-0:0:1:0",
+            "devices": "sdb",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 9",
+            "distro_version": "9",
+            "front_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6816/2398169567,v1:[2a01:4f8:d0:4401:3::29]:6817/2398169567]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6822/2398169567,v1:[2a01:4f8:d0:4401:3::29]:6823/2398169567]",
+            "hb_front_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6820/2398169567,v1:[2a01:4f8:d0:4401:3::29]:6821/2398169567]",
+            "hostname": "cph-test-josh-3",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP PREEMPT_DYNAMIC Debian 6.1.71-0gardenlinux1 (2024-01-08)",
+            "kernel_version": "6.1.71-gardenlinux-amd64",
+            "mem_swap_kb": "0",
+            "mem_total_kb": "4008768",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "sdb",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-1",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "osd_using_paths",
+            "rotational": "1"
+        },
+        {
+            "id": 2,
+            "arch": "x86_64",
+            "back_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6802/217956382,v1:[2a01:4f8:d0:4401:3::27]:6803/217956382]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_allocation_from_file": "0",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-1",
+            "bluestore_bdev_devices": "sdd",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_optimal_io_size": "0",
+            "bluestore_bdev_partition_path": "/dev/dm-1",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "536866717696",
+            "bluestore_bdev_support_discard": "1",
+            "bluestore_bdev_type": "hdd",
+            "bluestore_min_alloc_size": "4096",
+            "ceph_release": "squid",
+            "ceph_version": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "ceph_version_short": "19.3.0-4619-g2c345e1c",
+            "ceph_version_when_created": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "container_hostname": "cph-test-josh-1",
+            "container_image": "quay.ceph.io/ceph-ci/ceph@sha256:e1106e86f2c5b44314bbf001898c687e03884c35fb59071216e0f0e854f60079",
+            "cpu": "AMD EPYC 7413 24-Core Processor",
+            "created_at": "2024-08-30T20:13:40.026340Z",
+            "default_device_class": "hdd",
+            "device_ids": "sdd=QEMU_HARDDISK_drive-scsi0-0-3-0",
+            "device_paths": "sdd=/dev/disk/by-path/pci-0000:00:04.0-scsi-0:0:3:0",
+            "devices": "sdd",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 9",
+            "distro_version": "9",
+            "front_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6800/217956382,v1:[2a01:4f8:d0:4401:3::27]:6801/217956382]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6806/217956382,v1:[2a01:4f8:d0:4401:3::27]:6807/217956382]",
+            "hb_front_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6804/217956382,v1:[2a01:4f8:d0:4401:3::27]:6805/217956382]",
+            "hostname": "cph-test-josh-1",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP PREEMPT_DYNAMIC Debian 6.7.12-1~bpo12+1 (2024-05-06)",
+            "kernel_version": "6.7.12+bpo-amd64",
+            "mem_swap_kb": "4028412",
+            "mem_total_kb": "4019248",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "sdd",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-2",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "osd_using_paths",
+            "rotational": "1"
+        },
+        {
+            "id": 3,
+            "arch": "x86_64",
+            "back_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6802/3362973164,v1:[2a01:4f8:d0:4401:3::29]:6803/3362973164]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_allocation_from_file": "0",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-1",
+            "bluestore_bdev_devices": "sdc",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_optimal_io_size": "0",
+            "bluestore_bdev_partition_path": "/dev/dm-1",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "536866717696",
+            "bluestore_bdev_support_discard": "1",
+            "bluestore_bdev_type": "hdd",
+            "bluestore_min_alloc_size": "4096",
+            "ceph_release": "squid",
+            "ceph_version": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "ceph_version_short": "19.3.0-4619-g2c345e1c",
+            "ceph_version_when_created": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "container_hostname": "cph-test-josh-3",
+            "container_image": "quay.ceph.io/ceph-ci/ceph@sha256:e1106e86f2c5b44314bbf001898c687e03884c35fb59071216e0f0e854f60079",
+            "cpu": "AMD EPYC 7413 24-Core Processor",
+            "created_at": "2024-08-30T20:13:40.331468Z",
+            "default_device_class": "hdd",
+            "device_ids": "sdc=QEMU_HARDDISK_drive-scsi0-0-2-0",
+            "device_paths": "sdc=/dev/disk/by-path/pci-0000:00:04.0-scsi-0:0:2:0",
+            "devices": "sdc",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 9",
+            "distro_version": "9",
+            "front_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6800/3362973164,v1:[2a01:4f8:d0:4401:3::29]:6801/3362973164]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6806/3362973164,v1:[2a01:4f8:d0:4401:3::29]:6807/3362973164]",
+            "hb_front_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6804/3362973164,v1:[2a01:4f8:d0:4401:3::29]:6805/3362973164]",
+            "hostname": "cph-test-josh-3",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP PREEMPT_DYNAMIC Debian 6.1.71-0gardenlinux1 (2024-01-08)",
+            "kernel_version": "6.1.71-gardenlinux-amd64",
+            "mem_swap_kb": "0",
+            "mem_total_kb": "4008768",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "sdc",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-3",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "osd_using_paths",
+            "rotational": "1"
+        },
+        {
+            "id": 4,
+            "arch": "x86_64",
+            "back_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6812/185683642,v1:[2a01:4f8:d0:4401:3::27]:6813/185683642]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_allocation_from_file": "0",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-2",
+            "bluestore_bdev_devices": "sde",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_optimal_io_size": "0",
+            "bluestore_bdev_partition_path": "/dev/dm-2",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "536866717696",
+            "bluestore_bdev_support_discard": "1",
+            "bluestore_bdev_type": "hdd",
+            "bluestore_min_alloc_size": "4096",
+            "ceph_release": "squid",
+            "ceph_version": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "ceph_version_short": "19.3.0-4619-g2c345e1c",
+            "ceph_version_when_created": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "container_hostname": "cph-test-josh-1",
+            "container_image": "quay.ceph.io/ceph-ci/ceph@sha256:e1106e86f2c5b44314bbf001898c687e03884c35fb59071216e0f0e854f60079",
+            "cpu": "AMD EPYC 7413 24-Core Processor",
+            "created_at": "2024-08-30T20:13:45.042156Z",
+            "default_device_class": "hdd",
+            "device_ids": "sde=QEMU_HARDDISK_drive-scsi0-0-4-0",
+            "device_paths": "sde=/dev/disk/by-path/pci-0000:00:04.0-scsi-0:0:4:0",
+            "devices": "sde",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 9",
+            "distro_version": "9",
+            "front_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6809/185683642,v1:[2a01:4f8:d0:4401:3::27]:6810/185683642]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6818/185683642,v1:[2a01:4f8:d0:4401:3::27]:6820/185683642]",
+            "hb_front_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6815/185683642,v1:[2a01:4f8:d0:4401:3::27]:6817/185683642]",
+            "hostname": "cph-test-josh-1",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP PREEMPT_DYNAMIC Debian 6.7.12-1~bpo12+1 (2024-05-06)",
+            "kernel_version": "6.7.12+bpo-amd64",
+            "mem_swap_kb": "4028412",
+            "mem_total_kb": "4019248",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "sde",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-4",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "osd_using_paths",
+            "rotational": "1"
+        },
+        {
+            "id": 5,
+            "arch": "x86_64",
+            "back_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6810/3867822320,v1:[2a01:4f8:d0:4401:3::29]:6811/3867822320]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_allocation_from_file": "0",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-3",
+            "bluestore_bdev_devices": "sdd",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_optimal_io_size": "0",
+            "bluestore_bdev_partition_path": "/dev/dm-3",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "536866717696",
+            "bluestore_bdev_support_discard": "1",
+            "bluestore_bdev_type": "hdd",
+            "bluestore_min_alloc_size": "4096",
+            "ceph_release": "squid",
+            "ceph_version": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "ceph_version_short": "19.3.0-4619-g2c345e1c",
+            "ceph_version_when_created": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "container_hostname": "cph-test-josh-3",
+            "container_image": "quay.ceph.io/ceph-ci/ceph@sha256:e1106e86f2c5b44314bbf001898c687e03884c35fb59071216e0f0e854f60079",
+            "cpu": "AMD EPYC 7413 24-Core Processor",
+            "created_at": "2024-08-30T20:13:45.575646Z",
+            "default_device_class": "hdd",
+            "device_ids": "sdd=QEMU_HARDDISK_drive-scsi0-0-3-0",
+            "device_paths": "sdd=/dev/disk/by-path/pci-0000:00:04.0-scsi-0:0:3:0",
+            "devices": "sdd",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 9",
+            "distro_version": "9",
+            "front_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6808/3867822320,v1:[2a01:4f8:d0:4401:3::29]:6809/3867822320]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6814/3867822320,v1:[2a01:4f8:d0:4401:3::29]:6815/3867822320]",
+            "hb_front_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6812/3867822320,v1:[2a01:4f8:d0:4401:3::29]:6813/3867822320]",
+            "hostname": "cph-test-josh-3",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP PREEMPT_DYNAMIC Debian 6.1.71-0gardenlinux1 (2024-01-08)",
+            "kernel_version": "6.1.71-gardenlinux-amd64",
+            "mem_swap_kb": "0",
+            "mem_total_kb": "4008768",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "sdd",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-5",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "osd_using_paths",
+            "rotational": "1"
+        },
+        {
+            "id": 6,
+            "arch": "x86_64",
+            "back_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6826/2643030024,v1:[2a01:4f8:d0:4401:3::27]:6827/2643030024]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_allocation_from_file": "0",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-3",
+            "bluestore_bdev_devices": "sdb",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_optimal_io_size": "0",
+            "bluestore_bdev_partition_path": "/dev/dm-3",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "536866717696",
+            "bluestore_bdev_support_discard": "1",
+            "bluestore_bdev_type": "hdd",
+            "bluestore_min_alloc_size": "4096",
+            "ceph_release": "squid",
+            "ceph_version": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "ceph_version_short": "19.3.0-4619-g2c345e1c",
+            "ceph_version_when_created": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "container_hostname": "cph-test-josh-1",
+            "container_image": "quay.ceph.io/ceph-ci/ceph@sha256:e1106e86f2c5b44314bbf001898c687e03884c35fb59071216e0f0e854f60079",
+            "cpu": "AMD EPYC 7413 24-Core Processor",
+            "created_at": "2024-08-30T20:13:50.682379Z",
+            "default_device_class": "hdd",
+            "device_ids": "sdb=QEMU_HARDDISK_drive-scsi0-0-1-0",
+            "device_paths": "sdb=/dev/disk/by-path/pci-0000:00:04.0-scsi-0:0:1:0",
+            "devices": "sdb",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 9",
+            "distro_version": "9",
+            "front_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6824/2643030024,v1:[2a01:4f8:d0:4401:3::27]:6825/2643030024]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6830/2643030024,v1:[2a01:4f8:d0:4401:3::27]:6831/2643030024]",
+            "hb_front_addr": "[v2:[2a01:4f8:d0:4401:3::27]:6828/2643030024,v1:[2a01:4f8:d0:4401:3::27]:6829/2643030024]",
+            "hostname": "cph-test-josh-1",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP PREEMPT_DYNAMIC Debian 6.7.12-1~bpo12+1 (2024-05-06)",
+            "kernel_version": "6.7.12+bpo-amd64",
+            "mem_swap_kb": "4028412",
+            "mem_total_kb": "4019248",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "sdb",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-6",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "osd_using_paths",
+            "rotational": "1"
+        },
+        {
+            "id": 7,
+            "arch": "x86_64",
+            "back_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6826/2098959520,v1:[2a01:4f8:d0:4401:3::29]:6827/2098959520]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_allocation_from_file": "0",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-2",
+            "bluestore_bdev_devices": "sde",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_optimal_io_size": "0",
+            "bluestore_bdev_partition_path": "/dev/dm-2",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "536866717696",
+            "bluestore_bdev_support_discard": "1",
+            "bluestore_bdev_type": "hdd",
+            "bluestore_min_alloc_size": "4096",
+            "ceph_release": "squid",
+            "ceph_version": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "ceph_version_short": "19.3.0-4619-g2c345e1c",
+            "ceph_version_when_created": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "container_hostname": "cph-test-josh-3",
+            "container_image": "quay.ceph.io/ceph-ci/ceph@sha256:e1106e86f2c5b44314bbf001898c687e03884c35fb59071216e0f0e854f60079",
+            "cpu": "AMD EPYC 7413 24-Core Processor",
+            "created_at": "2024-08-30T20:13:51.333811Z",
+            "default_device_class": "hdd",
+            "device_ids": "sde=QEMU_HARDDISK_drive-scsi0-0-4-0",
+            "device_paths": "sde=/dev/disk/by-path/pci-0000:00:04.0-scsi-0:0:4:0",
+            "devices": "sde",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 9",
+            "distro_version": "9",
+            "front_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6824/2098959520,v1:[2a01:4f8:d0:4401:3::29]:6825/2098959520]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6830/2098959520,v1:[2a01:4f8:d0:4401:3::29]:6831/2098959520]",
+            "hb_front_addr": "[v2:[2a01:4f8:d0:4401:3::29]:6828/2098959520,v1:[2a01:4f8:d0:4401:3::29]:6829/2098959520]",
+            "hostname": "cph-test-josh-3",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP PREEMPT_DYNAMIC Debian 6.1.71-0gardenlinux1 (2024-01-08)",
+            "kernel_version": "6.1.71-gardenlinux-amd64",
+            "mem_swap_kb": "0",
+            "mem_total_kb": "4008768",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "sde",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-7",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "osd_using_paths",
+            "rotational": "1"
+        },
+        {
+            "id": 8,
+            "arch": "x86_64",
+            "back_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6810/903598675,v1:[2a01:4f8:d0:4401:3::28]:6811/903598675]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_allocation_from_file": "0",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-2",
+            "bluestore_bdev_devices": "sde",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_optimal_io_size": "0",
+            "bluestore_bdev_partition_path": "/dev/dm-2",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "536866717696",
+            "bluestore_bdev_support_discard": "1",
+            "bluestore_bdev_type": "hdd",
+            "bluestore_min_alloc_size": "4096",
+            "ceph_release": "squid",
+            "ceph_version": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "ceph_version_short": "19.3.0-4619-g2c345e1c",
+            "ceph_version_when_created": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "container_hostname": "cph-test-josh-2",
+            "container_image": "quay.ceph.io/ceph-ci/ceph@sha256:e1106e86f2c5b44314bbf001898c687e03884c35fb59071216e0f0e854f60079",
+            "cpu": "AMD EPYC 7413 24-Core Processor",
+            "created_at": "2024-08-30T20:20:59.693546Z",
+            "default_device_class": "hdd",
+            "device_ids": "sde=QEMU_HARDDISK_drive-scsi0-0-4-0",
+            "device_paths": "sde=/dev/disk/by-path/pci-0000:00:04.0-scsi-0:0:4:0",
+            "devices": "sde",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 9",
+            "distro_version": "9",
+            "front_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6808/903598675,v1:[2a01:4f8:d0:4401:3::28]:6809/903598675]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6814/903598675,v1:[2a01:4f8:d0:4401:3::28]:6815/903598675]",
+            "hb_front_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6812/903598675,v1:[2a01:4f8:d0:4401:3::28]:6813/903598675]",
+            "hostname": "cph-test-josh-2",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP PREEMPT_DYNAMIC Debian 6.1.71-0gardenlinux1 (2024-01-08)",
+            "kernel_version": "6.1.71-gardenlinux-amd64",
+            "mem_swap_kb": "0",
+            "mem_total_kb": "4008768",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "sde",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-8",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "None",
+            "rotational": "1"
+        },
+        {
+            "id": 9,
+            "arch": "x86_64",
+            "back_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6818/2305611088,v1:[2a01:4f8:d0:4401:3::28]:6819/2305611088]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_allocation_from_file": "0",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-3",
+            "bluestore_bdev_devices": "sdb",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_optimal_io_size": "0",
+            "bluestore_bdev_partition_path": "/dev/dm-3",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "536866717696",
+            "bluestore_bdev_support_discard": "1",
+            "bluestore_bdev_type": "hdd",
+            "bluestore_min_alloc_size": "4096",
+            "ceph_release": "squid",
+            "ceph_version": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "ceph_version_short": "19.3.0-4619-g2c345e1c",
+            "ceph_version_when_created": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "container_hostname": "cph-test-josh-2",
+            "container_image": "quay.ceph.io/ceph-ci/ceph@sha256:e1106e86f2c5b44314bbf001898c687e03884c35fb59071216e0f0e854f60079",
+            "cpu": "AMD EPYC 7413 24-Core Processor",
+            "created_at": "2024-08-30T20:21:05.969101Z",
+            "default_device_class": "hdd",
+            "device_ids": "sdb=QEMU_HARDDISK_drive-scsi0-0-1-0",
+            "device_paths": "sdb=/dev/disk/by-path/pci-0000:00:04.0-scsi-0:0:1:0",
+            "devices": "sdb",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 9",
+            "distro_version": "9",
+            "front_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6816/2305611088,v1:[2a01:4f8:d0:4401:3::28]:6817/2305611088]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6822/2305611088,v1:[2a01:4f8:d0:4401:3::28]:6823/2305611088]",
+            "hb_front_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6820/2305611088,v1:[2a01:4f8:d0:4401:3::28]:6821/2305611088]",
+            "hostname": "cph-test-josh-2",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP PREEMPT_DYNAMIC Debian 6.1.71-0gardenlinux1 (2024-01-08)",
+            "kernel_version": "6.1.71-gardenlinux-amd64",
+            "mem_swap_kb": "0",
+            "mem_total_kb": "4008768",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "sdb",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-9",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "None",
+            "rotational": "1"
+        },
+        {
+            "id": 10,
+            "arch": "x86_64",
+            "back_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6802/4069689014,v1:[2a01:4f8:d0:4401:3::28]:6803/4069689014]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_allocation_from_file": "0",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-1",
+            "bluestore_bdev_devices": "sdc",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_optimal_io_size": "0",
+            "bluestore_bdev_partition_path": "/dev/dm-1",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "536866717696",
+            "bluestore_bdev_support_discard": "1",
+            "bluestore_bdev_type": "hdd",
+            "bluestore_min_alloc_size": "4096",
+            "ceph_release": "squid",
+            "ceph_version": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "ceph_version_short": "19.3.0-4619-g2c345e1c",
+            "ceph_version_when_created": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "container_hostname": "cph-test-josh-2",
+            "container_image": "quay.ceph.io/ceph-ci/ceph@sha256:e1106e86f2c5b44314bbf001898c687e03884c35fb59071216e0f0e854f60079",
+            "cpu": "AMD EPYC 7413 24-Core Processor",
+            "created_at": "2024-08-30T20:21:11.349930Z",
+            "default_device_class": "hdd",
+            "device_ids": "sdc=QEMU_HARDDISK_drive-scsi0-0-2-0",
+            "device_paths": "sdc=/dev/disk/by-path/pci-0000:00:04.0-scsi-0:0:2:0",
+            "devices": "sdc",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 9",
+            "distro_version": "9",
+            "front_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6800/4069689014,v1:[2a01:4f8:d0:4401:3::28]:6801/4069689014]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6806/4069689014,v1:[2a01:4f8:d0:4401:3::28]:6807/4069689014]",
+            "hb_front_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6804/4069689014,v1:[2a01:4f8:d0:4401:3::28]:6805/4069689014]",
+            "hostname": "cph-test-josh-2",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP PREEMPT_DYNAMIC Debian 6.1.71-0gardenlinux1 (2024-01-08)",
+            "kernel_version": "6.1.71-gardenlinux-amd64",
+            "mem_swap_kb": "0",
+            "mem_total_kb": "4008768",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "sdc",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-10",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "None",
+            "rotational": "1"
+        },
+        {
+            "id": 11,
+            "arch": "x86_64",
+            "back_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6826/1716897490,v1:[2a01:4f8:d0:4401:3::28]:6827/1716897490]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_allocation_from_file": "0",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-0",
+            "bluestore_bdev_devices": "sdd",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_optimal_io_size": "0",
+            "bluestore_bdev_partition_path": "/dev/dm-0",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "536866717696",
+            "bluestore_bdev_support_discard": "1",
+            "bluestore_bdev_type": "hdd",
+            "bluestore_min_alloc_size": "4096",
+            "ceph_release": "squid",
+            "ceph_version": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "ceph_version_short": "19.3.0-4619-g2c345e1c",
+            "ceph_version_when_created": "ceph version 19.3.0-4619-g2c345e1c (2c345e1c2501ad3e94a4042a112d076bf6f888aa) squid (dev)",
+            "container_hostname": "cph-test-josh-2",
+            "container_image": "quay.ceph.io/ceph-ci/ceph@sha256:e1106e86f2c5b44314bbf001898c687e03884c35fb59071216e0f0e854f60079",
+            "cpu": "AMD EPYC 7413 24-Core Processor",
+            "created_at": "2024-08-30T20:21:16.993006Z",
+            "default_device_class": "hdd",
+            "device_ids": "sdd=QEMU_HARDDISK_drive-scsi0-0-3-0",
+            "device_paths": "sdd=/dev/disk/by-path/pci-0000:00:04.0-scsi-0:0:3:0",
+            "devices": "sdd",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 9",
+            "distro_version": "9",
+            "front_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6824/1716897490,v1:[2a01:4f8:d0:4401:3::28]:6825/1716897490]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6830/1716897490,v1:[2a01:4f8:d0:4401:3::28]:6831/1716897490]",
+            "hb_front_addr": "[v2:[2a01:4f8:d0:4401:3::28]:6828/1716897490,v1:[2a01:4f8:d0:4401:3::28]:6829/1716897490]",
+            "hostname": "cph-test-josh-2",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP PREEMPT_DYNAMIC Debian 6.1.71-0gardenlinux1 (2024-01-08)",
+            "kernel_version": "6.1.71-gardenlinux-amd64",
+            "mem_swap_kb": "0",
+            "mem_total_kb": "4008768",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "sdd",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-11",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "None",
+            "rotational": "1"
+        }
+    ],
+    "osdmap_clean_epochs": {
+        "min_last_epoch_clean": 401,
+        "last_epoch_clean": {
+            "per_pool": [
+                {
+                    "poolid": 1,
+                    "floor": 401
+                },
+                {
+                    "poolid": 2,
+                    "floor": 401
+                },
+                {
+                    "poolid": 3,
+                    "floor": 401
+                }
+            ]
+        },
+        "osd_epochs": [
+            {
+                "id": 1,
+                "epoch": 401
+            },
+            {
+                "id": 2,
+                "epoch": 401
+            },
+            {
+                "id": 3,
+                "epoch": 401
+            },
+            {
+                "id": 4,
+                "epoch": 401
+            },
+            {
+                "id": 5,
+                "epoch": 401
+            },
+            {
+                "id": 6,
+                "epoch": 401
+            },
+            {
+                "id": 7,
+                "epoch": 401
+            },
+            {
+                "id": 8,
+                "epoch": 401
+            },
+            {
+                "id": 9,
+                "epoch": 401
+            },
+            {
+                "id": 10,
+                "epoch": 401
+            },
+            {
+                "id": 11,
+                "epoch": 401
+            }
+        ]
+    },
+    "osdmap_first_committed": 1,
+    "osdmap_last_committed": 401,
+    "crushmap": {
+        "devices": [
+            {
+                "id": 0,
+                "name": "osd.0",
+                "class": "hdd"
+            },
+            {
+                "id": 1,
+                "name": "osd.1",
+                "class": "hdd"
+            },
+            {
+                "id": 2,
+                "name": "osd.2",
+                "class": "hdd"
+            },
+            {
+                "id": 3,
+                "name": "osd.3",
+                "class": "hdd"
+            },
+            {
+                "id": 4,
+                "name": "osd.4",
+                "class": "hdd"
+            },
+            {
+                "id": 5,
+                "name": "osd.5",
+                "class": "hdd"
+            },
+            {
+                "id": 6,
+                "name": "osd.6",
+                "class": "hdd"
+            },
+            {
+                "id": 7,
+                "name": "osd.7",
+                "class": "hdd"
+            },
+            {
+                "id": 8,
+                "name": "osd.8",
+                "class": "hdd"
+            },
+            {
+                "id": 9,
+                "name": "osd.9",
+                "class": "hdd"
+            },
+            {
+                "id": 10,
+                "name": "osd.10",
+                "class": "hdd"
+            },
+            {
+                "id": 11,
+                "name": "osd.11",
+                "class": "hdd"
+            }
+        ],
+        "types": [
+            {
+                "type_id": 0,
+                "name": "osd"
+            },
+            {
+                "type_id": 1,
+                "name": "host"
+            },
+            {
+                "type_id": 2,
+                "name": "chassis"
+            },
+            {
+                "type_id": 3,
+                "name": "rack"
+            },
+            {
+                "type_id": 4,
+                "name": "row"
+            },
+            {
+                "type_id": 5,
+                "name": "pdu"
+            },
+            {
+                "type_id": 6,
+                "name": "pod"
+            },
+            {
+                "type_id": 7,
+                "name": "room"
+            },
+            {
+                "type_id": 8,
+                "name": "datacenter"
+            },
+            {
+                "type_id": 9,
+                "name": "zone"
+            },
+            {
+                "type_id": 10,
+                "name": "region"
+            },
+            {
+                "type_id": 11,
+                "name": "root"
+            }
+        ],
+        "buckets": [
+            {
+                "id": -1,
+                "name": "default",
+                "type_id": 11,
+                "type_name": "root",
+                "weight": 384012,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": -3,
+                        "weight": 128004,
+                        "pos": 0
+                    },
+                    {
+                        "id": -5,
+                        "weight": 128004,
+                        "pos": 1
+                    },
+                    {
+                        "id": -7,
+                        "weight": 128004,
+                        "pos": 2
+                    }
+                ]
+            },
+            {
+                "id": -2,
+                "name": "default~hdd",
+                "type_id": 11,
+                "type_name": "root",
+                "weight": 384012,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": -4,
+                        "weight": 128004,
+                        "pos": 0
+                    },
+                    {
+                        "id": -6,
+                        "weight": 128004,
+                        "pos": 1
+                    },
+                    {
+                        "id": -8,
+                        "weight": 128004,
+                        "pos": 2
+                    }
+                ]
+            },
+            {
+                "id": -3,
+                "name": "cph-test-josh-1",
+                "type_id": 1,
+                "type_name": "host",
+                "weight": 128004,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": 0,
+                        "weight": 32001,
+                        "pos": 0
+                    },
+                    {
+                        "id": 2,
+                        "weight": 32001,
+                        "pos": 1
+                    },
+                    {
+                        "id": 4,
+                        "weight": 32001,
+                        "pos": 2
+                    },
+                    {
+                        "id": 6,
+                        "weight": 32001,
+                        "pos": 3
+                    }
+                ]
+            },
+            {
+                "id": -4,
+                "name": "cph-test-josh-1~hdd",
+                "type_id": 1,
+                "type_name": "host",
+                "weight": 128004,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": 0,
+                        "weight": 32001,
+                        "pos": 0
+                    },
+                    {
+                        "id": 2,
+                        "weight": 32001,
+                        "pos": 1
+                    },
+                    {
+                        "id": 4,
+                        "weight": 32001,
+                        "pos": 2
+                    },
+                    {
+                        "id": 6,
+                        "weight": 32001,
+                        "pos": 3
+                    }
+                ]
+            },
+            {
+                "id": -5,
+                "name": "cph-test-josh-3",
+                "type_id": 1,
+                "type_name": "host",
+                "weight": 128004,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": 1,
+                        "weight": 32001,
+                        "pos": 0
+                    },
+                    {
+                        "id": 3,
+                        "weight": 32001,
+                        "pos": 1
+                    },
+                    {
+                        "id": 5,
+                        "weight": 32001,
+                        "pos": 2
+                    },
+                    {
+                        "id": 7,
+                        "weight": 32001,
+                        "pos": 3
+                    }
+                ]
+            },
+            {
+                "id": -6,
+                "name": "cph-test-josh-3~hdd",
+                "type_id": 1,
+                "type_name": "host",
+                "weight": 128004,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": 1,
+                        "weight": 32001,
+                        "pos": 0
+                    },
+                    {
+                        "id": 3,
+                        "weight": 32001,
+                        "pos": 1
+                    },
+                    {
+                        "id": 5,
+                        "weight": 32001,
+                        "pos": 2
+                    },
+                    {
+                        "id": 7,
+                        "weight": 32001,
+                        "pos": 3
+                    }
+                ]
+            },
+            {
+                "id": -7,
+                "name": "cph-test-josh-2",
+                "type_id": 1,
+                "type_name": "host",
+                "weight": 128004,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": 10,
+                        "weight": 32001,
+                        "pos": 0
+                    },
+                    {
+                        "id": 11,
+                        "weight": 32001,
+                        "pos": 1
+                    },
+                    {
+                        "id": 8,
+                        "weight": 32001,
+                        "pos": 2
+                    },
+                    {
+                        "id": 9,
+                        "weight": 32001,
+                        "pos": 3
+                    }
+                ]
+            },
+            {
+                "id": -8,
+                "name": "cph-test-josh-2~hdd",
+                "type_id": 1,
+                "type_name": "host",
+                "weight": 128004,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": 10,
+                        "weight": 32001,
+                        "pos": 0
+                    },
+                    {
+                        "id": 11,
+                        "weight": 32001,
+                        "pos": 1
+                    },
+                    {
+                        "id": 8,
+                        "weight": 32001,
+                        "pos": 2
+                    },
+                    {
+                        "id": 9,
+                        "weight": 32001,
+                        "pos": 3
+                    }
+                ]
+            }
+        ],
+        "rules": [
+            {
+                "rule_id": 0,
+                "rule_name": "replicated_rule",
+                "type": 1,
+                "steps": [
+                    {
+                        "op": "take",
+                        "item": -1,
+                        "item_name": "default"
+                    },
+                    {
+                        "op": "chooseleaf_firstn",
+                        "num": 0,
+                        "type": "host"
+                    },
+                    {
+                        "op": "emit"
+                    }
+                ]
+            }
+        ],
+        "tunables": {
+            "choose_local_tries": 0,
+            "choose_local_fallback_tries": 0,
+            "choose_total_tries": 50,
+            "chooseleaf_descend_once": 1,
+            "chooseleaf_vary_r": 1,
+            "chooseleaf_stable": 1,
+            "msr_descents": 100,
+            "msr_collision_tries": 100,
+            "straw_calc_version": 1,
+            "allowed_bucket_algs": 54,
+            "profile": "jewel",
+            "optimal_tunables": 1,
+            "legacy_tunables": 0,
+            "minimum_required_version": "jewel",
+            "require_feature_tunables": 1,
+            "require_feature_tunables2": 1,
+            "has_v2_rules": 0,
+            "require_feature_tunables3": 1,
+            "has_v3_rules": 0,
+            "has_v4_buckets": 1,
+            "require_feature_tunables5": 1,
+            "has_v5_rules": 0,
+            "has_msr_rules": 0
+        },
+        "choose_args": {}
+    },
+    "fsmap": {
+        "epoch": 10,
+        "btime": "2024-09-09T17:16:27:310449+0000",
+        "default_fscid": 1,
+        "compat": {
+            "compat": {},
+            "ro_compat": {},
+            "incompat": {
+                "feature_1": "base v0.20",
+                "feature_2": "client writeable ranges",
+                "feature_3": "default file layouts on dirs",
+                "feature_4": "dir inode in separate object",
+                "feature_5": "mds uses versioned encoding",
+                "feature_6": "dirfrag is stored in omap",
+                "feature_8": "no anchor table",
+                "feature_9": "file layout v2",
+                "feature_10": "snaprealm v2",
+                "feature_11": "minor log segments",
+                "feature_12": "quiesce subvolumes"
+            }
+        },
+        "feature_flags": {
+            "enable_multiple": true,
+            "ever_enabled_multiple": true
+        },
+        "standbys": [
+            {
+                "gid": 64216,
+                "name": "cephfs.cph-test-josh-2.ortkry",
+                "rank": -1,
+                "incarnation": 0,
+                "state": "up:standby",
+                "state_seq": 2,
+                "addr": "[2a01:4f8:d0:4401:3::28]:6833/3825305304",
+                "addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6832",
+                            "nonce": 3825305304
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::28]:6833",
+                            "nonce": 3825305304
+                        }
+                    ]
+                },
+                "join_fscid": 1,
+                "export_targets": [],
+                "features": 4540719139924082687,
+                "flags": 0,
+                "compat": {
+                    "compat": {},
+                    "ro_compat": {},
+                    "incompat": {
+                        "feature_1": "base v0.20",
+                        "feature_2": "client writeable ranges",
+                        "feature_3": "default file layouts on dirs",
+                        "feature_4": "dir inode in separate object",
+                        "feature_5": "mds uses versioned encoding",
+                        "feature_6": "dirfrag is stored in omap",
+                        "feature_7": "mds uses inline data",
+                        "feature_8": "no anchor table",
+                        "feature_9": "file layout v2",
+                        "feature_10": "snaprealm v2",
+                        "feature_11": "minor log segments",
+                        "feature_12": "quiesce subvolumes"
+                    }
+                },
+                "epoch": 10
+            },
+            {
+                "gid": 64227,
+                "name": "cephfs.cph-test-josh-1.gekrye",
+                "rank": -1,
+                "incarnation": 0,
+                "state": "up:standby",
+                "state_seq": 2,
+                "addr": "[2a01:4f8:d0:4401:3::27]:6835/2491806359",
+                "addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6834",
+                            "nonce": 2491806359
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "[2a01:4f8:d0:4401:3::27]:6835",
+                            "nonce": 2491806359
+                        }
+                    ]
+                },
+                "join_fscid": 1,
+                "export_targets": [],
+                "features": 4540719139924082687,
+                "flags": 0,
+                "compat": {
+                    "compat": {},
+                    "ro_compat": {},
+                    "incompat": {
+                        "feature_1": "base v0.20",
+                        "feature_2": "client writeable ranges",
+                        "feature_3": "default file layouts on dirs",
+                        "feature_4": "dir inode in separate object",
+                        "feature_5": "mds uses versioned encoding",
+                        "feature_6": "dirfrag is stored in omap",
+                        "feature_7": "mds uses inline data",
+                        "feature_8": "no anchor table",
+                        "feature_9": "file layout v2",
+                        "feature_10": "snaprealm v2",
+                        "feature_11": "minor log segments",
+                        "feature_12": "quiesce subvolumes"
+                    }
+                },
+                "epoch": 9
+            }
+        ],
+        "filesystems": [
+            {
+                "mdsmap": {
+                    "epoch": 8,
+                    "flags": 18,
+                    "flags_state": {
+                        "joinable": true,
+                        "allow_snaps": true,
+                        "allow_multimds_snaps": true,
+                        "allow_standby_replay": false,
+                        "refuse_client_session": false,
+                        "refuse_standby_for_another_fs": false,
+                        "balance_automate": false
+                    },
+                    "ever_allowed_features": 0,
+                    "explicitly_allowed_features": 0,
+                    "created": "2024-09-09T17:16:15.477613+0000",
+                    "modified": "2024-09-09T17:16:23.318973+0000",
+                    "tableserver": 0,
+                    "root": 0,
+                    "session_timeout": 60,
+                    "session_autoclose": 300,
+                    "required_client_features": {},
+                    "max_file_size": 1099511627776,
+                    "max_xattr_size": 65536,
+                    "last_failure": 0,
+                    "last_failure_osd_epoch": 0,
+                    "compat": {
+                        "compat": {},
+                        "ro_compat": {},
+                        "incompat": {
+                            "feature_1": "base v0.20",
+                            "feature_2": "client writeable ranges",
+                            "feature_3": "default file layouts on dirs",
+                            "feature_4": "dir inode in separate object",
+                            "feature_5": "mds uses versioned encoding",
+                            "feature_6": "dirfrag is stored in omap",
+                            "feature_7": "mds uses inline data",
+                            "feature_8": "no anchor table",
+                            "feature_9": "file layout v2",
+                            "feature_10": "snaprealm v2",
+                            "feature_11": "minor log segments",
+                            "feature_12": "quiesce subvolumes"
+                        }
+                    },
+                    "max_mds": 1,
+                    "in": [
+                        0
+                    ],
+                    "up": {
+                        "mds_0": 64204
+                    },
+                    "failed": [],
+                    "damaged": [],
+                    "stopped": [],
+                    "info": {
+                        "gid_64204": {
+                            "gid": 64204,
+                            "name": "cephfs.cph-test-josh-3.pfxylj",
+                            "rank": 0,
+                            "incarnation": 4,
+                            "state": "up:active",
+                            "state_seq": 3,
+                            "addr": "[2a01:4f8:d0:4401:3::29]:6833/198814206",
+                            "addrs": {
+                                "addrvec": [
+                                    {
+                                        "type": "v2",
+                                        "addr": "[2a01:4f8:d0:4401:3::29]:6832",
+                                        "nonce": 198814206
+                                    },
+                                    {
+                                        "type": "v1",
+                                        "addr": "[2a01:4f8:d0:4401:3::29]:6833",
+                                        "nonce": 198814206
+                                    }
+                                ]
+                            },
+                            "join_fscid": 1,
+                            "export_targets": [],
+                            "features": 4540719139924082687,
+                            "flags": 0,
+                            "compat": {
+                                "compat": {},
+                                "ro_compat": {},
+                                "incompat": {
+                                    "feature_1": "base v0.20",
+                                    "feature_2": "client writeable ranges",
+                                    "feature_3": "default file layouts on dirs",
+                                    "feature_4": "dir inode in separate object",
+                                    "feature_5": "mds uses versioned encoding",
+                                    "feature_6": "dirfrag is stored in omap",
+                                    "feature_7": "mds uses inline data",
+                                    "feature_8": "no anchor table",
+                                    "feature_9": "file layout v2",
+                                    "feature_10": "snaprealm v2",
+                                    "feature_11": "minor log segments",
+                                    "feature_12": "quiesce subvolumes"
+                                }
+                            }
+                        }
+                    },
+                    "data_pools": [
+                        3
+                    ],
+                    "metadata_pool": 2,
+                    "enabled": true,
+                    "fs_name": "cephfs",
+                    "balancer": "",
+                    "bal_rank_mask": "-1",
+                    "standby_count_wanted": 1,
+                    "qdb_leader": 64204,
+                    "qdb_cluster": [
+                        64204
+                    ]
+                },
+                "id": 1
+            }
+        ]
+    },
+    "mdsmap_first_committed": 1,
+    "mdsmap_last_committed": 10,
+    "auth": {
+        "first_committed": 501,
+        "last_committed": 524,
+        "num_secrets": 27
+    },
+    "num_pg": 529,
+    "num_pg_active": 529,
+    "num_pg_unknown": 0,
+    "num_osd": 12,
+    "pool_sum": {
+        "stat_sum": {
+            "num_bytes": 862047,
+            "num_objects": 24,
+            "num_object_clones": 0,
+            "num_object_copies": 72,
+            "num_objects_missing_on_primary": 0,
+            "num_objects_missing": 0,
+            "num_objects_degraded": 0,
+            "num_objects_misplaced": 0,
+            "num_objects_unfound": 0,
+            "num_objects_dirty": 24,
+            "num_whiteouts": 0,
+            "num_read": 1737,
+            "num_read_kb": 2607,
+            "num_write": 2530,
+            "num_write_kb": 51964,
+            "num_scrub_errors": 0,
+            "num_shallow_scrub_errors": 0,
+            "num_deep_scrub_errors": 0,
+            "num_objects_recovered": 23,
+            "num_bytes_recovered": 592340,
+            "num_keys_recovered": 1,
+            "num_objects_omap": 14,
+            "num_objects_hit_set_archive": 0,
+            "num_bytes_hit_set_archive": 0,
+            "num_flush": 0,
+            "num_flush_kb": 0,
+            "num_evict": 0,
+            "num_evict_kb": 0,
+            "num_promote": 0,
+            "num_flush_mode_high": 0,
+            "num_flush_mode_low": 0,
+            "num_evict_mode_some": 0,
+            "num_evict_mode_full": 0,
+            "num_objects_pinned": 0,
+            "num_legacy_snapsets": 0,
+            "num_large_omap_objects": 0,
+            "num_objects_manifest": 0,
+            "num_omap_bytes": 5035,
+            "num_omap_keys": 11,
+            "num_objects_repaired": 0
+        },
+        "store_stats": {
+            "total": 0,
+            "available": 0,
+            "internally_reserved": 0,
+            "allocated": 0,
+            "data_stored": 0,
+            "data_compressed": 0,
+            "data_compressed_allocated": 0,
+            "data_compressed_original": 0,
+            "omap_allocated": 0,
+            "internal_metadata": 0
+        },
+        "log_size": 2920,
+        "ondisk_log_size": 2920,
+        "up": 1587,
+        "acting": 1587,
+        "num_store_stats": 0
+    },
+    "osd_sum": {
+        "up_from": 0,
+        "seq": 0,
+        "num_pgs": 1587,
+        "num_osds": 11,
+        "num_per_pool_osds": 11,
+        "num_per_pool_omap_osds": 11,
+        "kb": 5767122944,
+        "kb_used": 851100,
+        "kb_used_data": 66240,
+        "kb_used_omap": 85,
+        "kb_used_meta": 784554,
+        "kb_avail": 5766271844,
+        "statfs": {
+            "total": 5905533894656,
+            "available": 5904662368256,
+            "internally_reserved": 0,
+            "allocated": 67829760,
+            "data_stored": 42740233,
+            "data_compressed": 0,
+            "data_compressed_allocated": 0,
+            "data_compressed_original": 0,
+            "omap_allocated": 87768,
+            "internal_metadata": 803383592
+        },
+        "hb_peers": [],
+        "snap_trim_queue_len": 0,
+        "num_snap_trimming": 0,
+        "num_shards_repaired": 0,
+        "op_queue_age_hist": {
+            "histogram": [],
+            "upper_bound": 1
+        },
+        "perf_stat": {
+            "commit_latency_ms": 0,
+            "apply_latency_ms": 0,
+            "commit_latency_ns": 0,
+            "apply_latency_ns": 0
+        },
+        "alerts": [],
+        "network_ping_times": []
+    },
+    "osd_sum_by_class": {
+        "hdd": {
+            "up_from": 0,
+            "seq": 0,
+            "num_pgs": 1587,
+            "num_osds": 11,
+            "num_per_pool_osds": 11,
+            "num_per_pool_omap_osds": 11,
+            "kb": 5767122944,
+            "kb_used": 851100,
+            "kb_used_data": 66240,
+            "kb_used_omap": 85,
+            "kb_used_meta": 784554,
+            "kb_avail": 5766271844,
+            "statfs": {
+                "total": 5905533894656,
+                "available": 5904662368256,
+                "internally_reserved": 0,
+                "allocated": 67829760,
+                "data_stored": 42740233,
+                "data_compressed": 0,
+                "data_compressed_allocated": 0,
+                "data_compressed_original": 0,
+                "omap_allocated": 87768,
+                "internal_metadata": 803383592
+            },
+            "hb_peers": [],
+            "snap_trim_queue_len": 0,
+            "num_snap_trimming": 0,
+            "num_shards_repaired": 0,
+            "op_queue_age_hist": {
+                "histogram": [],
+                "upper_bound": 1
+            },
+            "perf_stat": {
+                "commit_latency_ms": 0,
+                "apply_latency_ms": 0,
+                "commit_latency_ns": 0,
+                "apply_latency_ns": 0
+            },
+            "alerts": [],
+            "network_ping_times": []
+        }
+    },
+    "pool_stats": [
+        {
+            "poolid": 3,
+            "num_pg": 512,
+            "stat_sum": {
+                "num_bytes": 0,
+                "num_objects": 0,
+                "num_object_clones": 0,
+                "num_object_copies": 0,
+                "num_objects_missing_on_primary": 0,
+                "num_objects_missing": 0,
+                "num_objects_degraded": 0,
+                "num_objects_misplaced": 0,
+                "num_objects_unfound": 0,
+                "num_objects_dirty": 0,
+                "num_whiteouts": 0,
+                "num_read": 0,
+                "num_read_kb": 0,
+                "num_write": 0,
+                "num_write_kb": 0,
+                "num_scrub_errors": 0,
+                "num_shallow_scrub_errors": 0,
+                "num_deep_scrub_errors": 0,
+                "num_objects_recovered": 0,
+                "num_bytes_recovered": 0,
+                "num_keys_recovered": 0,
+                "num_objects_omap": 0,
+                "num_objects_hit_set_archive": 0,
+                "num_bytes_hit_set_archive": 0,
+                "num_flush": 0,
+                "num_flush_kb": 0,
+                "num_evict": 0,
+                "num_evict_kb": 0,
+                "num_promote": 0,
+                "num_flush_mode_high": 0,
+                "num_flush_mode_low": 0,
+                "num_evict_mode_some": 0,
+                "num_evict_mode_full": 0,
+                "num_objects_pinned": 0,
+                "num_legacy_snapsets": 0,
+                "num_large_omap_objects": 0,
+                "num_objects_manifest": 0,
+                "num_omap_bytes": 0,
+                "num_omap_keys": 0,
+                "num_objects_repaired": 0
+            },
+            "store_stats": {
+                "total": 0,
+                "available": 0,
+                "internally_reserved": 0,
+                "allocated": 0,
+                "data_stored": 0,
+                "data_compressed": 0,
+                "data_compressed_allocated": 0,
+                "data_compressed_original": 0,
+                "omap_allocated": 0,
+                "internal_metadata": 0
+            },
+            "log_size": 0,
+            "ondisk_log_size": 0,
+            "up": 1536,
+            "acting": 1536,
+            "num_store_stats": 12
+        },
+        {
+            "poolid": 2,
+            "num_pg": 16,
+            "stat_sum": {
+                "num_bytes": 9535,
+                "num_objects": 22,
+                "num_object_clones": 0,
+                "num_object_copies": 66,
+                "num_objects_missing_on_primary": 0,
+                "num_objects_missing": 0,
+                "num_objects_degraded": 0,
+                "num_objects_misplaced": 0,
+                "num_objects_unfound": 0,
+                "num_objects_dirty": 22,
+                "num_whiteouts": 0,
+                "num_read": 0,
+                "num_read_kb": 0,
+                "num_write": 23,
+                "num_write_kb": 22,
+                "num_scrub_errors": 0,
+                "num_shallow_scrub_errors": 0,
+                "num_deep_scrub_errors": 0,
+                "num_objects_recovered": 21,
+                "num_bytes_recovered": 1972,
+                "num_keys_recovered": 1,
+                "num_objects_omap": 14,
+                "num_objects_hit_set_archive": 0,
+                "num_bytes_hit_set_archive": 0,
+                "num_flush": 0,
+                "num_flush_kb": 0,
+                "num_evict": 0,
+                "num_evict_kb": 0,
+                "num_promote": 0,
+                "num_flush_mode_high": 0,
+                "num_flush_mode_low": 0,
+                "num_evict_mode_some": 0,
+                "num_evict_mode_full": 0,
+                "num_objects_pinned": 0,
+                "num_legacy_snapsets": 0,
+                "num_large_omap_objects": 0,
+                "num_objects_manifest": 0,
+                "num_omap_bytes": 5035,
+                "num_omap_keys": 11,
+                "num_objects_repaired": 0
+            },
+            "store_stats": {
+                "total": 0,
+                "available": 0,
+                "internally_reserved": 0,
+                "allocated": 118784,
+                "data_stored": 29209,
+                "data_compressed": 0,
+                "data_compressed_allocated": 0,
+                "data_compressed_original": 0,
+                "omap_allocated": 30052,
+                "internal_metadata": 0
+            },
+            "log_size": 732,
+            "ondisk_log_size": 732,
+            "up": 48,
+            "acting": 48,
+            "num_store_stats": 12
+        },
+        {
+            "poolid": 1,
+            "num_pg": 1,
+            "stat_sum": {
+                "num_bytes": 852512,
+                "num_objects": 2,
+                "num_object_clones": 0,
+                "num_object_copies": 6,
+                "num_objects_missing_on_primary": 0,
+                "num_objects_missing": 0,
+                "num_objects_degraded": 0,
+                "num_objects_misplaced": 0,
+                "num_objects_unfound": 0,
+                "num_objects_dirty": 2,
+                "num_whiteouts": 0,
+                "num_read": 1737,
+                "num_read_kb": 2607,
+                "num_write": 2507,
+                "num_write_kb": 51942,
+                "num_scrub_errors": 0,
+                "num_shallow_scrub_errors": 0,
+                "num_deep_scrub_errors": 0,
+                "num_objects_recovered": 2,
+                "num_bytes_recovered": 590368,
+                "num_keys_recovered": 0,
+                "num_objects_omap": 0,
+                "num_objects_hit_set_archive": 0,
+                "num_bytes_hit_set_archive": 0,
+                "num_flush": 0,
+                "num_flush_kb": 0,
+                "num_evict": 0,
+                "num_evict_kb": 0,
+                "num_promote": 0,
+                "num_flush_mode_high": 0,
+                "num_flush_mode_low": 0,
+                "num_evict_mode_some": 0,
+                "num_evict_mode_full": 0,
+                "num_objects_pinned": 0,
+                "num_legacy_snapsets": 0,
+                "num_large_omap_objects": 0,
+                "num_objects_manifest": 0,
+                "num_omap_bytes": 0,
+                "num_omap_keys": 0,
+                "num_objects_repaired": 0
+            },
+            "store_stats": {
+                "total": 0,
+                "available": 0,
+                "internally_reserved": 0,
+                "allocated": 3293184,
+                "data_stored": 3278976,
+                "data_compressed": 0,
+                "data_compressed_allocated": 0,
+                "data_compressed_original": 0,
+                "omap_allocated": 0,
+                "internal_metadata": 0
+            },
+            "log_size": 2188,
+            "ondisk_log_size": 2188,
+            "up": 3,
+            "acting": 3,
+            "num_store_stats": 4
+        }
+    ],
+    "osd_stats": [
+        {
+            "osd": 0,
+            "seq": 0
+        },
+        {
+            "osd": 1,
+            "seq": 1176821242199
+        },
+        {
+            "osd": 2,
+            "seq": 1120986667355
+        },
+        {
+            "osd": 3,
+            "seq": 1163936340312
+        },
+        {
+            "osd": 4,
+            "seq": 1142461503834
+        },
+        {
+            "osd": 5,
+            "seq": 1163936340312
+        },
+        {
+            "osd": 6,
+            "seq": 1155346405721
+        },
+        {
+            "osd": 7,
+            "seq": 1189706144086
+        },
+        {
+            "osd": 8,
+            "seq": 429497042671
+        },
+        {
+            "osd": 9,
+            "seq": 429497042670
+        },
+        {
+            "osd": 10,
+            "seq": 429497042671
+        },
+        {
+            "osd": 11,
+            "seq": 433792009967
+        }
+    ],
+    "num_pg_by_state": [
+        {
+            "state": "active+clean",
+            "num": 529
+        }
+    ],
+    "num_pg_by_osd": [
+        {
+            "osd": 0,
+            "num_primary_pg": 0,
+            "num_acting_pg": 0,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 1,
+            "num_primary_pg": 43,
+            "num_acting_pg": 135,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 4,
+            "num_primary_pg": 44,
+            "num_acting_pg": 188,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 9,
+            "num_primary_pg": 46,
+            "num_acting_pg": 129,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 5,
+            "num_primary_pg": 55,
+            "num_acting_pg": 129,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 8,
+            "num_primary_pg": 54,
+            "num_acting_pg": 131,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 6,
+            "num_primary_pg": 50,
+            "num_acting_pg": 167,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 10,
+            "num_primary_pg": 44,
+            "num_acting_pg": 135,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 3,
+            "num_primary_pg": 56,
+            "num_acting_pg": 136,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 2,
+            "num_primary_pg": 38,
+            "num_acting_pg": 174,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 11,
+            "num_primary_pg": 53,
+            "num_acting_pg": 134,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 7,
+            "num_primary_pg": 46,
+            "num_acting_pg": 129,
+            "num_up_not_acting_pg": 0
+        }
+    ],
+    "purged_snaps": [
+        {
+            "pool": 1,
+            "purged_snaps": {}
+        },
+        {
+            "pool": 2,
+            "purged_snaps": {}
+        },
+        {
+            "pool": 3,
+            "purged_snaps": {}
+        }
+    ],
+    "servicemap": {
+        "epoch": 15026,
+        "modified": "2024-09-22T18:54:58.847255+0000",
+        "services": {}
+    },
+    "mgrstat_first_committed": 893622,
+    "mgrstat_last_committed": 893733,
+    "logm_first_committed": 981603,
+    "logm_last_committed": 982202,
+    "paxos": {
+        "first_committed": 1966837,
+        "last_committed": 1967466,
+        "last_pn": 700,
+        "accepted_pn": 700
+    }
+}

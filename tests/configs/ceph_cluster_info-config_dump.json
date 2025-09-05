@@ -1,0 +1,338 @@
+[
+  {
+    "section": "global",
+    "name": "cluster_network",
+    "value": "10.91.154.0/24",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "global",
+    "name": "container_image",
+    "value": "quay.io/ceph/ceph@sha256:883583fce8528df7786be27edb40ea3fcec7cae1d33f9e13169145f0eeae057d",
+    "level": "basic",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "global",
+    "name": "log_to_file",
+    "value": "true",
+    "level": "basic",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "global",
+    "name": "log_to_journald",
+    "value": "false",
+    "level": "basic",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "global",
+    "name": "log_to_stderr",
+    "value": "false",
+    "level": "basic",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "global",
+    "name": "mon_cluster_log_to_file",
+    "value": "true",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "global",
+    "name": "mon_cluster_log_to_journald",
+    "value": "false",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "global",
+    "name": "mon_cluster_log_to_stderr",
+    "value": "false",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "global",
+    "name": "public_network",
+    "value": "10.123.194.128/26,10.123.194.192/26,10.123.195.0/26,10.123.195.128/26,10.123.195.192/26,10.123.195.64/26,10.123.196.0/26,10.123.196.128/26,10.123.196.192/26,10.123.196.64/26,10.123.197.0/26,10.123.197.128/26,10.123.197.192/26,10.123.197.64/26,10.123.198.0/26,10.123.198.128/26,10.123.198.192/26,10.123.198.64/26",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mon",
+    "name": "auth_allow_insecure_global_id_reclaim",
+    "value": "false",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "mon",
+    "name": "public_network",
+    "value": "10.123.194.128/26,10.123.194.192/26,10.123.195.0/26,10.123.195.128/26,10.123.195.192/26,10.123.195.64/26,10.123.196.0/26,10.123.196.128/26,10.123.196.192/26,10.123.196.64/26,10.123.197.0/26,10.123.197.128/26,10.123.197.192/26,10.123.197.64/26,10.123.198.0/26,10.123.198.128/26,10.123.198.192/26,10.123.198.64/26",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/balancer/active",
+    "value": "true",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/balancer/sleep_interval",
+    "value": "2700",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/balancer/upmap_max_deviation",
+    "value": "3",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/cephadm/container_image_alertmanager",
+    "value": "quay.io/prometheus/alertmanager:v0.25.0",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/cephadm/container_image_base",
+    "value": "quay.io/ceph/ceph",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/cephadm/container_image_grafana",
+    "value": "quay.io/ceph/ceph-grafana:8.3.5",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/cephadm/container_image_node_exporter",
+    "value": "quay.io/prometheus/node-exporter:v1.5.0",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/cephadm/container_image_prometheus",
+    "value": "quay.io/prometheus/prometheus:v2.42.0",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/cephadm/container_init",
+    "value": "True",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/cephadm/migration_current",
+    "value": "5",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/dashboard/GRAFANA_API_PASSWORD",
+    "value": "<CENSORED>",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/dashboard/GRAFANA_API_SSL_VERIFY",
+    "value": "false",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/dashboard/RGW_API_ACCESS_KEY",
+    "value": "<CENSORED>",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/dashboard/RGW_API_SECRET_KEY",
+    "value": "<CENSORED>",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/dashboard/ssl_server_port",
+    "value": "8443",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "mgr",
+    "name": "mgr/orchestrator/orchestrator",
+    "value": "cephadm",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "osd",
+    "name": "osd_mclock_skip_benchmark",
+    "value": "true",
+    "level": "dev",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "osd",
+    "name": "osd_memory_target_autotune",
+    "value": "true",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "osd",
+    "name": "osd_op_queue",
+    "value": "wpq",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "client.rgw",
+    "name": "rgw_bucket_default_quota_max_size",
+    "value": "500000",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "client.rgw",
+    "name": "rgw_keystone_accepted_roles",
+    "value": "admin, swiftuser",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "client.rgw",
+    "name": "rgw_keystone_admin_domain",
+    "value": "default",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "client.rgw",
+    "name": "rgw_keystone_admin_password",
+    "value": "<CENSORED>",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "client.rgw",
+    "name": "rgw_keystone_admin_tenant",
+    "value": "service",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "client.rgw",
+    "name": "rgw_keystone_admin_user",
+    "value": "rgw",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "client.rgw",
+    "name": "rgw_keystone_api_version",
+    "value": "3",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "client.rgw",
+    "name": "rgw_keystone_token_cache_size",
+    "value": "10000",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "client.rgw",
+    "name": "rgw_s3_auth_use_keystone",
+    "value": "false",
+    "level": "advanced",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "client.rgw",
+    "name": "rgw_swift_custom_header",
+    "value": "HTTP_X_MANIFEST_TOTAL_SIZE",
+    "level": "advanced",
+    "can_update_at_runtime": false,
+    "mask": ""
+  },
+  {
+    "section": "client.rgw",
+    "name": "rgw_user_default_quota_max_objects",
+    "value": "2000000",
+    "level": "basic",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+  {
+    "section": "client.rgw",
+    "name": "rgw_user_default_quota_max_size",
+    "value": "1073741824",
+    "level": "basic",
+    "can_update_at_runtime": true,
+    "mask": ""
+  },
+]

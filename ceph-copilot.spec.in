@@ -29,7 +29,7 @@ install -m 755 -t %{buildroot}/%{_bindir} -D ceph-copilot
 %files
 %license LICENSE
 %doc README.md
-%{_bindir}/ceph-copilot
+%{_bindir}/clyq
 
 %changelog
 
