@@ -16,8 +16,6 @@ dependencies = [
   "pandas>=2.2.3",
   "prettytable>=3.16.0",
   "PyYaml",
-  "requests>=2.28.0",
-  "cryptography>=38.0.0"
 ]
 
 [project.scripts]
