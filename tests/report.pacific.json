@@ -1,0 +1,4360 @@
+{
+    "cluster_fingerprint": "0771efc1-00b2-4eb3-9029-607f9873951c",
+    "version": "16.2.9-2",
+    "commit": "4c3647a322c0ff5a1dd2344e039859dcbd28c830",
+    "timestamp": "2023-05-31T21:19:46.417636+0200",
+    "tag": "",
+    "health": {
+        "status": "HEALTH_WARN",
+        "checks": {
+            "MON_DOWN": {
+                "severity": "HEALTH_WARN",
+                "summary": {
+                    "message": "1/4 mons down, quorum miniflax-e845dd4855,miniflax-435fc69142,miniflax-0644fef1c2",
+                    "count": 1
+                },
+                "detail": [
+                    {
+                        "message": "mon.miniflax-rhel-migration-test (rank 3) addr v1:188.185.23.167:6789/0 is down (out of quorum)"
+                    }
+                ],
+                "muted": false
+            },
+            "MON_MSGR2_NOT_ENABLED": {
+                "severity": "HEALTH_WARN",
+                "summary": {
+                    "message": "1 monitors have not enabled msgr2",
+                    "count": 1
+                },
+                "detail": [
+                    {
+                        "message": "mon.miniflax-rhel-migration-test is not bound to a msgr2 port, only v1:188.185.23.167:6789/0"
+                    }
+                ],
+                "muted": false
+            },
+            "RECENT_CRASH": {
+                "severity": "HEALTH_WARN",
+                "summary": {
+                    "message": "1 daemons have recently crashed",
+                    "count": 1
+                },
+                "detail": [
+                    {
+                        "message": "mon.miniflax-rhel-migration-test crashed on host miniflax-rhel-migration-test.cern.ch at 2023-05-30T16:10:04.759833Z"
+                    }
+                ],
+                "muted": false
+            }
+        },
+        "mutes": []
+    },
+    "monmap_first_committed": 1,
+    "monmap_last_committed": 8,
+    "monmap": {
+        "epoch": 8,
+        "fsid": "6b15f4ce-7973-4f17-b253-66902772c0e5",
+        "modified": "2023-05-30T10:07:24.560167Z",
+        "created": "2021-12-14T10:16:28.874443Z",
+        "min_mon_release": 16,
+        "min_mon_release_name": "pacific",
+        "election_strategy": 1,
+        "disallowed_leaders: ": "",
+        "stretch_mode": false,
+        "tiebreaker_mon": "",
+        "features": {
+            "persistent": [
+                "kraken",
+                "luminous",
+                "mimic",
+                "osdmap-prune",
+                "nautilus",
+                "octopus",
+                "pacific",
+                "elector-pinging"
+            ],
+            "optional": []
+        },
+        "mons": [
+            {
+                "rank": 0,
+                "name": "miniflax-e845dd4855",
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:3300",
+                            "nonce": 0
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6789",
+                            "nonce": 0
+                        }
+                    ]
+                },
+                "addr": "188.184.96.113:6789/0",
+                "public_addr": "188.184.96.113:6789/0",
+                "priority": 0,
+                "weight": 0,
+                "crush_location": "{}"
+            },
+            {
+                "rank": 1,
+                "name": "miniflax-435fc69142",
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:3300",
+                            "nonce": 0
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6789",
+                            "nonce": 0
+                        }
+                    ]
+                },
+                "addr": "188.184.103.129:6789/0",
+                "public_addr": "188.184.103.129:6789/0",
+                "priority": 0,
+                "weight": 0,
+                "crush_location": "{}"
+            },
+            {
+                "rank": 2,
+                "name": "miniflax-0644fef1c2",
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:3300",
+                            "nonce": 0
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6789",
+                            "nonce": 0
+                        }
+                    ]
+                },
+                "addr": "188.185.91.110:6789/0",
+                "public_addr": "188.185.91.110:6789/0",
+                "priority": 0,
+                "weight": 0,
+                "crush_location": "{}"
+            },
+            {
+                "rank": 3,
+                "name": "miniflax-rhel-migration-test",
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v1",
+                            "addr": "188.185.23.167:6789",
+                            "nonce": 0
+                        }
+                    ]
+                },
+                "addr": "188.185.23.167:6789/0",
+                "public_addr": "188.185.23.167:6789/0",
+                "priority": 0,
+                "weight": 0,
+                "crush_location": "{}"
+            }
+        ]
+    },
+    "quorum": [
+        0,
+        1,
+        2
+    ],
+    "osdmap": {
+        "epoch": 6391,
+        "fsid": "6b15f4ce-7973-4f17-b253-66902772c0e5",
+        "created": "2021-12-14T11:16:29.412877+0100",
+        "modified": "2023-05-31T19:25:51.670875+0200",
+        "last_up_change": "2023-05-28T06:44:42.608954+0200",
+        "last_in_change": "2023-04-03T13:01:44.583436+0200",
+        "flags": "sortbitwise,recovery_deletes,purged_snapdirs,pglog_hardlimit",
+        "flags_num": 5799936,
+        "flags_set": [
+            "pglog_hardlimit",
+            "purged_snapdirs",
+            "recovery_deletes",
+            "sortbitwise"
+        ],
+        "crush_version": 74,
+        "full_ratio": 0.94999998807907104,
+        "backfillfull_ratio": 0.89999997615814209,
+        "nearfull_ratio": 0.85000002384185791,
+        "cluster_snapshot": "",
+        "pool_max": 6,
+        "max_osd": 16,
+        "require_min_compat_client": "luminous",
+        "min_compat_client": "luminous",
+        "require_osd_release": "pacific",
+        "pools": [
+            {
+                "pool": 3,
+                "pool_name": "test",
+                "create_time": "2021-12-14T20:47:54.114910+0100",
+                "flags": 1,
+                "flags_names": "hashpspool",
+                "type": 1,
+                "size": 3,
+                "min_size": 2,
+                "crush_rule": 0,
+                "peering_crush_bucket_count": 0,
+                "peering_crush_bucket_target": 0,
+                "peering_crush_bucket_barrier": 0,
+                "peering_crush_bucket_mandatory_member": 2147483647,
+                "object_hash": 2,
+                "pg_autoscale_mode": "off",
+                "pg_num": 64,
+                "pg_placement_num": 64,
+                "pg_placement_num_target": 64,
+                "pg_num_target": 64,
+                "pg_num_pending": 64,
+                "last_pg_merge_meta": {
+                    "source_pgid": "3.10",
+                    "ready_epoch": 1760,
+                    "last_epoch_started": 1759,
+                    "last_epoch_clean": 1759,
+                    "source_version": "1733'7408236",
+                    "target_version": "1733'7408340"
+                },
+                "last_change": "5337",
+                "last_force_op_resend": "0",
+                "last_force_op_resend_prenautilus": "1760",
+                "last_force_op_resend_preluminous": "1794",
+                "auid": 0,
+                "snap_mode": "selfmanaged",
+                "snap_seq": 0,
+                "snap_epoch": 0,
+                "pool_snaps": [],
+                "removed_snaps": "[]",
+                "quota_max_bytes": 0,
+                "quota_max_objects": 0,
+                "tiers": [],
+                "tier_of": -1,
+                "read_tier": -1,
+                "write_tier": -1,
+                "cache_mode": "none",
+                "target_max_bytes": 0,
+                "target_max_objects": 0,
+                "cache_target_dirty_ratio_micro": 400000,
+                "cache_target_dirty_high_ratio_micro": 600000,
+                "cache_target_full_ratio_micro": 800000,
+                "cache_min_flush_age": 0,
+                "cache_min_evict_age": 0,
+                "erasure_code_profile": "",
+                "hit_set_params": {
+                    "type": "none"
+                },
+                "hit_set_period": 0,
+                "hit_set_count": 0,
+                "use_gmt_hitset": true,
+                "min_read_recency_for_promote": 0,
+                "min_write_recency_for_promote": 0,
+                "hit_set_grade_decay_rate": 0,
+                "hit_set_search_last_n": 0,
+                "grade_table": [],
+                "stripe_width": 0,
+                "expected_num_objects": 0,
+                "fast_read": false,
+                "options": {},
+                "application_metadata": {
+                    "test": {}
+                }
+            },
+            {
+                "pool": 4,
+                "pool_name": "device_health_metrics",
+                "create_time": "2022-01-13T10:27:54.391389+0100",
+                "flags": 1,
+                "flags_names": "hashpspool",
+                "type": 1,
+                "size": 3,
+                "min_size": 2,
+                "crush_rule": 0,
+                "peering_crush_bucket_count": 0,
+                "peering_crush_bucket_target": 0,
+                "peering_crush_bucket_barrier": 0,
+                "peering_crush_bucket_mandatory_member": 2147483647,
+                "object_hash": 2,
+                "pg_autoscale_mode": "off",
+                "pg_num": 1,
+                "pg_placement_num": 1,
+                "pg_placement_num_target": 1,
+                "pg_num_target": 1,
+                "pg_num_pending": 1,
+                "last_pg_merge_meta": {
+                    "source_pgid": "0.0",
+                    "ready_epoch": 0,
+                    "last_epoch_started": 0,
+                    "last_epoch_clean": 0,
+                    "source_version": "0'0",
+                    "target_version": "0'0"
+                },
+                "last_change": "5999",
+                "last_force_op_resend": "0",
+                "last_force_op_resend_prenautilus": "0",
+                "last_force_op_resend_preluminous": "0",
+                "auid": 0,
+                "snap_mode": "selfmanaged",
+                "snap_seq": 0,
+                "snap_epoch": 0,
+                "pool_snaps": [],
+                "removed_snaps": "[]",
+                "quota_max_bytes": 0,
+                "quota_max_objects": 0,
+                "tiers": [],
+                "tier_of": -1,
+                "read_tier": -1,
+                "write_tier": -1,
+                "cache_mode": "none",
+                "target_max_bytes": 0,
+                "target_max_objects": 0,
+                "cache_target_dirty_ratio_micro": 400000,
+                "cache_target_dirty_high_ratio_micro": 600000,
+                "cache_target_full_ratio_micro": 800000,
+                "cache_min_flush_age": 0,
+                "cache_min_evict_age": 0,
+                "erasure_code_profile": "",
+                "hit_set_params": {
+                    "type": "none"
+                },
+                "hit_set_period": 0,
+                "hit_set_count": 0,
+                "use_gmt_hitset": true,
+                "min_read_recency_for_promote": 0,
+                "min_write_recency_for_promote": 0,
+                "hit_set_grade_decay_rate": 0,
+                "hit_set_search_last_n": 0,
+                "grade_table": [],
+                "stripe_width": 0,
+                "expected_num_objects": 0,
+                "fast_read": false,
+                "options": {
+                    "pg_num_min": 1
+                },
+                "application_metadata": {
+                    "mgr_devicehealth": {}
+                }
+            },
+            {
+                "pool": 5,
+                "pool_name": "cephfs.cephfs.meta",
+                "create_time": "2023-04-05T18:22:09.831137+0200",
+                "flags": 1,
+                "flags_names": "hashpspool",
+                "type": 1,
+                "size": 3,
+                "min_size": 2,
+                "crush_rule": 0,
+                "peering_crush_bucket_count": 0,
+                "peering_crush_bucket_target": 0,
+                "peering_crush_bucket_barrier": 0,
+                "peering_crush_bucket_mandatory_member": 2147483647,
+                "object_hash": 2,
+                "pg_autoscale_mode": "off",
+                "pg_num": 32,
+                "pg_placement_num": 32,
+                "pg_placement_num_target": 32,
+                "pg_num_target": 32,
+                "pg_num_pending": 32,
+                "last_pg_merge_meta": {
+                    "source_pgid": "0.0",
+                    "ready_epoch": 0,
+                    "last_epoch_started": 0,
+                    "last_epoch_clean": 0,
+                    "source_version": "0'0",
+                    "target_version": "0'0"
+                },
+                "last_change": "5460",
+                "last_force_op_resend": "0",
+                "last_force_op_resend_prenautilus": "0",
+                "last_force_op_resend_preluminous": "0",
+                "auid": 0,
+                "snap_mode": "selfmanaged",
+                "snap_seq": 0,
+                "snap_epoch": 0,
+                "pool_snaps": [],
+                "removed_snaps": "[]",
+                "quota_max_bytes": 0,
+                "quota_max_objects": 0,
+                "tiers": [],
+                "tier_of": -1,
+                "read_tier": -1,
+                "write_tier": -1,
+                "cache_mode": "none",
+                "target_max_bytes": 0,
+                "target_max_objects": 0,
+                "cache_target_dirty_ratio_micro": 400000,
+                "cache_target_dirty_high_ratio_micro": 600000,
+                "cache_target_full_ratio_micro": 800000,
+                "cache_min_flush_age": 0,
+                "cache_min_evict_age": 0,
+                "erasure_code_profile": "",
+                "hit_set_params": {
+                    "type": "none"
+                },
+                "hit_set_period": 0,
+                "hit_set_count": 0,
+                "use_gmt_hitset": true,
+                "min_read_recency_for_promote": 0,
+                "min_write_recency_for_promote": 0,
+                "hit_set_grade_decay_rate": 0,
+                "hit_set_search_last_n": 0,
+                "grade_table": [],
+                "stripe_width": 0,
+                "expected_num_objects": 0,
+                "fast_read": false,
+                "options": {
+                    "pg_autoscale_bias": 4,
+                    "pg_num_min": 16,
+                    "recovery_priority": 5
+                },
+                "application_metadata": {
+                    "cephfs": {
+                        "metadata": "cephfs"
+                    }
+                }
+            },
+            {
+                "pool": 6,
+                "pool_name": "cephfs.cephfs.data",
+                "create_time": "2023-04-05T18:22:10.379081+0200",
+                "flags": 1,
+                "flags_names": "hashpspool",
+                "type": 1,
+                "size": 3,
+                "min_size": 2,
+                "crush_rule": 0,
+                "peering_crush_bucket_count": 0,
+                "peering_crush_bucket_target": 0,
+                "peering_crush_bucket_barrier": 0,
+                "peering_crush_bucket_mandatory_member": 2147483647,
+                "object_hash": 2,
+                "pg_autoscale_mode": "off",
+                "pg_num": 32,
+                "pg_placement_num": 32,
+                "pg_placement_num_target": 32,
+                "pg_num_target": 32,
+                "pg_num_pending": 32,
+                "last_pg_merge_meta": {
+                    "source_pgid": "0.0",
+                    "ready_epoch": 0,
+                    "last_epoch_started": 0,
+                    "last_epoch_clean": 0,
+                    "source_version": "0'0",
+                    "target_version": "0'0"
+                },
+                "last_change": "5461",
+                "last_force_op_resend": "0",
+                "last_force_op_resend_prenautilus": "0",
+                "last_force_op_resend_preluminous": "0",
+                "auid": 0,
+                "snap_mode": "selfmanaged",
+                "snap_seq": 0,
+                "snap_epoch": 0,
+                "pool_snaps": [],
+                "removed_snaps": "[]",
+                "quota_max_bytes": 0,
+                "quota_max_objects": 0,
+                "tiers": [],
+                "tier_of": -1,
+                "read_tier": -1,
+                "write_tier": -1,
+                "cache_mode": "none",
+                "target_max_bytes": 0,
+                "target_max_objects": 0,
+                "cache_target_dirty_ratio_micro": 400000,
+                "cache_target_dirty_high_ratio_micro": 600000,
+                "cache_target_full_ratio_micro": 800000,
+                "cache_min_flush_age": 0,
+                "cache_min_evict_age": 0,
+                "erasure_code_profile": "",
+                "hit_set_params": {
+                    "type": "none"
+                },
+                "hit_set_period": 0,
+                "hit_set_count": 0,
+                "use_gmt_hitset": true,
+                "min_read_recency_for_promote": 0,
+                "min_write_recency_for_promote": 0,
+                "hit_set_grade_decay_rate": 0,
+                "hit_set_search_last_n": 0,
+                "grade_table": [],
+                "stripe_width": 0,
+                "expected_num_objects": 0,
+                "fast_read": false,
+                "options": {},
+                "application_metadata": {
+                    "cephfs": {
+                        "data": "cephfs"
+                    }
+                }
+            }
+        ],
+        "osds": [
+            {
+                "osd": 0,
+                "uuid": "39b7b42f-d781-425b-bb19-d63eccab344a",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 4546,
+                "last_clean_end": 6026,
+                "up_from": 6030,
+                "up_thru": 6346,
+                "down_at": 6027,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6836",
+                            "nonce": 1047426
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6837",
+                            "nonce": 1047426
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6838",
+                            "nonce": 1047426
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6839",
+                            "nonce": 1047426
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6842",
+                            "nonce": 1047426
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6843",
+                            "nonce": 1047426
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6840",
+                            "nonce": 1047426
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6841",
+                            "nonce": 1047426
+                        }
+                    ]
+                },
+                "public_addr": "188.184.96.113:6837/1047426",
+                "cluster_addr": "188.184.96.113:6839/1047426",
+                "heartbeat_back_addr": "188.184.96.113:6843/1047426",
+                "heartbeat_front_addr": "188.184.96.113:6841/1047426",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 1,
+                "uuid": "15ba238e-b814-44b4-a081-2f58564b1ea4",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 5366,
+                "last_clean_end": 6014,
+                "up_from": 6018,
+                "up_thru": 6343,
+                "down_at": 6015,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6802",
+                            "nonce": 3201852
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6803",
+                            "nonce": 3201852
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6804",
+                            "nonce": 3201852
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6805",
+                            "nonce": 3201852
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6808",
+                            "nonce": 3201852
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6809",
+                            "nonce": 3201852
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6806",
+                            "nonce": 3201852
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6807",
+                            "nonce": 3201852
+                        }
+                    ]
+                },
+                "public_addr": "188.184.103.129:6803/3201852",
+                "cluster_addr": "188.184.103.129:6805/3201852",
+                "heartbeat_back_addr": "188.184.103.129:6809/3201852",
+                "heartbeat_front_addr": "188.184.103.129:6807/3201852",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 2,
+                "uuid": "5c05f7cd-5b63-4d5e-a57f-bdf616e24097",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 4580,
+                "last_clean_end": 5997,
+                "up_from": 6001,
+                "up_thru": 6197,
+                "down_at": 5998,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6818",
+                            "nonce": 1205097
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6819",
+                            "nonce": 1205097
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6820",
+                            "nonce": 1205097
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6821",
+                            "nonce": 1205097
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6824",
+                            "nonce": 1205097
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6825",
+                            "nonce": 1205097
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6822",
+                            "nonce": 1205097
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6823",
+                            "nonce": 1205097
+                        }
+                    ]
+                },
+                "public_addr": "188.185.91.110:6819/1205097",
+                "cluster_addr": "188.185.91.110:6821/1205097",
+                "heartbeat_back_addr": "188.185.91.110:6825/1205097",
+                "heartbeat_front_addr": "188.185.91.110:6823/1205097",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 3,
+                "uuid": "66648b3b-e8a7-4adb-8fcc-e794affd59da",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 6004,
+                "last_clean_end": 6342,
+                "up_from": 6343,
+                "up_thru": 6346,
+                "down_at": 6341,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6826",
+                            "nonce": 1205115
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6827",
+                            "nonce": 1205115
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6828",
+                            "nonce": 3205115
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6829",
+                            "nonce": 3205115
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6832",
+                            "nonce": 1205115
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6833",
+                            "nonce": 1205115
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6830",
+                            "nonce": 1205115
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6831",
+                            "nonce": 1205115
+                        }
+                    ]
+                },
+                "public_addr": "188.185.91.110:6827/1205115",
+                "cluster_addr": "188.185.91.110:6829/3205115",
+                "heartbeat_back_addr": "188.185.91.110:6833/1205115",
+                "heartbeat_front_addr": "188.185.91.110:6831/1205115",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 4,
+                "uuid": "1b7b26e5-693c-430e-8e8d-61d79ea4f6f3",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 6013,
+                "last_clean_end": 6173,
+                "up_from": 6174,
+                "up_thru": 6205,
+                "down_at": 6172,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6802",
+                            "nonce": 1205050
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6803",
+                            "nonce": 1205050
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6836",
+                            "nonce": 2205050
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6837",
+                            "nonce": 2205050
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6808",
+                            "nonce": 1205050
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6809",
+                            "nonce": 1205050
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6806",
+                            "nonce": 1205050
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6807",
+                            "nonce": 1205050
+                        }
+                    ]
+                },
+                "public_addr": "188.185.91.110:6803/1205050",
+                "cluster_addr": "188.185.91.110:6837/2205050",
+                "heartbeat_back_addr": "188.185.91.110:6809/1205050",
+                "heartbeat_front_addr": "188.185.91.110:6807/1205050",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 5,
+                "uuid": "2ffc9996-be4c-45d8-8373-c36c84bf0b2f",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 4477,
+                "last_clean_end": 6014,
+                "up_from": 6022,
+                "up_thru": 6345,
+                "down_at": 6015,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6810",
+                            "nonce": 3201871
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6811",
+                            "nonce": 3201871
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6812",
+                            "nonce": 3201871
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6813",
+                            "nonce": 3201871
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6816",
+                            "nonce": 3201871
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6817",
+                            "nonce": 3201871
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6814",
+                            "nonce": 3201871
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6815",
+                            "nonce": 3201871
+                        }
+                    ]
+                },
+                "public_addr": "188.184.103.129:6811/3201871",
+                "cluster_addr": "188.184.103.129:6813/3201871",
+                "heartbeat_back_addr": "188.184.103.129:6817/3201871",
+                "heartbeat_front_addr": "188.184.103.129:6815/3201871",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 6,
+                "uuid": "dc5691df-e7a4-4a5d-ac62-e04d6bc12177",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 6021,
+                "last_clean_end": 6185,
+                "up_from": 6186,
+                "up_thru": 6343,
+                "down_at": 6183,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6834",
+                            "nonce": 3201937
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6835",
+                            "nonce": 3201937
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6827",
+                            "nonce": 6201937
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6829",
+                            "nonce": 6201937
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6840",
+                            "nonce": 3201937
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6841",
+                            "nonce": 3201937
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6838",
+                            "nonce": 3201937
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6839",
+                            "nonce": 3201937
+                        }
+                    ]
+                },
+                "public_addr": "188.184.103.129:6835/3201937",
+                "cluster_addr": "188.184.103.129:6829/6201937",
+                "heartbeat_back_addr": "188.184.103.129:6841/3201937",
+                "heartbeat_front_addr": "188.184.103.129:6839/3201937",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 7,
+                "uuid": "50075713-3e9a-4612-a9f0-8ed5ee577a8a",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 4541,
+                "last_clean_end": 6026,
+                "up_from": 6038,
+                "up_thru": 6341,
+                "down_at": 6027,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6802",
+                            "nonce": 1047390
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6803",
+                            "nonce": 1047390
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6804",
+                            "nonce": 1047390
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6805",
+                            "nonce": 1047390
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6808",
+                            "nonce": 1047390
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6809",
+                            "nonce": 1047390
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6806",
+                            "nonce": 1047390
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6807",
+                            "nonce": 1047390
+                        }
+                    ]
+                },
+                "public_addr": "188.184.96.113:6803/1047390",
+                "cluster_addr": "188.184.96.113:6805/1047390",
+                "heartbeat_back_addr": "188.184.96.113:6809/1047390",
+                "heartbeat_front_addr": "188.184.96.113:6807/1047390",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 8,
+                "uuid": "e45e2ad6-67a9-4cd1-b055-60e8856e9374",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 4541,
+                "last_clean_end": 6026,
+                "up_from": 6033,
+                "up_thru": 6347,
+                "down_at": 6027,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6824",
+                            "nonce": 1047364
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6827",
+                            "nonce": 1047364
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6829",
+                            "nonce": 1047364
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6830",
+                            "nonce": 1047364
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6834",
+                            "nonce": 1047364
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6835",
+                            "nonce": 1047364
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6831",
+                            "nonce": 1047364
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6833",
+                            "nonce": 1047364
+                        }
+                    ]
+                },
+                "public_addr": "188.184.96.113:6827/1047364",
+                "cluster_addr": "188.184.96.113:6830/1047364",
+                "heartbeat_back_addr": "188.184.96.113:6835/1047364",
+                "heartbeat_front_addr": "188.184.96.113:6833/1047364",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 9,
+                "uuid": "8ede2dc6-864a-4ac7-998a-c252b55e523f",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 5217,
+                "last_clean_end": 5997,
+                "up_from": 6010,
+                "up_thru": 6197,
+                "down_at": 5998,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6810",
+                            "nonce": 1205095
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6811",
+                            "nonce": 1205095
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6812",
+                            "nonce": 1205095
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6813",
+                            "nonce": 1205095
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6816",
+                            "nonce": 1205095
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6817",
+                            "nonce": 1205095
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6814",
+                            "nonce": 1205095
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6815",
+                            "nonce": 1205095
+                        }
+                    ]
+                },
+                "public_addr": "188.185.91.110:6811/1205095",
+                "cluster_addr": "188.185.91.110:6813/1205095",
+                "heartbeat_back_addr": "188.185.91.110:6817/1205095",
+                "heartbeat_front_addr": "188.185.91.110:6815/1205095",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 10,
+                "uuid": "4b84a170-1699-49cf-b46a-4caa6c306f34",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 6007,
+                "last_clean_end": 6131,
+                "up_from": 6132,
+                "up_thru": 6205,
+                "down_at": 6130,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6834",
+                            "nonce": 1205042
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6835",
+                            "nonce": 1205042
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6842",
+                            "nonce": 2205042
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6843",
+                            "nonce": 2205042
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6840",
+                            "nonce": 1205042
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6841",
+                            "nonce": 1205042
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6838",
+                            "nonce": 1205042
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6839",
+                            "nonce": 1205042
+                        }
+                    ]
+                },
+                "public_addr": "188.185.91.110:6835/1205042",
+                "cluster_addr": "188.185.91.110:6843/2205042",
+                "heartbeat_back_addr": "188.185.91.110:6841/1205042",
+                "heartbeat_front_addr": "188.185.91.110:6839/1205042",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 11,
+                "uuid": "04af0f33-dfc3-4b33-8ef2-5ad97612c9b9",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 6025,
+                "last_clean_end": 6204,
+                "up_from": 6205,
+                "up_thru": 6346,
+                "down_at": 6202,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6822",
+                            "nonce": 3201873
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6825",
+                            "nonce": 3201873
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6836",
+                            "nonce": 8201873
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6837",
+                            "nonce": 8201873
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6832",
+                            "nonce": 3201873
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6833",
+                            "nonce": 3201873
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6830",
+                            "nonce": 3201873
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6831",
+                            "nonce": 3201873
+                        }
+                    ]
+                },
+                "public_addr": "188.184.103.129:6825/3201873",
+                "cluster_addr": "188.184.103.129:6837/8201873",
+                "heartbeat_back_addr": "188.184.103.129:6833/3201873",
+                "heartbeat_front_addr": "188.184.103.129:6831/3201873",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 12,
+                "uuid": "dc7a22aa-24c6-45a7-8c19-159e9e2e51c6",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 6022,
+                "last_clean_end": 6186,
+                "up_from": 6187,
+                "up_thru": 6346,
+                "down_at": 6183,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6818",
+                            "nonce": 3201864
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6819",
+                            "nonce": 3201864
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6842",
+                            "nonce": 5201864
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6843",
+                            "nonce": 5201864
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6826",
+                            "nonce": 3201864
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6828",
+                            "nonce": 3201864
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6823",
+                            "nonce": 3201864
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6824",
+                            "nonce": 3201864
+                        }
+                    ]
+                },
+                "public_addr": "188.184.103.129:6819/3201864",
+                "cluster_addr": "188.184.103.129:6843/5201864",
+                "heartbeat_back_addr": "188.184.103.129:6828/3201864",
+                "heartbeat_front_addr": "188.184.103.129:6824/3201864",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 13,
+                "uuid": "669368d9-1b54-46a2-b0fd-c04b734c8887",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 6036,
+                "last_clean_end": 6190,
+                "up_from": 6191,
+                "up_thru": 6343,
+                "down_at": 6189,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6812",
+                            "nonce": 1047395
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6814",
+                            "nonce": 1047395
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6816",
+                            "nonce": 3047395
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6818",
+                            "nonce": 3047395
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6825",
+                            "nonce": 1047395
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6828",
+                            "nonce": 1047395
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6820",
+                            "nonce": 1047395
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6822",
+                            "nonce": 1047395
+                        }
+                    ]
+                },
+                "public_addr": "188.184.96.113:6814/1047395",
+                "cluster_addr": "188.184.96.113:6818/3047395",
+                "heartbeat_back_addr": "188.184.96.113:6828/1047395",
+                "heartbeat_front_addr": "188.184.96.113:6822/1047395",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            },
+            {
+                "osd": 14,
+                "uuid": "600e3fea-b31a-4241-b5b3-e34868faab65",
+                "up": 1,
+                "in": 1,
+                "weight": 1,
+                "primary_affinity": 1,
+                "last_clean_begin": 6039,
+                "last_clean_end": 6195,
+                "up_from": 6197,
+                "up_thru": 6347,
+                "down_at": 6193,
+                "lost_at": 0,
+                "public_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6813",
+                            "nonce": 1047380
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6815",
+                            "nonce": 1047380
+                        }
+                    ]
+                },
+                "cluster_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6817",
+                            "nonce": 3047380
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6819",
+                            "nonce": 3047380
+                        }
+                    ]
+                },
+                "heartbeat_back_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6826",
+                            "nonce": 1047380
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6832",
+                            "nonce": 1047380
+                        }
+                    ]
+                },
+                "heartbeat_front_addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.96.113:6821",
+                            "nonce": 1047380
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.96.113:6823",
+                            "nonce": 1047380
+                        }
+                    ]
+                },
+                "public_addr": "188.184.96.113:6815/1047380",
+                "cluster_addr": "188.184.96.113:6819/3047380",
+                "heartbeat_back_addr": "188.184.96.113:6832/1047380",
+                "heartbeat_front_addr": "188.184.96.113:6823/1047380",
+                "state": [
+                    "exists",
+                    "up"
+                ]
+            }
+        ],
+        "osd_xinfo": [
+            {
+                "osd": 0,
+                "down_stamp": "2023-05-11T11:03:34.826234+0200",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-31T07:17:02.206396+0200",
+                "dead_epoch": 6026
+            },
+            {
+                "osd": 1,
+                "down_stamp": "2023-02-24T16:26:03.459723+0100",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-30T23:44:46.508445+0200",
+                "dead_epoch": 6014
+            },
+            {
+                "osd": 2,
+                "down_stamp": "2023-05-11T11:01:24.610321+0200",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-31T18:25:58.996703+0200",
+                "dead_epoch": 5997
+            },
+            {
+                "osd": 3,
+                "down_stamp": "2023-05-28T06:44:06.937792+0200",
+                "laggy_probability": 0.30000001192092896,
+                "laggy_interval": 10,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-31T13:08:48.242403+0200",
+                "dead_epoch": 6341
+            },
+            {
+                "osd": 4,
+                "down_stamp": "2023-05-18T02:55:17.961628+0200",
+                "laggy_probability": 0.30000001192092896,
+                "laggy_interval": 0,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-31T09:25:17.797746+0200",
+                "dead_epoch": 6172
+            },
+            {
+                "osd": 5,
+                "down_stamp": "2023-05-11T11:02:32.164700+0200",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-30T19:54:36.211965+0200",
+                "dead_epoch": 6014
+            },
+            {
+                "osd": 6,
+                "down_stamp": "2023-05-18T03:19:28.914767+0200",
+                "laggy_probability": 0.65700000524520874,
+                "laggy_interval": 1,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-31T13:18:04.089739+0200",
+                "dead_epoch": 6185
+            },
+            {
+                "osd": 7,
+                "down_stamp": "2023-05-11T11:03:34.826234+0200",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-30T21:21:41.078121+0200",
+                "dead_epoch": 6026
+            },
+            {
+                "osd": 8,
+                "down_stamp": "2023-05-11T11:03:34.826234+0200",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-31T17:08:53.546896+0200",
+                "dead_epoch": 6026
+            },
+            {
+                "osd": 9,
+                "down_stamp": "0.000000",
+                "laggy_probability": 0,
+                "laggy_interval": 0,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-31T13:03:57.288642+0200",
+                "dead_epoch": 5997
+            },
+            {
+                "osd": 10,
+                "down_stamp": "2023-05-17T23:07:04.817361+0200",
+                "laggy_probability": 0.30000001192092896,
+                "laggy_interval": 1,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-31T19:25:50.783048+0200",
+                "dead_epoch": 6131
+            },
+            {
+                "osd": 11,
+                "down_stamp": "2023-05-18T05:21:20.469544+0200",
+                "laggy_probability": 0.83192998170852661,
+                "laggy_interval": 2,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-30T20:33:39.590604+0200",
+                "dead_epoch": 6203
+            },
+            {
+                "osd": 12,
+                "down_stamp": "2023-05-18T03:19:28.914767+0200",
+                "laggy_probability": 0.50999999046325684,
+                "laggy_interval": 5,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-31T09:28:35.869871+0200",
+                "dead_epoch": 6185
+            },
+            {
+                "osd": 13,
+                "down_stamp": "2023-05-18T03:33:37.821071+0200",
+                "laggy_probability": 0.50999999046325684,
+                "laggy_interval": 1,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-31T06:35:26.879652+0200",
+                "dead_epoch": 6189
+            },
+            {
+                "osd": 14,
+                "down_stamp": "2023-05-18T05:01:02.971127+0200",
+                "laggy_probability": 0.50999999046325684,
+                "laggy_interval": 1,
+                "features": 4540138297136906239,
+                "old_weight": 0,
+                "last_purged_snaps_scrub": "2023-05-31T07:58:26.536809+0200",
+                "dead_epoch": 6194
+            }
+        ],
+        "pg_upmap": [],
+        "pg_upmap_items": [
+            {
+                "pgid": "3.0",
+                "mappings": [
+                    {
+                        "from": 3,
+                        "to": 9
+                    }
+                ]
+            },
+            {
+                "pgid": "3.2",
+                "mappings": [
+                    {
+                        "from": 8,
+                        "to": 0
+                    }
+                ]
+            },
+            {
+                "pgid": "3.3",
+                "mappings": [
+                    {
+                        "from": 8,
+                        "to": 14
+                    }
+                ]
+            },
+            {
+                "pgid": "3.5",
+                "mappings": [
+                    {
+                        "from": 3,
+                        "to": 2
+                    }
+                ]
+            },
+            {
+                "pgid": "3.7",
+                "mappings": [
+                    {
+                        "from": 4,
+                        "to": 2
+                    }
+                ]
+            },
+            {
+                "pgid": "3.9",
+                "mappings": [
+                    {
+                        "from": 4,
+                        "to": 2
+                    },
+                    {
+                        "from": 12,
+                        "to": 6
+                    }
+                ]
+            },
+            {
+                "pgid": "3.a",
+                "mappings": [
+                    {
+                        "from": 4,
+                        "to": 2
+                    }
+                ]
+            },
+            {
+                "pgid": "3.b",
+                "mappings": [
+                    {
+                        "from": 3,
+                        "to": 2
+                    }
+                ]
+            },
+            {
+                "pgid": "3.d",
+                "mappings": [
+                    {
+                        "from": 3,
+                        "to": 2
+                    }
+                ]
+            },
+            {
+                "pgid": "3.13",
+                "mappings": [
+                    {
+                        "from": 3,
+                        "to": 9
+                    }
+                ]
+            },
+            {
+                "pgid": "3.15",
+                "mappings": [
+                    {
+                        "from": 12,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "3.16",
+                "mappings": [
+                    {
+                        "from": 11,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "3.19",
+                "mappings": [
+                    {
+                        "from": 12,
+                        "to": 6
+                    }
+                ]
+            },
+            {
+                "pgid": "3.1b",
+                "mappings": [
+                    {
+                        "from": 12,
+                        "to": 11
+                    }
+                ]
+            },
+            {
+                "pgid": "3.24",
+                "mappings": [
+                    {
+                        "from": 3,
+                        "to": 2
+                    },
+                    {
+                        "from": 11,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "3.26",
+                "mappings": [
+                    {
+                        "from": 4,
+                        "to": 2
+                    }
+                ]
+            },
+            {
+                "pgid": "3.27",
+                "mappings": [
+                    {
+                        "from": 3,
+                        "to": 2
+                    },
+                    {
+                        "from": 8,
+                        "to": 14
+                    }
+                ]
+            },
+            {
+                "pgid": "3.29",
+                "mappings": [
+                    {
+                        "from": 3,
+                        "to": 9
+                    }
+                ]
+            },
+            {
+                "pgid": "3.2b",
+                "mappings": [
+                    {
+                        "from": 12,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "3.2c",
+                "mappings": [
+                    {
+                        "from": 3,
+                        "to": 9
+                    }
+                ]
+            },
+            {
+                "pgid": "3.31",
+                "mappings": [
+                    {
+                        "from": 8,
+                        "to": 14
+                    }
+                ]
+            },
+            {
+                "pgid": "3.33",
+                "mappings": [
+                    {
+                        "from": 8,
+                        "to": 14
+                    }
+                ]
+            },
+            {
+                "pgid": "3.34",
+                "mappings": [
+                    {
+                        "from": 8,
+                        "to": 14
+                    }
+                ]
+            },
+            {
+                "pgid": "3.39",
+                "mappings": [
+                    {
+                        "from": 12,
+                        "to": 5
+                    }
+                ]
+            },
+            {
+                "pgid": "5.0",
+                "mappings": [
+                    {
+                        "from": 5,
+                        "to": 1
+                    }
+                ]
+            },
+            {
+                "pgid": "5.3",
+                "mappings": [
+                    {
+                        "from": 4,
+                        "to": 10
+                    },
+                    {
+                        "from": 11,
+                        "to": 12
+                    }
+                ]
+            },
+            {
+                "pgid": "5.6",
+                "mappings": [
+                    {
+                        "from": 11,
+                        "to": 6
+                    }
+                ]
+            },
+            {
+                "pgid": "5.7",
+                "mappings": [
+                    {
+                        "from": 4,
+                        "to": 2
+                    }
+                ]
+            },
+            {
+                "pgid": "5.15",
+                "mappings": [
+                    {
+                        "from": 11,
+                        "to": 6
+                    }
+                ]
+            },
+            {
+                "pgid": "5.1a",
+                "mappings": [
+                    {
+                        "from": 4,
+                        "to": 2
+                    }
+                ]
+            },
+            {
+                "pgid": "6.14",
+                "mappings": [
+                    {
+                        "from": 11,
+                        "to": 12
+                    }
+                ]
+            },
+            {
+                "pgid": "6.19",
+                "mappings": [
+                    {
+                        "from": 13,
+                        "to": 14
+                    }
+                ]
+            },
+            {
+                "pgid": "6.1d",
+                "mappings": [
+                    {
+                        "from": 13,
+                        "to": 14
+                    }
+                ]
+            }
+        ],
+        "pg_temp": [],
+        "primary_temp": [],
+        "blocklist": {},
+        "erasure_code_profiles": {
+            "asdf": {
+                "crush-device-class": "",
+                "crush-failure-domain": "osd",
+                "crush-root": "default",
+                "jerasure-per-chunk-alignment": "false",
+                "k": "8",
+                "m": "4",
+                "plugin": "jerasure",
+                "technique": "reed_sol_van",
+                "w": "8"
+            },
+            "default": {
+                "k": "2",
+                "m": "1",
+                "plugin": "jerasure",
+                "technique": "reed_sol_van"
+            }
+        },
+        "removed_snaps_queue": [],
+        "new_removed_snaps": [],
+        "new_purged_snaps": [],
+        "crush_node_flags": {},
+        "device_class_flags": {},
+        "stretch_mode": {
+            "stretch_mode_enabled": false,
+            "stretch_bucket_count": 0,
+            "degraded_stretch_mode": 0,
+            "recovering_stretch_mode": 0,
+            "stretch_mode_bucket": 0
+        }
+    },
+    "osd_metadata": [
+        {
+            "id": 0,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.184.96.113:6838/1047426,v1:188.184.96.113:6839/1047426]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-0",
+            "bluestore_bdev_devices": "vdb",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-0",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vdb=6ea8b7f0-696a-47e3-b",
+            "device_paths": "vdb=/dev/disk/by-path/pci-0000:04:00.0",
+            "devices": "vdb",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.184.96.113:6836/1047426,v1:188.184.96.113:6837/1047426]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.184.96.113:6842/1047426,v1:188.184.96.113:6843/1047426]",
+            "hb_front_addr": "[v2:188.184.96.113:6840/1047426,v1:188.184.96.113:6841/1047426]",
+            "hostname": "miniflax-e845dd4855.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vdb",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-0",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 1,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.184.103.129:6804/3201852,v1:188.184.103.129:6805/3201852]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-0",
+            "bluestore_bdev_devices": "vdb",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-0",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vdb=541ae81f-d4a7-4d39-8",
+            "device_paths": "vdb=/dev/disk/by-path/pci-0000:04:00.0",
+            "devices": "vdb",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.184.103.129:6802/3201852,v1:188.184.103.129:6803/3201852]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.184.103.129:6808/3201852,v1:188.184.103.129:6809/3201852]",
+            "hb_front_addr": "[v2:188.184.103.129:6806/3201852,v1:188.184.103.129:6807/3201852]",
+            "hostname": "miniflax-435fc69142.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vdb",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-1",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 2,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.185.91.110:6820/1205097,v1:188.185.91.110:6821/1205097]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-1",
+            "bluestore_bdev_devices": "vdb",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-1",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vdb=0458fcf8-e9af-4a21-8",
+            "device_paths": "vdb=/dev/disk/by-path/pci-0000:04:00.0",
+            "devices": "vdb",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.185.91.110:6818/1205097,v1:188.185.91.110:6819/1205097]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.185.91.110:6824/1205097,v1:188.185.91.110:6825/1205097]",
+            "hb_front_addr": "[v2:188.185.91.110:6822/1205097,v1:188.185.91.110:6823/1205097]",
+            "hostname": "miniflax-0644fef1c2.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vdb",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-2",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 3,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.185.91.110:6828/3205115,v1:188.185.91.110:6829/3205115]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-2",
+            "bluestore_bdev_devices": "vdc",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-2",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vdc=fd09a588-dd54-4fe0-9",
+            "device_paths": "vdc=/dev/disk/by-path/pci-0000:05:00.0",
+            "devices": "vdc",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.185.91.110:6826/1205115,v1:188.185.91.110:6827/1205115]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.185.91.110:6832/1205115,v1:188.185.91.110:6833/1205115]",
+            "hb_front_addr": "[v2:188.185.91.110:6830/1205115,v1:188.185.91.110:6831/1205115]",
+            "hostname": "miniflax-0644fef1c2.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vdc",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-3",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 4,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.185.91.110:6836/2205050,v1:188.185.91.110:6837/2205050]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-0",
+            "bluestore_bdev_devices": "vdd",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-0",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vdd=434fca33-0fe5-46f5-a",
+            "device_paths": "vdd=/dev/disk/by-path/pci-0000:06:00.0",
+            "devices": "vdd",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.185.91.110:6802/1205050,v1:188.185.91.110:6803/1205050]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.185.91.110:6808/1205050,v1:188.185.91.110:6809/1205050]",
+            "hb_front_addr": "[v2:188.185.91.110:6806/1205050,v1:188.185.91.110:6807/1205050]",
+            "hostname": "miniflax-0644fef1c2.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vdd",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-4",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 5,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.184.103.129:6812/3201871,v1:188.184.103.129:6813/3201871]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-1",
+            "bluestore_bdev_devices": "vdc",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-1",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vdc=a086a83e-ffa4-4770-8",
+            "device_paths": "vdc=/dev/disk/by-path/pci-0000:06:00.0",
+            "devices": "vdc",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.184.103.129:6810/3201871,v1:188.184.103.129:6811/3201871]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.184.103.129:6816/3201871,v1:188.184.103.129:6817/3201871]",
+            "hb_front_addr": "[v2:188.184.103.129:6814/3201871,v1:188.184.103.129:6815/3201871]",
+            "hostname": "miniflax-435fc69142.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vdc",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-5",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 6,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.184.103.129:6827/6201937,v1:188.184.103.129:6829/6201937]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-2",
+            "bluestore_bdev_devices": "vdd",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-2",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vdd=b842d086-8d98-4aea-a",
+            "device_paths": "vdd=/dev/disk/by-path/pci-0000:07:00.0",
+            "devices": "vdd",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.184.103.129:6834/3201937,v1:188.184.103.129:6835/3201937]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.184.103.129:6840/3201937,v1:188.184.103.129:6841/3201937]",
+            "hb_front_addr": "[v2:188.184.103.129:6838/3201937,v1:188.184.103.129:6839/3201937]",
+            "hostname": "miniflax-435fc69142.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vdd",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-6",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 7,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.184.96.113:6804/1047390,v1:188.184.96.113:6805/1047390]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-1",
+            "bluestore_bdev_devices": "vdc",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-1",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vdc=6620b193-d329-417c-8",
+            "device_paths": "vdc=/dev/disk/by-path/pci-0000:06:00.0",
+            "devices": "vdc",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.184.96.113:6802/1047390,v1:188.184.96.113:6803/1047390]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.184.96.113:6808/1047390,v1:188.184.96.113:6809/1047390]",
+            "hb_front_addr": "[v2:188.184.96.113:6806/1047390,v1:188.184.96.113:6807/1047390]",
+            "hostname": "miniflax-e845dd4855.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vdc",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-7",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 8,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.184.96.113:6829/1047364,v1:188.184.96.113:6830/1047364]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-2",
+            "bluestore_bdev_devices": "vdd",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-2",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vdd=d769af5d-0f2b-40cf-8",
+            "device_paths": "vdd=/dev/disk/by-path/pci-0000:07:00.0",
+            "devices": "vdd",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.184.96.113:6824/1047364,v1:188.184.96.113:6827/1047364]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.184.96.113:6834/1047364,v1:188.184.96.113:6835/1047364]",
+            "hb_front_addr": "[v2:188.184.96.113:6831/1047364,v1:188.184.96.113:6833/1047364]",
+            "hostname": "miniflax-e845dd4855.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vdd",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-8",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 9,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.185.91.110:6812/1205095,v1:188.185.91.110:6813/1205095]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-3",
+            "bluestore_bdev_devices": "vde",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-3",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vde=260e9f58-1dac-42f1-a",
+            "device_paths": "vde=/dev/disk/by-path/pci-0000:08:00.0",
+            "devices": "vde",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.185.91.110:6810/1205095,v1:188.185.91.110:6811/1205095]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.185.91.110:6816/1205095,v1:188.185.91.110:6817/1205095]",
+            "hb_front_addr": "[v2:188.185.91.110:6814/1205095,v1:188.185.91.110:6815/1205095]",
+            "hostname": "miniflax-0644fef1c2.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vde",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-9",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 10,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.185.91.110:6842/2205042,v1:188.185.91.110:6843/2205042]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-4",
+            "bluestore_bdev_devices": "vdf",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-4",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vdf=79eae4be-b2e5-4b46-a",
+            "device_paths": "vdf=/dev/disk/by-path/pci-0000:09:00.0",
+            "devices": "vdf",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.185.91.110:6834/1205042,v1:188.185.91.110:6835/1205042]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.185.91.110:6840/1205042,v1:188.185.91.110:6841/1205042]",
+            "hb_front_addr": "[v2:188.185.91.110:6838/1205042,v1:188.185.91.110:6839/1205042]",
+            "hostname": "miniflax-0644fef1c2.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vdf",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-10",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 11,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.184.103.129:6836/8201873,v1:188.184.103.129:6837/8201873]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-3",
+            "bluestore_bdev_devices": "vde",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-3",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vde=898895b6-e723-4f7d-8",
+            "device_paths": "vde=/dev/disk/by-path/pci-0000:08:00.0",
+            "devices": "vde",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.184.103.129:6822/3201873,v1:188.184.103.129:6825/3201873]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.184.103.129:6832/3201873,v1:188.184.103.129:6833/3201873]",
+            "hb_front_addr": "[v2:188.184.103.129:6830/3201873,v1:188.184.103.129:6831/3201873]",
+            "hostname": "miniflax-435fc69142.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vde",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-11",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 12,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.184.103.129:6842/5201864,v1:188.184.103.129:6843/5201864]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-4",
+            "bluestore_bdev_devices": "vdf",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-4",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vdf=3197673e-337d-40ff-a",
+            "device_paths": "vdf=/dev/disk/by-path/pci-0000:09:00.0",
+            "devices": "vdf",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.184.103.129:6818/3201864,v1:188.184.103.129:6819/3201864]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.184.103.129:6826/3201864,v1:188.184.103.129:6828/3201864]",
+            "hb_front_addr": "[v2:188.184.103.129:6823/3201864,v1:188.184.103.129:6824/3201864]",
+            "hostname": "miniflax-435fc69142.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vdf",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-12",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 13,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.184.96.113:6816/3047395,v1:188.184.96.113:6818/3047395]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-3",
+            "bluestore_bdev_devices": "vde",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-3",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vde=931144a9-4f1f-4b56-9",
+            "device_paths": "vde=/dev/disk/by-path/pci-0000:08:00.0",
+            "devices": "vde",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.184.96.113:6812/1047395,v1:188.184.96.113:6814/1047395]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.184.96.113:6825/1047395,v1:188.184.96.113:6828/1047395]",
+            "hb_front_addr": "[v2:188.184.96.113:6820/1047395,v1:188.184.96.113:6822/1047395]",
+            "hostname": "miniflax-e845dd4855.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vde",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-13",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        },
+        {
+            "id": 14,
+            "arch": "x86_64",
+            "back_addr": "[v2:188.184.96.113:6817/3047380,v1:188.184.96.113:6819/3047380]",
+            "back_iface": "",
+            "bluefs": "1",
+            "bluefs_dedicated_db": "0",
+            "bluefs_dedicated_wal": "0",
+            "bluefs_single_shared_device": "1",
+            "bluestore_bdev_access_mode": "blk",
+            "bluestore_bdev_block_size": "4096",
+            "bluestore_bdev_dev_node": "/dev/dm-4",
+            "bluestore_bdev_devices": "vdf",
+            "bluestore_bdev_driver": "KernelDevice",
+            "bluestore_bdev_partition_path": "/dev/dm-4",
+            "bluestore_bdev_rotational": "1",
+            "bluestore_bdev_size": "107369988096",
+            "bluestore_bdev_support_discard": "0",
+            "bluestore_bdev_type": "hdd",
+            "ceph_release": "pacific",
+            "ceph_version": "ceph version 16.2.9-2 (4c3647a322c0ff5a1dd2344e039859dcbd28c830) pacific (stable)",
+            "ceph_version_short": "16.2.9-2",
+            "cpu": "Intel Xeon Processor (Skylake, IBRS)",
+            "default_device_class": "hdd",
+            "device_ids": "vdf=eca3c402-489e-493f-b",
+            "device_paths": "vdf=/dev/disk/by-path/pci-0000:09:00.0",
+            "devices": "vdf",
+            "distro": "centos",
+            "distro_description": "CentOS Stream 8",
+            "distro_version": "8",
+            "front_addr": "[v2:188.184.96.113:6813/1047380,v1:188.184.96.113:6815/1047380]",
+            "front_iface": "",
+            "hb_back_addr": "[v2:188.184.96.113:6826/1047380,v1:188.184.96.113:6832/1047380]",
+            "hb_front_addr": "[v2:188.184.96.113:6821/1047380,v1:188.184.96.113:6823/1047380]",
+            "hostname": "miniflax-e845dd4855.cern.ch",
+            "journal_rotational": "1",
+            "kernel_description": "#1 SMP Wed Jan 18 15:02:46 UTC 2023",
+            "kernel_version": "4.18.0-448.el8.x86_64",
+            "mem_swap_kb": "14477308",
+            "mem_total_kb": "7168320",
+            "network_numa_unknown_ifaces": "back_iface,front_iface",
+            "objectstore_numa_unknown_devices": "vdf",
+            "os": "Linux",
+            "osd_data": "/var/lib/ceph/osd/ceph-14",
+            "osd_objectstore": "bluestore",
+            "osdspec_affinity": "",
+            "rotational": "1"
+        }
+    ],
+    "osdmap_clean_epochs": {
+        "min_last_epoch_clean": 0,
+        "last_epoch_clean": {
+            "per_pool": [
+                {
+                    "poolid": 3,
+                    "floor": 0
+                },
+                {
+                    "poolid": 5,
+                    "floor": 0
+                },
+                {
+                    "poolid": 6,
+                    "floor": 0
+                }
+            ]
+        },
+        "osd_epochs": [
+            {
+                "id": 0,
+                "epoch": 6366
+            },
+            {
+                "id": 3,
+                "epoch": 6220
+            },
+            {
+                "id": 4,
+                "epoch": 6078
+            },
+            {
+                "id": 7,
+                "epoch": 6355
+            },
+            {
+                "id": 10,
+                "epoch": 6309
+            },
+            {
+                "id": 12,
+                "epoch": 6256
+            }
+        ]
+    },
+    "osdmap_first_committed": 5847,
+    "osdmap_last_committed": 6391,
+    "crushmap": {
+        "devices": [
+            {
+                "id": 0,
+                "name": "osd.0",
+                "class": "hdd"
+            },
+            {
+                "id": 1,
+                "name": "osd.1",
+                "class": "hdd"
+            },
+            {
+                "id": 2,
+                "name": "osd.2",
+                "class": "hdd"
+            },
+            {
+                "id": 3,
+                "name": "osd.3",
+                "class": "hdd"
+            },
+            {
+                "id": 4,
+                "name": "osd.4",
+                "class": "hdd"
+            },
+            {
+                "id": 5,
+                "name": "osd.5",
+                "class": "hdd"
+            },
+            {
+                "id": 6,
+                "name": "osd.6",
+                "class": "hdd"
+            },
+            {
+                "id": 7,
+                "name": "osd.7",
+                "class": "hdd"
+            },
+            {
+                "id": 8,
+                "name": "osd.8",
+                "class": "hdd"
+            },
+            {
+                "id": 9,
+                "name": "osd.9",
+                "class": "hdd"
+            },
+            {
+                "id": 10,
+                "name": "osd.10",
+                "class": "hdd"
+            },
+            {
+                "id": 11,
+                "name": "osd.11",
+                "class": "hdd"
+            },
+            {
+                "id": 12,
+                "name": "osd.12",
+                "class": "hdd"
+            },
+            {
+                "id": 13,
+                "name": "osd.13",
+                "class": "hdd"
+            },
+            {
+                "id": 14,
+                "name": "osd.14",
+                "class": "hdd"
+            }
+        ],
+        "types": [
+            {
+                "type_id": 0,
+                "name": "osd"
+            },
+            {
+                "type_id": 1,
+                "name": "host"
+            },
+            {
+                "type_id": 2,
+                "name": "chassis"
+            },
+            {
+                "type_id": 3,
+                "name": "rack"
+            },
+            {
+                "type_id": 4,
+                "name": "row"
+            },
+            {
+                "type_id": 5,
+                "name": "pdu"
+            },
+            {
+                "type_id": 6,
+                "name": "pod"
+            },
+            {
+                "type_id": 7,
+                "name": "room"
+            },
+            {
+                "type_id": 8,
+                "name": "datacenter"
+            },
+            {
+                "type_id": 9,
+                "name": "zone"
+            },
+            {
+                "type_id": 10,
+                "name": "region"
+            },
+            {
+                "type_id": 11,
+                "name": "root"
+            }
+        ],
+        "buckets": [
+            {
+                "id": -1,
+                "name": "default",
+                "type_id": 11,
+                "type_name": "root",
+                "weight": 92904,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": -5,
+                        "weight": 92904,
+                        "pos": 0
+                    }
+                ]
+            },
+            {
+                "id": -2,
+                "name": "default~hdd",
+                "type_id": 11,
+                "type_name": "root",
+                "weight": 92904,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": -8,
+                        "weight": 92904,
+                        "pos": 0
+                    }
+                ]
+            },
+            {
+                "id": -3,
+                "name": "miniflax-0644fef1c2",
+                "type_id": 1,
+                "type_name": "host",
+                "weight": 32010,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": 2,
+                        "weight": 6402,
+                        "pos": 0
+                    },
+                    {
+                        "id": 4,
+                        "weight": 6402,
+                        "pos": 1
+                    },
+                    {
+                        "id": 3,
+                        "weight": 6402,
+                        "pos": 2
+                    },
+                    {
+                        "id": 9,
+                        "weight": 6402,
+                        "pos": 3
+                    },
+                    {
+                        "id": 10,
+                        "weight": 6402,
+                        "pos": 4
+                    }
+                ]
+            },
+            {
+                "id": -4,
+                "name": "0000",
+                "type_id": 3,
+                "type_name": "rack",
+                "weight": 92904,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": -3,
+                        "weight": 32010,
+                        "pos": 0
+                    },
+                    {
+                        "id": -9,
+                        "weight": 28884,
+                        "pos": 1
+                    },
+                    {
+                        "id": -11,
+                        "weight": 32010,
+                        "pos": 2
+                    }
+                ]
+            },
+            {
+                "id": -5,
+                "name": "0000-0-0000",
+                "type_id": 7,
+                "type_name": "room",
+                "weight": 92904,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": -4,
+                        "weight": 92904,
+                        "pos": 0
+                    }
+                ]
+            },
+            {
+                "id": -6,
+                "name": "miniflax-0644fef1c2~hdd",
+                "type_id": 1,
+                "type_name": "host",
+                "weight": 32010,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": 2,
+                        "weight": 6402,
+                        "pos": 0
+                    },
+                    {
+                        "id": 4,
+                        "weight": 6402,
+                        "pos": 1
+                    },
+                    {
+                        "id": 3,
+                        "weight": 6402,
+                        "pos": 2
+                    },
+                    {
+                        "id": 9,
+                        "weight": 6402,
+                        "pos": 3
+                    },
+                    {
+                        "id": 10,
+                        "weight": 6402,
+                        "pos": 4
+                    }
+                ]
+            },
+            {
+                "id": -7,
+                "name": "0000~hdd",
+                "type_id": 3,
+                "type_name": "rack",
+                "weight": 92904,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": -6,
+                        "weight": 32010,
+                        "pos": 0
+                    },
+                    {
+                        "id": -10,
+                        "weight": 28884,
+                        "pos": 1
+                    },
+                    {
+                        "id": -12,
+                        "weight": 32010,
+                        "pos": 2
+                    }
+                ]
+            },
+            {
+                "id": -8,
+                "name": "0000-0-0000~hdd",
+                "type_id": 7,
+                "type_name": "room",
+                "weight": 92904,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": -7,
+                        "weight": 92904,
+                        "pos": 0
+                    }
+                ]
+            },
+            {
+                "id": -9,
+                "name": "miniflax-435fc69142",
+                "type_id": 1,
+                "type_name": "host",
+                "weight": 28884,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": 1,
+                        "weight": 3276,
+                        "pos": 0
+                    },
+                    {
+                        "id": 6,
+                        "weight": 6402,
+                        "pos": 1
+                    },
+                    {
+                        "id": 5,
+                        "weight": 6402,
+                        "pos": 2
+                    },
+                    {
+                        "id": 11,
+                        "weight": 6402,
+                        "pos": 3
+                    },
+                    {
+                        "id": 12,
+                        "weight": 6402,
+                        "pos": 4
+                    }
+                ]
+            },
+            {
+                "id": -10,
+                "name": "miniflax-435fc69142~hdd",
+                "type_id": 1,
+                "type_name": "host",
+                "weight": 28884,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": 1,
+                        "weight": 3276,
+                        "pos": 0
+                    },
+                    {
+                        "id": 6,
+                        "weight": 6402,
+                        "pos": 1
+                    },
+                    {
+                        "id": 5,
+                        "weight": 6402,
+                        "pos": 2
+                    },
+                    {
+                        "id": 11,
+                        "weight": 6402,
+                        "pos": 3
+                    },
+                    {
+                        "id": 12,
+                        "weight": 6402,
+                        "pos": 4
+                    }
+                ]
+            },
+            {
+                "id": -11,
+                "name": "miniflax-e845dd4855",
+                "type_id": 1,
+                "type_name": "host",
+                "weight": 32010,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": 0,
+                        "weight": 6402,
+                        "pos": 0
+                    },
+                    {
+                        "id": 8,
+                        "weight": 6402,
+                        "pos": 1
+                    },
+                    {
+                        "id": 7,
+                        "weight": 6402,
+                        "pos": 2
+                    },
+                    {
+                        "id": 13,
+                        "weight": 6402,
+                        "pos": 3
+                    },
+                    {
+                        "id": 14,
+                        "weight": 6402,
+                        "pos": 4
+                    }
+                ]
+            },
+            {
+                "id": -12,
+                "name": "miniflax-e845dd4855~hdd",
+                "type_id": 1,
+                "type_name": "host",
+                "weight": 32010,
+                "alg": "straw2",
+                "hash": "rjenkins1",
+                "items": [
+                    {
+                        "id": 0,
+                        "weight": 6402,
+                        "pos": 0
+                    },
+                    {
+                        "id": 8,
+                        "weight": 6402,
+                        "pos": 1
+                    },
+                    {
+                        "id": 7,
+                        "weight": 6402,
+                        "pos": 2
+                    },
+                    {
+                        "id": 13,
+                        "weight": 6402,
+                        "pos": 3
+                    },
+                    {
+                        "id": 14,
+                        "weight": 6402,
+                        "pos": 4
+                    }
+                ]
+            }
+        ],
+        "rules": [
+            {
+                "rule_id": 0,
+                "rule_name": "replicated_rule",
+                "ruleset": 0,
+                "type": 1,
+                "min_size": 1,
+                "max_size": 10,
+                "steps": [
+                    {
+                        "op": "take",
+                        "item": -1,
+                        "item_name": "default"
+                    },
+                    {
+                        "op": "chooseleaf_firstn",
+                        "num": 0,
+                        "type": "host"
+                    },
+                    {
+                        "op": "emit"
+                    }
+                ]
+            },
+            {
+                "rule_id": 1,
+                "rule_name": "asdfasdf",
+                "ruleset": 1,
+                "type": 3,
+                "min_size": 3,
+                "max_size": 12,
+                "steps": [
+                    {
+                        "op": "set_chooseleaf_tries",
+                        "num": 5
+                    },
+                    {
+                        "op": "set_choose_tries",
+                        "num": 100
+                    },
+                    {
+                        "op": "take",
+                        "item": -1,
+                        "item_name": "default"
+                    },
+                    {
+                        "op": "choose_indep",
+                        "num": 0,
+                        "type": "osd"
+                    },
+                    {
+                        "op": "emit"
+                    }
+                ]
+            }
+        ],
+        "tunables": {
+            "choose_local_tries": 0,
+            "choose_local_fallback_tries": 0,
+            "choose_total_tries": 50,
+            "chooseleaf_descend_once": 1,
+            "chooseleaf_vary_r": 1,
+            "chooseleaf_stable": 1,
+            "straw_calc_version": 1,
+            "allowed_bucket_algs": 54,
+            "profile": "jewel",
+            "optimal_tunables": 1,
+            "legacy_tunables": 0,
+            "minimum_required_version": "jewel",
+            "require_feature_tunables": 1,
+            "require_feature_tunables2": 1,
+            "has_v2_rules": 1,
+            "require_feature_tunables3": 1,
+            "has_v3_rules": 0,
+            "has_v4_buckets": 1,
+            "require_feature_tunables5": 1,
+            "has_v5_rules": 0
+        },
+        "choose_args": {}
+    },
+    "fsmap": {
+        "epoch": 306654,
+        "default_fscid": 2,
+        "compat": {
+            "compat": {},
+            "ro_compat": {},
+            "incompat": {
+                "feature_1": "base v0.20",
+                "feature_2": "client writeable ranges",
+                "feature_3": "default file layouts on dirs",
+                "feature_4": "dir inode in separate object",
+                "feature_5": "mds uses versioned encoding",
+                "feature_6": "dirfrag is stored in omap",
+                "feature_8": "no anchor table",
+                "feature_9": "file layout v2",
+                "feature_10": "snaprealm v2"
+            }
+        },
+        "feature_flags": {
+            "enable_multiple": false,
+            "ever_enabled_multiple": true
+        },
+        "standbys": [
+            {
+                "gid": 107837120,
+                "name": "miniflax-0644fef1c2",
+                "rank": -1,
+                "incarnation": 0,
+                "state": "up:standby",
+                "state_seq": 1,
+                "addr": "188.185.91.110:6801/1565622228",
+                "addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.185.91.110:6800",
+                            "nonce": 1565622228
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.185.91.110:6801",
+                            "nonce": 1565622228
+                        }
+                    ]
+                },
+                "join_fscid": -1,
+                "export_targets": [],
+                "features": 4540138297136906239,
+                "flags": 0,
+                "compat": {
+                    "compat": {},
+                    "ro_compat": {},
+                    "incompat": {
+                        "feature_1": "base v0.20",
+                        "feature_2": "client writeable ranges",
+                        "feature_3": "default file layouts on dirs",
+                        "feature_4": "dir inode in separate object",
+                        "feature_5": "mds uses versioned encoding",
+                        "feature_6": "dirfrag is stored in omap",
+                        "feature_7": "mds uses inline data",
+                        "feature_8": "no anchor table",
+                        "feature_9": "file layout v2",
+                        "feature_10": "snaprealm v2"
+                    }
+                },
+                "epoch": 306598
+            },
+            {
+                "gid": 107841334,
+                "name": "miniflax-435fc69142",
+                "rank": -1,
+                "incarnation": 0,
+                "state": "up:standby",
+                "state_seq": 1,
+                "addr": "188.184.103.129:6801/3322968820",
+                "addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.103.129:6800",
+                            "nonce": 3322968820
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.103.129:6801",
+                            "nonce": 3322968820
+                        }
+                    ]
+                },
+                "join_fscid": -1,
+                "export_targets": [],
+                "features": 4540138297136906239,
+                "flags": 0,
+                "compat": {
+                    "compat": {},
+                    "ro_compat": {},
+                    "incompat": {
+                        "feature_1": "base v0.20",
+                        "feature_2": "client writeable ranges",
+                        "feature_3": "default file layouts on dirs",
+                        "feature_4": "dir inode in separate object",
+                        "feature_5": "mds uses versioned encoding",
+                        "feature_6": "dirfrag is stored in omap",
+                        "feature_7": "mds uses inline data",
+                        "feature_8": "no anchor table",
+                        "feature_9": "file layout v2",
+                        "feature_10": "snaprealm v2"
+                    }
+                },
+                "epoch": 306601
+            },
+            {
+                "gid": 128594358,
+                "name": "miniflax-rhel-migration-test",
+                "rank": -1,
+                "incarnation": 0,
+                "state": "up:standby",
+                "state_seq": 1,
+                "addr": "188.184.91.106:6801/763438446",
+                "addrs": {
+                    "addrvec": [
+                        {
+                            "type": "v2",
+                            "addr": "188.184.91.106:6800",
+                            "nonce": 763438446
+                        },
+                        {
+                            "type": "v1",
+                            "addr": "188.184.91.106:6801",
+                            "nonce": 763438446
+                        }
+                    ]
+                },
+                "join_fscid": -1,
+                "export_targets": [],
+                "features": 4540138297136906239,
+                "flags": 0,
+                "compat": {
+                    "compat": {},
+                    "ro_compat": {},
+                    "incompat": {
+                        "feature_1": "base v0.20",
+                        "feature_2": "client writeable ranges",
+                        "feature_3": "default file layouts on dirs",
+                        "feature_4": "dir inode in separate object",
+                        "feature_5": "mds uses versioned encoding",
+                        "feature_6": "dirfrag is stored in omap",
+                        "feature_7": "mds uses inline data",
+                        "feature_8": "no anchor table",
+                        "feature_9": "file layout v2",
+                        "feature_10": "snaprealm v2"
+                    }
+                },
+                "epoch": 306654
+            }
+        ],
+        "filesystems": [
+            {
+                "mdsmap": {
+                    "epoch": 306651,
+                    "flags": 18,
+                    "ever_allowed_features": 0,
+                    "explicitly_allowed_features": 0,
+                    "created": "2023-04-05T18:22:10.928731+0200",
+                    "modified": "2023-05-18T07:44:44.541278+0200",
+                    "tableserver": 0,
+                    "root": 0,
+                    "session_timeout": 60,
+                    "session_autoclose": 300,
+                    "required_client_features": {},
+                    "max_file_size": 1099511627776,
+                    "last_failure": 0,
+                    "last_failure_osd_epoch": 6043,
+                    "compat": {
+                        "compat": {},
+                        "ro_compat": {},
+                        "incompat": {
+                            "feature_1": "base v0.20",
+                            "feature_2": "client writeable ranges",
+                            "feature_3": "default file layouts on dirs",
+                            "feature_4": "dir inode in separate object",
+                            "feature_5": "mds uses versioned encoding",
+                            "feature_6": "dirfrag is stored in omap",
+                            "feature_7": "mds uses inline data",
+                            "feature_8": "no anchor table",
+                            "feature_9": "file layout v2",
+                            "feature_10": "snaprealm v2"
+                        }
+                    },
+                    "max_mds": 1,
+                    "in": [
+                        0
+                    ],
+                    "up": {
+                        "mds_0": 107870388
+                    },
+                    "failed": [],
+                    "damaged": [],
+                    "stopped": [],
+                    "info": {
+                        "gid_107870388": {
+                            "gid": 107870388,
+                            "name": "miniflax-e845dd4855",
+                            "rank": 0,
+                            "incarnation": 306597,
+                            "state": "up:active",
+                            "state_seq": 148182,
+                            "addr": "188.184.96.113:6801/3063489617",
+                            "addrs": {
+                                "addrvec": [
+                                    {
+                                        "type": "v2",
+                                        "addr": "188.184.96.113:6800",
+                                        "nonce": 3063489617
+                                    },
+                                    {
+                                        "type": "v1",
+                                        "addr": "188.184.96.113:6801",
+                                        "nonce": 3063489617
+                                    }
+                                ]
+                            },
+                            "join_fscid": -1,
+                            "export_targets": [],
+                            "features": 4540138297136906239,
+                            "flags": 0,
+                            "compat": {
+                                "compat": {},
+                                "ro_compat": {},
+                                "incompat": {
+                                    "feature_1": "base v0.20",
+                                    "feature_2": "client writeable ranges",
+                                    "feature_3": "default file layouts on dirs",
+                                    "feature_4": "dir inode in separate object",
+                                    "feature_5": "mds uses versioned encoding",
+                                    "feature_6": "dirfrag is stored in omap",
+                                    "feature_7": "mds uses inline data",
+                                    "feature_8": "no anchor table",
+                                    "feature_9": "file layout v2",
+                                    "feature_10": "snaprealm v2"
+                                }
+                            }
+                        }
+                    },
+                    "data_pools": [
+                        6
+                    ],
+                    "metadata_pool": 5,
+                    "enabled": true,
+                    "fs_name": "cephfs",
+                    "balancer": "",
+                    "standby_count_wanted": 1
+                },
+                "id": 2
+            }
+        ]
+    },
+    "mdsmap_first_committed": 306073,
+    "mdsmap_last_committed": 306654,
+    "auth": {
+        "first_committed": 32010,
+        "last_committed": 32197,
+        "num_secrets": 31
+    },
+    "num_pg": 129,
+    "num_pg_active": 129,
+    "num_pg_unknown": 0,
+    "num_osd": 15,
+    "pool_sum": {
+        "stat_sum": {
+            "num_bytes": 33665353146,
+            "num_objects": 493387,
+            "num_object_clones": 0,
+            "num_object_copies": 1480161,
+            "num_objects_missing_on_primary": 0,
+            "num_objects_missing": 0,
+            "num_objects_degraded": 0,
+            "num_objects_misplaced": 0,
+            "num_objects_unfound": 0,
+            "num_objects_dirty": 493387,
+            "num_whiteouts": 0,
+            "num_read": 5896459,
+            "num_read_kb": 44515159,
+            "num_write": 1827044679,
+            "num_write_kb": 6476808118,
+            "num_scrub_errors": 0,
+            "num_shallow_scrub_errors": 0,
+            "num_deep_scrub_errors": 0,
+            "num_objects_recovered": 64114,
+            "num_bytes_recovered": 2420796893,
+            "num_keys_recovered": 89305,
+            "num_objects_omap": 22754,
+            "num_objects_hit_set_archive": 0,
+            "num_bytes_hit_set_archive": 0,
+            "num_flush": 0,
+            "num_flush_kb": 0,
+            "num_evict": 0,
+            "num_evict_kb": 0,
+            "num_promote": 0,
+            "num_flush_mode_high": 0,
+            "num_flush_mode_low": 0,
+            "num_evict_mode_some": 0,
+            "num_evict_mode_full": 0,
+            "num_objects_pinned": 0,
+            "num_legacy_snapsets": 0,
+            "num_large_omap_objects": 0,
+            "num_objects_manifest": 0,
+            "num_omap_bytes": 246756828,
+            "num_omap_keys": 492077,
+            "num_objects_repaired": 0
+        },
+        "store_stats": {
+            "total": 0,
+            "available": 0,
+            "internally_reserved": 0,
+            "allocated": 0,
+            "data_stored": 0,
+            "data_compressed": 0,
+            "data_compressed_allocated": 0,
+            "data_compressed_original": 0,
+            "omap_allocated": 0,
+            "internal_metadata": 0
+        },
+        "log_size": 1273013,
+        "ondisk_log_size": 1273013,
+        "up": 387,
+        "acting": 387,
+        "num_store_stats": 0
+    },
+    "osd_sum": {
+        "up_from": 0,
+        "seq": 0,
+        "num_pgs": 387,
+        "num_osds": 15,
+        "num_per_pool_osds": 15,
+        "num_per_pool_omap_osds": 15,
+        "kb": 1572802560,
+        "kb_used": 125198456,
+        "kb_used_data": 110589004,
+        "kb_used_omap": 1373873,
+        "kb_used_meta": 13235342,
+        "kb_avail": 1447604104,
+        "statfs": {
+            "total": 1610549821440,
+            "available": 1482346602496,
+            "internally_reserved": 0,
+            "allocated": 113243140096,
+            "data_stored": 101084626434,
+            "data_compressed": 0,
+            "data_compressed_allocated": 0,
+            "data_compressed_original": 0,
+            "omap_allocated": 1406845963,
+            "internal_metadata": 13552991221
+        },
+        "hb_peers": [],
+        "snap_trim_queue_len": 0,
+        "num_snap_trimming": 0,
+        "num_shards_repaired": 0,
+        "op_queue_age_hist": {
+            "histogram": [],
+            "upper_bound": 1
+        },
+        "perf_stat": {
+            "commit_latency_ms": 26,
+            "apply_latency_ms": 26,
+            "commit_latency_ns": 26000000,
+            "apply_latency_ns": 26000000
+        },
+        "alerts": [],
+        "network_ping_times": []
+    },
+    "osd_sum_by_class": {
+        "hdd": {
+            "up_from": 0,
+            "seq": 0,
+            "num_pgs": 387,
+            "num_osds": 15,
+            "num_per_pool_osds": 15,
+            "num_per_pool_omap_osds": 15,
+            "kb": 1572802560,
+            "kb_used": 125198456,
+            "kb_used_data": 110589004,
+            "kb_used_omap": 1373873,
+            "kb_used_meta": 13235342,
+            "kb_avail": 1447604104,
+            "statfs": {
+                "total": 1610549821440,
+                "available": 1482346602496,
+                "internally_reserved": 0,
+                "allocated": 113243140096,
+                "data_stored": 101084626434,
+                "data_compressed": 0,
+                "data_compressed_allocated": 0,
+                "data_compressed_original": 0,
+                "omap_allocated": 1406845963,
+                "internal_metadata": 13552991221
+            },
+            "hb_peers": [],
+            "snap_trim_queue_len": 0,
+            "num_snap_trimming": 0,
+            "num_shards_repaired": 0,
+            "op_queue_age_hist": {
+                "histogram": [],
+                "upper_bound": 1
+            },
+            "perf_stat": {
+                "commit_latency_ms": 26,
+                "apply_latency_ms": 26,
+                "commit_latency_ns": 26000000,
+                "apply_latency_ns": 26000000
+            },
+            "alerts": [],
+            "network_ping_times": []
+        }
+    },
+    "pool_stats": [
+        {
+            "poolid": 6,
+            "num_pg": 32,
+            "stat_sum": {
+                "num_bytes": 33464148164,
+                "num_objects": 469770,
+                "num_object_clones": 0,
+                "num_object_copies": 1409310,
+                "num_objects_missing_on_primary": 0,
+                "num_objects_missing": 0,
+                "num_objects_degraded": 0,
+                "num_objects_misplaced": 0,
+                "num_objects_unfound": 0,
+                "num_objects_dirty": 469770,
+                "num_whiteouts": 0,
+                "num_read": 2774554,
+                "num_read_kb": 29270517,
+                "num_write": 495532151,
+                "num_write_kb": 2516628356,
+                "num_scrub_errors": 0,
+                "num_shallow_scrub_errors": 0,
+                "num_deep_scrub_errors": 0,
+                "num_objects_recovered": 42652,
+                "num_bytes_recovered": 2326512407,
+                "num_keys_recovered": 0,
+                "num_objects_omap": 0,
+                "num_objects_hit_set_archive": 0,
+                "num_bytes_hit_set_archive": 0,
+                "num_flush": 0,
+                "num_flush_kb": 0,
+                "num_evict": 0,
+                "num_evict_kb": 0,
+                "num_promote": 0,
+                "num_flush_mode_high": 0,
+                "num_flush_mode_low": 0,
+                "num_evict_mode_some": 0,
+                "num_evict_mode_full": 0,
+                "num_objects_pinned": 0,
+                "num_legacy_snapsets": 0,
+                "num_large_omap_objects": 0,
+                "num_objects_manifest": 0,
+                "num_omap_bytes": 0,
+                "num_omap_keys": 0,
+                "num_objects_repaired": 0
+            },
+            "store_stats": {
+                "total": 0,
+                "available": 0,
+                "internally_reserved": 0,
+                "allocated": 112357269504,
+                "data_stored": 100392444492,
+                "data_compressed": 0,
+                "data_compressed_allocated": 0,
+                "data_compressed_original": 0,
+                "omap_allocated": 0,
+                "internal_metadata": 0
+            },
+            "log_size": 316282,
+            "ondisk_log_size": 316282,
+            "up": 96,
+            "acting": 96,
+            "num_store_stats": 15
+        },
+        {
+            "poolid": 5,
+            "num_pg": 32,
+            "stat_sum": {
+                "num_bytes": 197899510,
+                "num_objects": 22808,
+                "num_object_clones": 0,
+                "num_object_copies": 68424,
+                "num_objects_missing_on_primary": 0,
+                "num_objects_missing": 0,
+                "num_objects_degraded": 0,
+                "num_objects_misplaced": 0,
+                "num_objects_unfound": 0,
+                "num_objects_dirty": 22808,
+                "num_whiteouts": 0,
+                "num_read": 2400033,
+                "num_read_kb": 14522770,
+                "num_write": 72189192,
+                "num_write_kb": 1443697062,
+                "num_scrub_errors": 0,
+                "num_shallow_scrub_errors": 0,
+                "num_deep_scrub_errors": 0,
+                "num_objects_recovered": 4795,
+                "num_bytes_recovered": 69007854,
+                "num_keys_recovered": 89287,
+                "num_objects_omap": 22752,
+                "num_objects_hit_set_archive": 0,
+                "num_bytes_hit_set_archive": 0,
+                "num_flush": 0,
+                "num_flush_kb": 0,
+                "num_evict": 0,
+                "num_evict_kb": 0,
+                "num_promote": 0,
+                "num_flush_mode_high": 0,
+                "num_flush_mode_low": 0,
+                "num_evict_mode_some": 0,
+                "num_evict_mode_full": 0,
+                "num_objects_pinned": 0,
+                "num_legacy_snapsets": 0,
+                "num_large_omap_objects": 0,
+                "num_objects_manifest": 0,
+                "num_omap_bytes": 246756261,
+                "num_omap_keys": 492074,
+                "num_objects_repaired": 0
+            },
+            "store_stats": {
+                "total": 0,
+                "available": 0,
+                "internally_reserved": 0,
+                "allocated": 594014208,
+                "data_stored": 593698530,
+                "data_compressed": 0,
+                "data_compressed_allocated": 0,
+                "data_compressed_original": 0,
+                "omap_allocated": 1406841874,
+                "internal_metadata": 0
+            },
+            "log_size": 319189,
+            "ondisk_log_size": 319189,
+            "up": 96,
+            "acting": 96,
+            "num_store_stats": 15
+        },
+        {
+            "poolid": 3,
+            "num_pg": 64,
+            "stat_sum": {
+                "num_bytes": 3305472,
+                "num_objects": 807,
+                "num_object_clones": 0,
+                "num_object_copies": 2421,
+                "num_objects_missing_on_primary": 0,
+                "num_objects_missing": 0,
+                "num_objects_degraded": 0,
+                "num_objects_misplaced": 0,
+                "num_objects_unfound": 0,
+                "num_objects_dirty": 807,
+                "num_whiteouts": 0,
+                "num_read": 721871,
+                "num_read_kb": 721871,
+                "num_write": 1259323333,
+                "num_write_kb": 2516482697,
+                "num_scrub_errors": 0,
+                "num_shallow_scrub_errors": 0,
+                "num_deep_scrub_errors": 0,
+                "num_objects_recovered": 16655,
+                "num_bytes_recovered": 25276632,
+                "num_keys_recovered": 0,
+                "num_objects_omap": 0,
+                "num_objects_hit_set_archive": 0,
+                "num_bytes_hit_set_archive": 0,
+                "num_flush": 0,
+                "num_flush_kb": 0,
+                "num_evict": 0,
+                "num_evict_kb": 0,
+                "num_promote": 0,
+                "num_flush_mode_high": 0,
+                "num_flush_mode_low": 0,
+                "num_evict_mode_some": 0,
+                "num_evict_mode_full": 0,
+                "num_objects_pinned": 0,
+                "num_legacy_snapsets": 0,
+                "num_large_omap_objects": 0,
+                "num_objects_manifest": 0,
+                "num_omap_bytes": 0,
+                "num_omap_keys": 0,
+                "num_objects_repaired": 0
+            },
+            "store_stats": {
+                "total": 0,
+                "available": 0,
+                "internally_reserved": 0,
+                "allocated": 32710656,
+                "data_stored": 9916416,
+                "data_compressed": 0,
+                "data_compressed_allocated": 0,
+                "data_compressed_original": 0,
+                "omap_allocated": 0,
+                "internal_metadata": 0
+            },
+            "log_size": 637537,
+            "ondisk_log_size": 637537,
+            "up": 192,
+            "acting": 192,
+            "num_store_stats": 15
+        },
+        {
+            "poolid": 4,
+            "num_pg": 1,
+            "stat_sum": {
+                "num_bytes": 0,
+                "num_objects": 2,
+                "num_object_clones": 0,
+                "num_object_copies": 6,
+                "num_objects_missing_on_primary": 0,
+                "num_objects_missing": 0,
+                "num_objects_degraded": 0,
+                "num_objects_misplaced": 0,
+                "num_objects_unfound": 0,
+                "num_objects_dirty": 2,
+                "num_whiteouts": 0,
+                "num_read": 1,
+                "num_read_kb": 1,
+                "num_write": 3,
+                "num_write_kb": 3,
+                "num_scrub_errors": 0,
+                "num_shallow_scrub_errors": 0,
+                "num_deep_scrub_errors": 0,
+                "num_objects_recovered": 12,
+                "num_bytes_recovered": 0,
+                "num_keys_recovered": 18,
+                "num_objects_omap": 2,
+                "num_objects_hit_set_archive": 0,
+                "num_bytes_hit_set_archive": 0,
+                "num_flush": 0,
+                "num_flush_kb": 0,
+                "num_evict": 0,
+                "num_evict_kb": 0,
+                "num_promote": 0,
+                "num_flush_mode_high": 0,
+                "num_flush_mode_low": 0,
+                "num_evict_mode_some": 0,
+                "num_evict_mode_full": 0,
+                "num_objects_pinned": 0,
+                "num_legacy_snapsets": 0,
+                "num_large_omap_objects": 0,
+                "num_objects_manifest": 0,
+                "num_omap_bytes": 567,
+                "num_omap_keys": 3,
+                "num_objects_repaired": 0
+            },
+            "store_stats": {
+                "total": 0,
+                "available": 0,
+                "internally_reserved": 0,
+                "allocated": 0,
+                "data_stored": 0,
+                "data_compressed": 0,
+                "data_compressed_allocated": 0,
+                "data_compressed_original": 0,
+                "omap_allocated": 0,
+                "internal_metadata": 0
+            },
+            "log_size": 5,
+            "ondisk_log_size": 5,
+            "up": 3,
+            "acting": 3,
+            "num_store_stats": 3
+        }
+    ],
+    "osd_stats": [
+        {
+            "osd": 0,
+            "seq": 25898653147850
+        },
+        {
+            "osd": 1,
+            "seq": 25847113540322
+        },
+        {
+            "osd": 2,
+            "seq": 25774099096295
+        },
+        {
+            "osd": 3,
+            "seq": 27242977911501
+        },
+        {
+            "osd": 4,
+            "seq": 26517128438486
+        },
+        {
+            "osd": 5,
+            "seq": 25864293409482
+        },
+        {
+            "osd": 6,
+            "seq": 26568668045966
+        },
+        {
+            "osd": 7,
+            "seq": 25933012886219
+        },
+        {
+            "osd": 8,
+            "seq": 25911538049743
+        },
+        {
+            "osd": 9,
+            "seq": 25812753801949
+        },
+        {
+            "osd": 10,
+            "seq": 26336739812075
+        },
+        {
+            "osd": 11,
+            "seq": 26650272424592
+        },
+        {
+            "osd": 12,
+            "seq": 26572963013319
+        },
+        {
+            "osd": 13,
+            "seq": 26590142882461
+        },
+        {
+            "osd": 14,
+            "seq": 26615912686256
+        }
+    ],
+    "num_pg_by_state": [
+        {
+            "state": "active+clean",
+            "num": 129
+        }
+    ],
+    "num_pg_by_osd": [
+        {
+            "osd": 3,
+            "num_primary_pg": 9,
+            "num_acting_pg": 27,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 6,
+            "num_primary_pg": 11,
+            "num_acting_pg": 28,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 12,
+            "num_primary_pg": 9,
+            "num_acting_pg": 27,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 7,
+            "num_primary_pg": 6,
+            "num_acting_pg": 21,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 5,
+            "num_primary_pg": 11,
+            "num_acting_pg": 28,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 2,
+            "num_primary_pg": 7,
+            "num_acting_pg": 26,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 14,
+            "num_primary_pg": 10,
+            "num_acting_pg": 32,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 10,
+            "num_primary_pg": 5,
+            "num_acting_pg": 23,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 0,
+            "num_primary_pg": 10,
+            "num_acting_pg": 28,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 8,
+            "num_primary_pg": 5,
+            "num_acting_pg": 25,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 1,
+            "num_primary_pg": 7,
+            "num_acting_pg": 14,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 9,
+            "num_primary_pg": 9,
+            "num_acting_pg": 26,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 13,
+            "num_primary_pg": 14,
+            "num_acting_pg": 23,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 11,
+            "num_primary_pg": 12,
+            "num_acting_pg": 32,
+            "num_up_not_acting_pg": 0
+        },
+        {
+            "osd": 4,
+            "num_primary_pg": 4,
+            "num_acting_pg": 27,
+            "num_up_not_acting_pg": 0
+        }
+    ],
+    "purged_snaps": [
+        {
+            "pool": 3,
+            "purged_snaps": {}
+        },
+        {
+            "pool": 4,
+            "purged_snaps": {}
+        },
+        {
+            "pool": 5,
+            "purged_snaps": {}
+        },
+        {
+            "pool": 6,
+            "purged_snaps": {}
+        }
+    ],
+    "servicemap": {
+        "epoch": 424920,
+        "modified": "2023-05-31T21:19:07.648182+0200",
+        "services": {
+            "osd": {
+                "daemons": {
+                    "summary": "",
+                    "0": {
+                        "start_epoch": 0,
+                        "start_stamp": "0.000000",
+                        "gid": 0,
+                        "addr": "(unrecognized address family 0)/0",
+                        "metadata": {},
+                        "task_status": {}
+                    }
+                }
+            }
+        }
+    },
+    "paxos": {
+        "first_committed": 62266575,
+        "last_committed": 62267265,
+        "last_pn": 277701,
+        "accepted_pn": 278600
+    }
+}

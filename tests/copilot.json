@@ -1,0 +1,475 @@
+{
+  "summary": {
+    "score": 26.0,
+    "grade": "F",
+    "max_score": 33
+  },
+  "sections": [
+    {
+      "id": "Cluster",
+      "score": 0.5,
+      "max_score": 1,
+      "summary": "",
+      "info": [
+        {
+          "id": "Cluster Info",
+          "summary": "Cluster info for fsid 6b15f4ce-7973-4f17-b253-66902772c0e5",
+          "detail": [
+            "Version 16.2.9-2",
+            "Cluster Creation Timestamp: 2021-12-14T10:16:28.874443Z",
+            "Report Timestamp: 2023-05-31T21:19:46.417636+0200"
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "id": "Health",
+          "result": "WARN",
+          "summary": "HEALTH_WARN with 3 warnings",
+          "detail": [
+            "Internal health check MON_DOWN with severity HEALTH_WARN reports 1/4 mons down, quorum miniflax-e845dd4855,miniflax-435fc69142,miniflax-0644fef1c2",
+            "Internal health check MON_MSGR2_NOT_ENABLED with severity HEALTH_WARN reports 1 monitors have not enabled msgr2",
+            "Internal health check RECENT_CRASH with severity HEALTH_WARN reports 1 daemons have recently crashed"
+          ],
+          "recommend": [
+            "RECENT_CRASH warnings should be managed via the `ceph crash` command. If you simply want to clear the warning, run `ceph crash prune 0`."
+          ]
+        }
+      ],
+      "grade": "F"
+    },
+    {
+      "id": "Version",
+      "score": 1.5,
+      "max_score": 3,
+      "summary": "",
+      "info": [],
+      "checks": [
+        {
+          "id": "Release",
+          "result": "WARN",
+          "summary": "Not running a recommended stable release",
+          "detail": [
+            "Cluster is running 16.2.9. Clyso highly recommends one of the stable releases: 17.2.7, 18.2.7.",
+            "16.2.15 is the recommended bugfix release for your current version."
+          ],
+          "recommend": [
+            "Upgrade to one of the stable releases: 17.2.7, 18.2.7.",
+            "Alternatively, upgrade to 16.2.15."
+          ]
+        },
+        {
+          "id": "Check for Known Issues in Running Version",
+          "result": "FAIL",
+          "summary": "CRITICAL: Found 1 high severity bugs(s) in running version 16.2.9-2",
+          "detail": [
+            "PG Splitting/Merging Causes OSD Out-Of-Memory (severity: high): A bug in the PG splitting and merging code can cause the OSD to go out-of-memory, a condition which persists even after restart. Offline tools are available in fixed releases to workaround the issue. See https://tracker.ceph.com/issues/53729."
+          ],
+          "recommend": [
+            "PG Splitting/Merging Causes OSD Out-Of-Memory (severity: high): Do not change pg_num for any pool until after upgrade to a fixed release. Disable the pg autoscaler. Fixed in v16.2.11 and v17.2.4."
+          ]
+        },
+        {
+          "id": "Mixing Ceph Versions",
+          "result": "PASS",
+          "summary": "Running Equal Ceph Versions",
+          "detail": [
+            "Ceph daemons are all running version 16.2.9-2."
+          ],
+          "recommend": []
+        }
+      ],
+      "grade": "F"
+    },
+    {
+      "id": "Operating System",
+      "score": 1.0,
+      "max_score": 1,
+      "summary": "",
+      "info": [],
+      "checks": [
+        {
+          "id": "OS Support",
+          "result": "PASS",
+          "summary": "Operating System is Supported",
+          "detail": [
+            "CentOS Stream 8 is Supported."
+          ],
+          "recommend": []
+        }
+      ],
+      "grade": "A+"
+    },
+    {
+      "id": "Capacity",
+      "score": 1.0,
+      "max_score": 1,
+      "summary": "",
+      "info": [
+        {
+          "id": "Info",
+          "summary": "Cluster Capacity Info",
+          "detail": [
+            "Pools storing 31.4 GiB and 493.4 thousand objects",
+            "OSD total capacity 1.5 TiB. Used: 119.4 GiB. Available: 1.3 TiB."
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "id": "Check Cluster Capacity Fullness",
+          "result": "PASS",
+          "summary": "Cluster Capacity Info",
+          "detail": [
+            "Cluster is 8.0% full, under 80%, safe for production."
+          ],
+          "recommend": []
+        }
+      ],
+      "grade": "A+"
+    },
+    {
+      "id": "Pools",
+      "score": 8.5,
+      "max_score": 10,
+      "summary": "",
+      "info": [
+        {
+          "id": "Info",
+          "summary": "Cluster has 4 pools configured",
+          "detail": [
+            "Pool test with replica size 3, created 2021-12-14T20:47:54.114910+0100",
+            "Pool device_health_metrics with replica size 3, created 2022-01-13T10:27:54.391389+0100",
+            "Pool cephfs.cephfs.meta with replica size 3, created 2023-04-05T18:22:09.831137+0200",
+            "Pool cephfs.cephfs.data with replica size 3, created 2023-04-05T18:22:10.379081+0200"
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "id": "Recommended Flags",
+          "result": "FAIL",
+          "summary": "Some pools have missing flags",
+          "detail": [
+            "Pools missing recommended 'nodelete' flag: test, device_health_metrics, cephfs.cephfs.meta, cephfs.cephfs.data",
+            "Pools missing recommended 'nosizechange' flag: test, device_health_metrics, cephfs.cephfs.meta, cephfs.cephfs.data"
+          ],
+          "recommend": [
+            "It is strongly recommended to set the nodelete and nosizechange flags to prevent unintended pool changes in production. E.g. ceph osd pool set \\<poolname\\> nodelete 1"
+          ]
+        },
+        {
+          "id": "Pool Sizing",
+          "result": "PASS",
+          "summary": "All pools have correct min_size setting",
+          "detail": [
+            "All pools have correct min_size setting"
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Pool Autoscale Mode",
+          "result": "PASS",
+          "summary": "All pools have pg_autoscaler disabled",
+          "detail": [
+            "All pools have pg_autoscaler disabled. This is the recommended setting for most environments."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Minimum PG Count",
+          "result": "PASS",
+          "summary": "All pools have pg_num higher or equal recommended minimum",
+          "detail": [
+            "All pools have at least one replica or shard per OSD."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Pool CRUSH Failure Domain Buckets",
+          "result": "WARN",
+          "summary": "Not enough CRUSH failure domain buckets for all pools",
+          "detail": [
+            "Pool test with size 3 has only 3 host items.",
+            "Pool device_health_metrics with size 3 has only 3 host items.",
+            "Pool cephfs.cephfs.meta with size 3 has only 3 host items.",
+            "Pool cephfs.cephfs.data with size 3 has only 3 host items."
+          ],
+          "recommend": [
+            "You need to have at least 4 host items for pool test to avoid degraded state in case of a host failure.",
+            "You need to have at least 4 host items for pool device_health_metrics to avoid degraded state in case of a host failure.",
+            "You need to have at least 4 host items for pool cephfs.cephfs.meta to avoid degraded state in case of a host failure.",
+            "You need to have at least 4 host items for pool cephfs.cephfs.data to avoid degraded state in case of a host failure."
+          ]
+        },
+        {
+          "id": "Zero weight buckets in CRUSH Tree",
+          "result": "PASS",
+          "summary": "No zero weight buckets in CRUSH tree",
+          "detail": [
+            "All pools use CRUSH tree with no zero weight buckets."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "CRUSH Tree Balanced",
+          "result": "PASS",
+          "summary": "Balanced CRUSH tree for all pools",
+          "detail": [
+            "All pools have balanced CRUSH tree."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Pool Average Object Size",
+          "result": "PASS",
+          "summary": "Average object size in all pools is large enough",
+          "detail": [
+            "For all pools the average object size is higher than allocation unit"
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Pool Space Amplification",
+          "result": "PASS",
+          "summary": "All pools have low space amplification",
+          "detail": [
+            "For all pools space amplification is close to 1"
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Cache Tiering",
+          "result": "PASS",
+          "summary": "Cache tiering is not used",
+          "detail": [
+            "No pools have cache tiering enabled."
+          ],
+          "recommend": [
+            "Cache tiering has been deprecated in the Reef release as it has lacked a maintainer for a very long time. It may be removed in newer releases without much further notice.",
+            "Do not enable cache tiering."
+          ]
+        }
+      ],
+      "grade": "B"
+    },
+    {
+      "id": "CephFS",
+      "score": 1.0,
+      "max_score": 1,
+      "summary": "",
+      "info": [
+        {
+          "id": "CephFS Info",
+          "summary": "Found 1 CephFS filesystems",
+          "detail": [
+            "cephfs: data pools [6], meta pool 5, max_mds 1"
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "id": "Multi-MDS Safety",
+          "result": "PASS",
+          "summary": "All CephFS filesystems use a single active MDS",
+          "detail": [],
+          "recommend": []
+        }
+      ],
+      "grade": "A+"
+    },
+    {
+      "id": "MON Health",
+      "score": 2.5,
+      "max_score": 3,
+      "summary": "",
+      "info": [],
+      "checks": [
+        {
+          "id": "Monitor Committed Maps",
+          "result": "PASS",
+          "summary": "Correct number of monmaps",
+          "detail": [
+            "This cluster has a reasonably small number of monmaps (8), which is normal."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Number of Monitors",
+          "result": "PASS",
+          "summary": "Sufficient Number of Monitors",
+          "detail": [
+            "Cluster has a sufficient number of ceph-mon daemons (4) for its size."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Even Number of Monitors",
+          "result": "WARN",
+          "summary": "Even number of Monitors",
+          "detail": [
+            "Cluster has an even number of ceph-mon daemons (4). This is not a problem however operators should be aware that the 3 of the monitors must be up to maintain quorum."
+          ],
+          "recommend": [
+            "Run an odd number of ceph-mon daemons"
+          ]
+        }
+      ],
+      "grade": "B"
+    },
+    {
+      "id": "OSD Health",
+      "score": 10.0,
+      "max_score": 13,
+      "summary": "",
+      "info": [
+        {
+          "id": "Info",
+          "summary": "Cluster has 15 OSDs configured",
+          "detail": []
+        }
+      ],
+      "checks": [
+        {
+          "id": "Check osdmap flags",
+          "result": "PASS",
+          "summary": "OSDMap has correct flags set.",
+          "detail": [
+            "osdmap has the expected flags: pglog_hardlimit, purged_snapdirs, recovery_deletes, sortbitwise"
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Check require_osd_release flag",
+          "result": "PASS",
+          "summary": "require_osd_release is correct",
+          "detail": [
+            "require_osd_release pacific matches running release pacific"
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Check OSD Primary Affinity",
+          "result": "PASS",
+          "summary": "All OSDs have optimal primary-affinity",
+          "detail": [
+            "All OSDs have the recommended primary-affinity (1). This ensures uniform IO handling across the cluster."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Check OSD Weights",
+          "result": "PASS",
+          "summary": "All OSDs have optimal weight",
+          "detail": [
+            "All OSDs have the recommended weight (1). When used in tandem with the upmap balancer, this ensures an optimal data placement."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Check osdmap pg_upmap list",
+          "result": "PASS",
+          "summary": "osdmap pg_upmap list is empty",
+          "detail": [
+            "pg_upmap is not useful in normal situations, and this cluster is correctly not using it."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Check BlueFS DB/Journal is on Flash",
+          "result": "FAIL",
+          "summary": "All OSDs have bluefs db/wal or journal on rotational device",
+          "detail": [
+            "The following OSDs have a rotational db/wal or journal: osd.0, osd.1, osd.2, osd.3, osd.4, osd.5, osd.6, osd.7, osd.8, osd.9, osd.10, osd.11, osd.12, osd.13, osd.14"
+          ],
+          "recommend": [
+            "Migrate db/wal or journal for affected OSDs to non-rotational (flash) devices."
+          ]
+        },
+        {
+          "id": "Check OSD bluefs db size",
+          "result": "PASS",
+          "summary": "All OSDs have large enough bluefs db",
+          "detail": [
+            "Bluefs db of at least 10737418240 size is recommended for expected performance."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Check OSD bluefs wal size",
+          "result": "PASS",
+          "summary": "All OSDs have large enough bluefs wal",
+          "detail": [
+            "Bluefs wal of at least 1073741824 size is recommended for expected performance."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "OSD host memory",
+          "result": "FAIL",
+          "summary": "All OSD hosts have insufficient memory",
+          "detail": [
+            "Host miniflax-e845dd4855.cern.ch has 6.8 GiB total memory for 5 OSDs",
+            "Host miniflax-435fc69142.cern.ch has 6.8 GiB total memory for 5 OSDs",
+            "Host miniflax-0644fef1c2.cern.ch has 6.8 GiB total memory for 5 OSDs"
+          ],
+          "recommend": [
+            "Increase memory on host miniflax-e845dd4855.cern.ch to at least 20.0 GiB",
+            "Increase memory on host miniflax-435fc69142.cern.ch to at least 20.0 GiB",
+            "Increase memory on host miniflax-0644fef1c2.cern.ch to at least 20.0 GiB"
+          ]
+        },
+        {
+          "id": "OSD host swap",
+          "result": "WARN",
+          "summary": "All OSD hosts have swap enabled",
+          "detail": [
+            "swap is enabled on OSD hosts: miniflax-0644fef1c2.cern.ch, miniflax-435fc69142.cern.ch, miniflax-e845dd4855.cern.ch"
+          ],
+          "recommend": [
+            "Disable swap on hosts and increase memory if needed"
+          ]
+        },
+        {
+          "id": "Check number of osdmaps stored",
+          "result": "PASS",
+          "summary": "Cluster osdmaps are trimming correctly",
+          "detail": [
+            "Ceph is storing 544 osdmaps, which is within the normal range."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Check CRUSH Tunables",
+          "result": "PASS",
+          "summary": "CRUSH Tunables are optimal",
+          "detail": [
+            "CRUSH tunables are optimal, ensuring the ideal data placement."
+          ],
+          "recommend": []
+        },
+        {
+          "id": "Dedicated Cluster Network",
+          "result": "WARN",
+          "summary": "Public and Cluster Networks are Shared",
+          "detail": [
+            "OSDs are using the same IP address for the public and cluster networks. This may have performance implications for busy clusters notably during periods of recovery or backfilling."
+          ],
+          "recommend": [
+            "Consider adding a dedicated cluster network for internal OSD traffic."
+          ]
+        }
+      ],
+      "grade": "C"
+    },
+    {
+      "id": "Configuration",
+      "score": 0,
+      "max_score": 0,
+      "summary": "",
+      "info": [],
+      "checks": [],
+      "grade": "-"
+    }
+  ]
+}
