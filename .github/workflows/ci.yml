@@ -30,6 +30,7 @@ jobs:
         run: |
           uv --no-cache venv
           source .venv/bin/activate
+          uv sync --all-packages
           ./run_tests.sh
 
       - name: Generate version
@@ -137,5 +138,6 @@ jobs:
 
       - name: Run binary tests
         run: |
+          chmod +x ./dist/ceph-copilot
           chmod +x tests/test_binary.sh
           ./tests/test_binary.sh

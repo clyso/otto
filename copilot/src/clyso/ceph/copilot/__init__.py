@@ -593,7 +593,6 @@ def main():
     )
     parser_osd_perf.set_defaults(func=subcommand_osd_perf)
 
-    # Create the parser for the "daemon" command
     # Add the upmap command
     add_command_upmap(cluster_subparsers)
 
