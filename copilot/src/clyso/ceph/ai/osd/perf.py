@@ -1,8 +1,8 @@
 import json
 import statistics
 import sys
-from typing import Tuple, Any
-from clyso.ceph.ai.common import jsoncmd
+from typing import Any
+from clyso.ceph.api.commands import ceph_osd_perf_dump
 
 
 class OSDPerf:
@@ -57,10 +57,7 @@ class OSDPerf:
         if self.osd_id is None:
             raise ValueError("OSD ID must be set for subprocess collection")
         try:
-            return jsoncmd(
-                f"ceph tell osd.{self.osd_id} perf dump",
-                skip_confirmation=skip_confirmation,
-            )
+            return ceph_osd_perf_dump(self.osd_id, skip_confirmation=skip_confirmation)
         except json.JSONDecodeError as e:
             raise ValueError(
                 f"Invalid JSON response from OSD {self.osd_id} perf dump command: {e}"
@@ -128,7 +125,7 @@ class OSDPerf:
     @classmethod
     def collect_osd_performance_metrics(
         cls, sampled_osds: list, osd_metadata: dict, skip_confirmation: bool = True
-    ) -> Tuple[list, list]:
+    ) -> tuple[list, list]:
         """Collect onode performance metrics from sampled OSDs"""
         osd_metrics = []
         failed_osds = []
