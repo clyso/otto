@@ -15,6 +15,7 @@ dependencies = [
   "packaging",
   "pandas>=2.2.3",
   "prettytable>=3.16.0",
+  "pydantic>=2.0.0",
   "PyYaml",
 ]
 

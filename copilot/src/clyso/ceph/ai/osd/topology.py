@@ -1,21 +1,22 @@
 from collections import defaultdict
-from clyso.ceph.ai.common import jsoncmd
-from typing import Optional, Tuple, List, Dict
+
+from clyso.ceph.api.commands import ceph_osd_tree
 
 
 class OSDTopology:
     """Manages OSD cluster topology information"""
 
     def __init__(self):
-        self.osd_tree = jsoncmd("ceph osd tree --format=json")
+        osd_tree_data = ceph_osd_tree()
+        self.osd_tree = osd_tree_data.model_dump()
         self.nodes = self.osd_tree.get("nodes", [])
-        self._host_to_osds = None
-        self._device_class_to_osds = None
-        self._up_osds = None
-        self._osd_metadata = None
+        self._host_to_osds: dict[str, list[int]] | None = None
+        self._device_class_to_osds: dict[str, list[int]] | None = None
+        self._up_osds: list[int] | None = None
+        self._osd_metadata: dict[int, dict[str, str]] | None = None
         self._parse_topology()
 
-    def _find_osd_host(self, osd_id: int) -> Optional[str]:
+    def _find_osd_host(self, osd_id: int) -> str | None:
         """Find the host name for a given OSD ID"""
         for node in self.nodes:
             if node["type"] == "host" and osd_id in node.get("children", []):
@@ -53,8 +54,8 @@ class OSDTopology:
 
     def get_topology_info(
         self,
-    ) -> Tuple[
-        Dict[str, List[int]], Dict[str, List[int]], List[int], Dict[int, Dict[str, str]]
+    ) -> tuple[
+        dict[str, list[int]], dict[str, list[int]], list[int], dict[int, dict[str, str]]
     ]:
         return (
             self.host_to_osds,
@@ -64,17 +65,25 @@ class OSDTopology:
         )
 
     @property
-    def host_to_osds(self) -> Dict[str, List[int]]:
+    def host_to_osds(self) -> dict[str, list[int]]:
+        if self._host_to_osds is None:
+            return {}
         return self._host_to_osds
 
     @property
-    def device_class_to_osds(self) -> Dict[str, List[int]]:
+    def device_class_to_osds(self) -> dict[str, list[int]]:
+        if self._device_class_to_osds is None:
+            return {}
         return self._device_class_to_osds
 
     @property
-    def up_osds(self) -> List[int]:
+    def up_osds(self) -> list[int]:
+        if self._up_osds is None:
+            return []
         return self._up_osds
 
     @property
-    def osd_metadata(self) -> Dict[int, Dict[str, str]]:
+    def osd_metadata(self) -> dict[int, dict[str, str]]:
+        if self._osd_metadata is None:
+            return {}
         return self._osd_metadata
