@@ -9,11 +9,10 @@ import yaml
 from clyso.ceph.ai import generate_result
 from clyso.ceph.ai.common import (
     CopilotParser,
-    json_load,
-    jsoncmd,
     load_ceph_report_file,
     CEPH_FILES,
 )
+from clyso.ceph.api.commands import ceph_report, ceph_command
 from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.pg import add_command_pg
 from clyso.ceph.copilot.upmap import add_command_upmap
@@ -26,7 +25,7 @@ CONFIG_FILE = "copilot.yaml"
 
 def collect(args=None):
     skip_confirmation = getattr(args, "yes", True) if args else True
-    return jsoncmd("ceph report", skip_confirmation=skip_confirmation)
+    return ceph_report(skip_confirmation=skip_confirmation)
 
 
 def collect_data_source(
@@ -69,7 +68,7 @@ def collect_data_source(
                 continue
 
     if cli_command:
-        return jsoncmd(cli_command, skip_confirmation=skip_confirmation)
+        return ceph_command(cli_command, skip_confirmation=skip_confirmation)
 
     return None
 
@@ -277,6 +276,7 @@ def subcommand_checkup(args):
         verbose_result(result.dump())
     else:
         compact_result(result.dump())
+
 
 def subcommand_osd_perf(args):
     """Execute OSD performance analysis command"""
@@ -497,6 +497,7 @@ def run_ceph_command(args):
     except subprocess.CalledProcessError as e:
         print(f"Error: {e.output.decode('utf-8')}")
         exit(1)
+
 
 def main():
     # Create the top-level parser

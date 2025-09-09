@@ -1,5 +1,5 @@
 from clyso.ceph.ai.pg.distribution import PGHistogram
-from clyso.ceph.ai.common import jsoncmd
+from clyso.ceph.api.commands import ceph_osd_tree, ceph_pg_dump
 import json
 import os
 
@@ -69,6 +69,11 @@ def add_command_pg(subparsers):
 
 
 def pg_distribution(args):
+    """
+    Generate PG distribution histogram.
+
+    Now using typed API functions for better type safety and validation.
+    """
     if args.osd_tree_json:
         with open(args.osd_tree_json, "r") as file:
             osd_weights = json.load(file)
@@ -76,7 +81,8 @@ def pg_distribution(args):
         with open("osd_info-tree_json", "r") as file:
             osd_weights = json.load(file)
     else:
-        osd_weights = jsoncmd("ceph osd tree -f json")
+        osd_tree = ceph_osd_tree()
+        osd_weights = osd_tree.model_dump()
 
     if args.pg_dump_json:
         with open(args.pg_dump_json, "r") as file:
@@ -85,7 +91,8 @@ def pg_distribution(args):
         with open("pg_info-dump_json", "r") as file:
             pg_stats = json.load(file)
     else:
-        pg_stats = jsoncmd("ceph pg dump --format=json")
+        pg_dump = ceph_pg_dump()
+        pg_stats = pg_dump.model_dump()
 
     pg_histogram = PGHistogram(osd_weights, pg_stats, args)
     pg_histogram.print_ascii_histogram()
