@@ -20,7 +20,7 @@ class OSDPerf:
         self.onode_hitrate = None
 
     def load_from_subprocess(
-        self, osd_id: int, skip_confirmation: bool = False
+        self, osd_id: int, skip_confirmation: bool = True
     ) -> None:
         """Load performance data by running subprocess command"""
         self.osd_id = osd_id
@@ -53,7 +53,7 @@ class OSDPerf:
         self._extract_onode_metrics()
 
     def _collect_perf_data_subprocess(
-        self, skip_confirmation: bool = False
+        self, skip_confirmation: bool = True
     ) -> dict[str, Any]:
         """Collect performance data via subprocess command"""
         if self.osd_id is None:
@@ -129,7 +129,7 @@ class OSDPerf:
 
     @classmethod
     def collect_osd_performance_metrics(
-        cls, sampled_osds: list, osd_metadata: dict, skip_confirmation: bool = False
+        cls, sampled_osds: list, osd_metadata: dict, skip_confirmation: bool = True
     ) -> Tuple[list, list]:
         """Collect onode performance metrics from sampled OSDs"""
         osd_metrics = []
@@ -205,7 +205,7 @@ class OSDPerf:
 
     @staticmethod
     def collect_single_osd_metrics(
-        osd_id: int, skip_confirmation: bool = False
+        osd_id: int, skip_confirmation: bool = True
     ) -> list:
         """Collect performance metrics from a single OSD"""
         try:
