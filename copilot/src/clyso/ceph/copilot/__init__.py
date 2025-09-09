@@ -25,7 +25,7 @@ CONFIG_FILE = "copilot.yaml"
 
 
 def collect(args=None):
-    skip_confirmation = getattr(args, "yes", False) if args else False
+    skip_confirmation = getattr(args, "yes", True) if args else True
     return jsoncmd("ceph report", skip_confirmation=skip_confirmation)
 
 
@@ -42,7 +42,7 @@ def collect_data_source(
     2. Check if file exists in current directory (using file patterns)
     3. Fall back to running ceph CLI command
     """
-    skip_confirmation = getattr(args, "yes", False) if args else False
+    skip_confirmation = getattr(args, "yes", True) if args else True
     if explicit_file:
         try:
             with open(explicit_file, "r") as file:
@@ -78,7 +78,7 @@ def collect_all_data(args):
     """
     Returns a populated CephData object and a list of warnings.
     """
-    skip_confirmation = getattr(args, "yes", False)
+    skip_confirmation = getattr(args, "yes", True)
     data = CephData()
     warnings = []
     verbose = getattr(args, "verbose", False)
@@ -476,7 +476,7 @@ def planner_replacement(args):
 
 # note: use jsoncmd to run ceph comamnds with json
 def run_ceph_command(args):
-    skip_confirmation = getattr(args, "yes", False)
+    skip_confirmation = getattr(args, "yes", True)
     command = ["ceph"]
     command.extend(args)
     cmd_str = " ".join(command)
@@ -508,6 +508,7 @@ def main():
         "--yes",
         "-y",
         action="store_true",
+        default=True,
         help="Automatically confirm all interactive prompts",
     )
 
