@@ -40,7 +40,7 @@ def json_load(f):
     return json_loads(f.read())
 
 
-def jsoncmd(command, timeout=30, skip_confirmation=False):
+def jsoncmd(command, timeout=30, skip_confirmation=True):
     """Execute a Ceph command and return JSON output with optional interactive confirmation.
 
     Args:
@@ -92,7 +92,6 @@ def load_ceph_report_file(filepath):
 class CopilotParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
         super(CopilotParser, self).__init__(*args, **kwargs)
-        self.print_help = self.add_extra_help_message(self.print_help)
 
     def error(self, message):
         copilot_error = "{cluster, pool, toolkit}"
@@ -105,13 +104,3 @@ class CopilotParser(argparse.ArgumentParser):
         self.print_usage()
         print(f"copilot: error: {message}")
         sys.exit(2)
-
-    def add_extra_help_message(self, func):
-        def wrapper(*args, **kwargs):
-            func(*args, **kwargs)  # Call the original function
-            print(
-                "
-If you encounter any bugs, please report them at https://ticket.clyso.com/"
-            )
-
-        return wrapper

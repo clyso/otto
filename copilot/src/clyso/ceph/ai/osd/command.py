@@ -44,7 +44,7 @@ class OSDPerfCommand:
 
     def _collect_data(self) -> bool:
         """Collect OSD performance data based on command arguments"""
-        skip_confirmation = getattr(self.args, "yes", False)
+        skip_confirmation = getattr(self.args, "yes", True)
 
         try:
             if self.args.osd_id:
