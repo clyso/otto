@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  GIT_DEPTH: 100
+  GIT_DEPTH: 0
 
 jobs:
   build_binary:
@@ -68,9 +68,6 @@ jobs:
           dnf config-manager --enable crb
           dnf install -y git rpm-build rpmdevtools python3-devel
           curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/bin UV_DISABLE_UPDATE=1 UV_NO_MODIFY_PATH=1 /bin/sh
-
-      - name: Fetch tags
-        run: git fetch --tags
 
       - name: Build RPM
         run: ./build_rpm.sh
