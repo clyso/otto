@@ -13,7 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/astral-sh/uv:python3.11-alpine
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
     steps:
+      - name: Install git 
+        run: |
+          apk add git
+          git config --global --add safe.directory .
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -23,8 +30,6 @@ jobs:
         run: |
           apk add nmap-ncat
           apk add bash
-          apk add git
-          git config --global --add safe.directory .
 
       - name: Setup Python environment and run tests
         run: |
@@ -49,7 +54,14 @@ jobs:
     needs: run_tests
     container:
       image: rockylinux:9
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
     steps:
+      - name: Install git 
+        run: |
+          dnf install -y git
+          git config --global --add safe.directory .
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:

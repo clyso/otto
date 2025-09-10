@@ -57,6 +57,11 @@ jobs:
     container:
       image: rockylinux:9
     steps:
+      - name: Install git 
+        run: |
+          dnf install -y git
+          git config --global --add safe.directory .
+          
       - name: Checkout code
         uses: actions/checkout@v4
         with:
