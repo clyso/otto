@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+env:
+  GIT_DEPTH: 100
+
+jobs:
+  build_binary:
+    runs-on: ubuntu-latest
+    container:
+      image: centos:8
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ env.GIT_DEPTH }}
+
+      - name: Setup CentOS repositories
+        run: |
+          cd /etc/yum.repos.d/
+          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+
+      - name: Install dependencies
+        run: |
+          yum install -y curl git
+          curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/bin UV_DISABLE_UPDATE=1 UV_NO_MODIFY_PATH=1 /bin/sh
+
+      - name: Generate version
+        run: |
+          git describe --tags --long --always | awk -F'-' '{ printf "%s+g%s.d%s\n", $1, $3, strftime("%Y%m%d") }' > GIT_VERSION
+
+      - name: Build binary
+        run: ./build.sh
+
+      - name: Test binary
+        run: |
+          ./dist/clyq --version
+          ./dist/clyq --help
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary
+          path: dist/clyq
+          retention-days: 1
+
+  build_rpm:
+    runs-on: ubuntu-latest
+    container:
+      image: rockylinux:9
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ env.GIT_DEPTH }}
+
+      - name: Install dependencies
+        run: |
+          dnf install -y epel-release
+          dnf config-manager --enable crb
+          dnf install -y git rpm-build rpmdevtools python3-devel
+          curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/bin UV_DISABLE_UPDATE=1 UV_NO_MODIFY_PATH=1 /bin/sh
+
+      - name: Fetch tags
+        run: git fetch --tags
+
+      - name: Build RPM
+        run: ./build_rpm.sh
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm
+          path: "*.rpm"
+          retention-days: 1
+
+  create_release:
+    runs-on: ubuntu-latest
+    needs: [build_binary, build_rpm]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ env.GIT_DEPTH }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        run: |
+          gh release create ${{ github.ref_name }} \
+            --title "Release ${{ github.ref_name }}" \
+            binary/clyq \
+            rpm/*.rpm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
