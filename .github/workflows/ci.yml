@@ -84,10 +84,10 @@ jobs:
 
       - name: Test RPM installation
         run: |
-          dnf install -y ./ceph-copilot-*.x86_64.rpm
-          ceph-copilot --help
-          ceph-copilot --version
-          ceph-copilot toolkit list
+          dnf install -y ./clyq-*.x86_64.rpm
+          clyq --help
+          clyq --version
+          clyq toolkit list
 
   build_binary:
     runs-on: ubuntu-latest
@@ -116,8 +116,8 @@ jobs:
 
       - name: Test binary
         run: |
-          ./dist/ceph-copilot --version
-          ./dist/ceph-copilot --help
+          ./dist/clyq --version
+          ./dist/clyq --help
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -145,6 +145,6 @@ jobs:
 
       - name: Run binary tests
         run: |
-          chmod +x ./dist/ceph-copilot
+          chmod +x ./dist/clyq
           chmod +x tests/test_binary.sh
           ./tests/test_binary.sh
