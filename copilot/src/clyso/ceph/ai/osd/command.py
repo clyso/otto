@@ -1,6 +1,6 @@
 import json
 import sys
-from typing import Tuple
+from typing import Any
 
 from .perf import OSDPerf, OSDPerfFormatter
 from clyso.ceph.ai.osd.topology import OSDTopology
@@ -10,11 +10,11 @@ from clyso.ceph.ai.osd.sampler import stratified_sample_osds
 class OSDPerfCommand:
     """Command class that orchestrates OSD performance analysis workflow"""
 
-    def __init__(self, args):
+    def __init__(self, args: Any):
         self.args = args
-        self.osd_metrics = []
-        self.failed_osds = []
-        self.analysis_results = {}
+        self.osd_metrics: list[dict[str, Any]] = []
+        self.failed_osds: list[int] = []
+        self.analysis_results: dict[str, Any] = {}
         self.perf_class = OSDPerf
         self.formatter_class = OSDPerfFormatter
 
@@ -67,7 +67,7 @@ class OSDPerfCommand:
             print(f"Error collecting OSD data: {e}", file=sys.stderr)
             return False
 
-    def _collect_from_file(self) -> list:
+    def _collect_from_file(self) -> list[dict[str, Any]]:
         """Collect data from file input"""
         try:
             with open(self.args.file, "r") as f:
@@ -83,19 +83,24 @@ class OSDPerfCommand:
             )
             return []
 
-    def _collect_from_cluster(self, skip_confirmation: bool) -> Tuple[list, list]:
+    def _collect_from_cluster(
+        self, skip_confirmation: bool
+    ) -> tuple[list[dict[str, Any]], list[int]]:
         """Collect data from cluster sampling"""
 
         try:
             topology = OSDTopology()
-            host_to_osds, device_class_to_osds, up_osds, osd_metadata = (
-                topology.get_topology_info()
-            )
+            (
+                host_to_osds,
+                device_class_to_osds,
+                up_osds,
+                osd_metadata,
+            ) = topology.get_topology_info()
         except Exception as e:
             print(f"Error loading cluster information: {e}")
             return [], []
 
-        sample_size = self.args.num_osds
+        sample_size: int = self.args.num_osds
         print(f"Cluster has {len(up_osds)} UP OSDs, sampling {sample_size} OSDs")
 
         sampled_osds = stratified_sample_osds(
@@ -129,7 +134,7 @@ class OSDPerfCommand:
             print("No performance metrics to display")
             return
 
-        onode_analysis = self.analysis_results.get("onode", {})
+        onode_analysis: dict[str, Any] = self.analysis_results.get("onode", {})
         self.formatter_class.display_results(
             onode_analysis, self.osd_metrics, self.failed_osds
         )
