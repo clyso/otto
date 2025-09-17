@@ -1,80 +1,77 @@
-import json
+from __future__ import annotations
 import statistics
-import sys
 from typing import Any
+from pydantic import BaseModel
+
+from clyso.ceph.api.loaders import (
+    load_osd_perf_from_file,
+    load_osd_perf_from_stdin,
+)
 from clyso.ceph.api.commands import ceph_osd_perf_dump
+from clyso.ceph.api.schemas import OSDPerfDumpResponse
+
+class OSDMetric(BaseModel):
+    """Schema for OSD performance metric data"""
+
+    osd_id: int | str
+    host: str
+    device_class: str
+    onode_hits: int
+    onode_misses: int
+    onode_hitrate: float
 
 
 class OSDPerf:
-    osd_id: int | None
-    perf_dump: dict[str, Any] | None
-    onode_hits: int | None
-    onode_misses: int | None
-    onode_hitrate: float | None
+    """Handles OSD perf data
+    Example:
 
-    def __init__(self, osd_id: int | None = None):
-        self.osd_id = osd_id
-        self.perf_dump = None
-        self.onode_hits = None
-        self.onode_misses = None
-        self.onode_hitrate = None
+    osd_perf = OSDPerf.from_subprocess(osd_id=5)
 
-    def load_from_subprocess(self, osd_id: int, skip_confirmation: bool = True) -> None:
-        """Load performance data by running subprocess command"""
-        self.osd_id = osd_id
-        self.perf_dump = self._collect_perf_data_subprocess(skip_confirmation)
+    or
+    osd_perf = OSDPerf.from_file("/path/to/osd_perf_dump.json")
+
+    or
+    osd_perf = OSDPerf.from_stdin()
+
+    # can be used it the same way:
+    metrics = osd_perf.get_onode_metrics()
+    print(f"OSD Hit Rate: {metrics.onode_hitrate:.2%}")
+    print(f"Cache Hits: {metrics.onode_hits}")
+    print(f"Cache Misses: {metrics.onode_misses}")
+    """
+
+    perf_dump: OSDPerfDumpResponse
+    onode_hits: int
+    onode_misses: int
+    onode_hitrate: float
+
+    def __init__(self, perf_dump: OSDPerfDumpResponse):
+        self.perf_dump = perf_dump
         self._extract_onode_metrics()
 
-    def load_from_file(self, file_path: str) -> None:
-        """Load performance data from a file"""
-        try:
-            with open(file_path, "r") as f:
-                self.perf_dump = json.load(f)
-            self._extract_onode_metrics()
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Performance data file '{file_path}' not found")
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in file '{file_path}': {e}") from e
+    @classmethod
+    def from_file(cls, file_path: str) -> OSDPerf:
+        perf_dump = load_osd_perf_from_file(file_path)
+        return cls(perf_dump)
 
-    def load_from_stdin(self) -> None:
-        """Load performance data from stdin"""
-        try:
-            content = sys.stdin.read()
-            self.perf_dump = json.loads(content)
-            self._extract_onode_metrics()
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON from stdin: {e}") from e
+    @classmethod
+    def from_subprocess(cls, osd_id: int, skip_confirmation: bool = True) -> OSDPerf:
+        perf_dump = ceph_osd_perf_dump(osd_id, skip_confirmation)
+        return cls(perf_dump)
 
-    def load_from_data(self, perf_data: dict[str, Any]) -> None:
-        """Load performance data from provided dictionary"""
-        self.perf_dump = perf_data
-        self._extract_onode_metrics()
+    @classmethod
+    def from_stdin(cls) -> OSDPerf:
+        perf_dump = load_osd_perf_from_stdin()
+        return cls(perf_dump)
 
-    def _collect_perf_data_subprocess(
-        self, skip_confirmation: bool = True
-    ) -> dict[str, Any]:
-        """Collect performance data via subprocess command"""
-        if self.osd_id is None:
-            raise ValueError("OSD ID must be set for subprocess collection")
-        try:
-            return ceph_osd_perf_dump(self.osd_id, skip_confirmation=skip_confirmation)
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"Invalid JSON response from OSD {self.osd_id} perf dump command: {e}"
-            ) from e
-        except Exception as e:
-            raise RuntimeError(
-                f"Unexpected error collecting perf data for OSD {self.osd_id}: {e}"
-            ) from e
+    @classmethod
+    def from_data(cls, perf_data: object) -> OSDPerf:
+        perf_dump = OSDPerfDumpResponse.model_validate(perf_data)
+        return cls(perf_dump)
 
     def _extract_onode_metrics(self) -> None:
-        """Extract onode metrics from loaded performance dump"""
-        if not self.perf_dump:
-            raise ValueError("No performance data loaded")
-
-        bluestore = self.perf_dump.get("bluestore", {})
-        self.onode_hits = bluestore.get("onode_hits", 0)
-        self.onode_misses = bluestore.get("onode_misses", 0)
+        self.onode_hits = self.perf_dump.bluestore.onode_hits
+        self.onode_misses = self.perf_dump.bluestore.onode_misses
 
         assert self.onode_hits is not None
         assert self.onode_misses is not None
@@ -85,217 +82,147 @@ class OSDPerf:
             else 0.0
         )
 
-    def get_onode_metrics_json(self) -> str:
-        """Get onode metrics as JSON string"""
-        if (
-            self.onode_hits is None
-            or self.onode_misses is None
-            or self.onode_hitrate is None
-        ):
-            raise ValueError("No onode metrics available. Load performance data first.")
-
-        onode_metrics = {
-            "onode_hits": self.onode_hits,
-            "onode_misses": self.onode_misses,
-            "onode_hitrate": self.onode_hitrate,
-        }
-        return json.dumps(onode_metrics)
-
-    @staticmethod
-    def process_perf_dump_file(perf_data: dict[str, Any]) -> list:
-        """Process perf dump data from a JSON file and extract OSD metrics"""
-        osd_metrics = []
-
-        osd_perf = OSDPerf()
-        osd_perf.load_from_data(perf_data)
-
-        osd_metrics.append(
-            {
-                "osd_id": "unknown",
-                "host": "unknown",
-                "device_class": "unknown",
-                "onode_hits": osd_perf.onode_hits,
-                "onode_misses": osd_perf.onode_misses,
-                "onode_hitrate": osd_perf.onode_hitrate,
-            }
+    def get_onode_metrics(self) -> OSDMetric:
+        return OSDMetric(
+            osd_id="unknown",
+            host="unknown",
+            device_class="unknown",
+            onode_hits=self.onode_hits,
+            onode_misses=self.onode_misses,
+            onode_hitrate=self.onode_hitrate,
         )
 
-        return osd_metrics
+    def process(self) -> list[OSDMetric]:
+        """Process performance data and return list of OSD metrics"""
+        return [self.get_onode_metrics()]
+
+    @classmethod
+    def collect_single_osd_metrics(
+        cls, osd_id: int, skip_confirmation: bool = True
+    ) -> list[OSDMetric]:
+        """Collect metrics from a single OSD"""
+        perf_instance = cls.from_subprocess(osd_id, skip_confirmation)
+        return perf_instance.process()
+
+    @classmethod
+    def process_perf_dump_file(cls, perf_data: object) -> list[OSDMetric]:
+        """Process performance dump data from file"""
+        perf_instance = cls.from_data(perf_data)
+        return perf_instance.process()
 
     @classmethod
     def collect_osd_performance_metrics(
-        cls, sampled_osds: list, osd_metadata: dict, skip_confirmation: bool = True
-    ) -> tuple[list, list]:
-        """Collect onode performance metrics from sampled OSDs"""
+        cls,
+        osd_ids: list[int],
+        osd_metadata: dict[int, dict[str, str]],
+        skip_confirmation: bool = True,
+    ) -> tuple[list[OSDMetric], list[int]]:
+        """Collect performance metrics from multiple OSDs"""
         osd_metrics = []
         failed_osds = []
 
-        # Handle bulk confirmation for multiple OSDs
-        if not skip_confirmation and len(sampled_osds) > 1:
-            osd_list = ", ".join(f"osd.{osd_id}" for osd_id in sorted(sampled_osds))
+        for osd_id in osd_ids:
             try:
-                response = (
-                    input(
-                        f"+ Collect perf dump from {len(sampled_osds)} OSDs ({osd_list}) [y/n]: "
-                    )
-                    .strip()
-                    .lower()
-                )
-                if response not in ("y", "yes"):
-                    print("OSD performance collection cancelled by user.")
-                    return [], []
-            except (KeyboardInterrupt, EOFError):
-                print("\nOperation cancelled by user.")
-                return [], []
-
-        skip_confirmation = True
-
-        # TODO: Multi-OSD collection could be parallelized
-        # Consider using concurrent.futures.ThreadPoolExecutor for collecting from
-        # multiple OSDs simultaneously to reduce overall collection time
-        for osd_id in sampled_osds:
-            try:
-                osd_perf = cls()
-                osd_perf.load_from_subprocess(
-                    osd_id, skip_confirmation=skip_confirmation
-                )
-                metadata = osd_metadata[osd_id]
-
-                osd_metrics.append(
-                    {
-                        "osd_id": osd_id,
-                        "host": metadata["host"],
-                        "device_class": metadata["device_class"],
-                        "onode_hits": osd_perf.onode_hits,
-                        "onode_misses": osd_perf.onode_misses,
-                        "onode_hitrate": osd_perf.onode_hitrate,
-                    }
-                )
-
-            except Exception:
+                metrics = cls.collect_single_osd_metrics(osd_id, skip_confirmation)
+                for metric in metrics:
+                    # Update with metadata if available
+                    if osd_id in osd_metadata:
+                        metadata = osd_metadata[osd_id]
+                        metric.osd_id = osd_id
+                        metric.host = metadata.get("hostname", "unknown")
+                        metric.device_class = metadata.get("device_class", "unknown")
+                    osd_metrics.extend(metrics)
+            except Exception as e:
+                print(f"Failed to collect metrics for OSD {osd_id}: {e}")
                 failed_osds.append(osd_id)
 
         return osd_metrics, failed_osds
 
-    @staticmethod
-    def collect_from_file_or_stdin(file_path: str | None = None) -> list:
-        """Collect performance metrics from file or stdin"""
-        osd_perf = OSDPerf()
+    @classmethod
+    def analyze_onode_distribution(cls, osd_metrics: list[OSDMetric]) -> dict[str, Any]:
+        """Analyze onode cache hit rate distribution across OSDs"""
+        return analyze_onode_distribution(osd_metrics)
 
-        if file_path:
-            osd_perf.load_from_file(file_path)
-        else:
-            osd_perf.load_from_stdin()
 
-        return [
-            {
-                "osd_id": "unknown",
-                "host": "unknown",
-                "device_class": "unknown",
-                "onode_hits": osd_perf.onode_hits,
-                "onode_misses": osd_perf.onode_misses,
-                "onode_hitrate": osd_perf.onode_hitrate,
-            }
-        ]
+def analyze_onode_distribution(osd_metrics: list[OSDMetric]) -> dict[str, Any]:
+    """Analyze onode cache hit rate distribution across OSDs"""
+    hit_rates = [osd.onode_hitrate for osd in osd_metrics]
 
-    @staticmethod
-    def collect_single_osd_metrics(osd_id: int, skip_confirmation: bool = True) -> list:
-        """Collect performance metrics from a single OSD"""
-        try:
-            osd_perf = OSDPerf()
-            osd_perf.load_from_subprocess(osd_id, skip_confirmation=skip_confirmation)
+    if not hit_rates:
+        return {"error": "No valid hit rate data found"}
 
-            return [
-                {
-                    "osd_id": osd_id,
-                    "host": "unknown",
-                    "device_class": "unknown",
-                    "onode_hits": osd_perf.onode_hits,
-                    "onode_misses": osd_perf.onode_misses,
-                    "onode_hitrate": osd_perf.onode_hitrate,
-                }
-            ]
+    # TODO: make a schema for this dict if we are passing it around
+    result: dict[str, float | int] = {
+        "total_osds": len(hit_rates),
+        "mean_hitrate": statistics.mean(hit_rates),
+        "median_hitrate": statistics.median(hit_rates),
+        "min_hitrate": min(hit_rates),
+        "max_hitrate": max(hit_rates),
+    }
 
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to collect metrics from OSD {osd_id}: {e}"
-            ) from e
+    if len(hit_rates) > 1:
+        result["stdev_hitrate"] = statistics.stdev(hit_rates)
 
-    @staticmethod
-    def analyze_onode_distribution(osd_metrics: list) -> dict:
-        """Analyze onode hit rate distribution"""
-        if not osd_metrics:
-            return {}
+    # # Categorize OSDs by hit rate performance
+    # excellent = sum(1 for rate in hit_rates if rate >= 0.95)
+    # good = sum(1 for rate in hit_rates if 0.8 <= rate < 0.95)
+    # poor = sum(1 for rate in hit_rates if rate < 0.8)
+    #
+    # result["performance_distribution"] = {
+    #     "excellent_cache_performance": excellent,
+    #     "good_cache_performance": good,
+    #     "poor_cache_performance": poor,
+    # }
 
-        hitrates = [m["onode_hitrate"] for m in osd_metrics]
+    return result
 
-        analysis = {
-            "overall": {
-                "count": len(osd_metrics),
-                "mean": statistics.mean(hitrates),
-                "median": statistics.median(hitrates),
-                "min": min(hitrates),
-                "max": max(hitrates),
-                "std_dev": statistics.stdev(hitrates) if len(hitrates) > 1 else 0.0,
-            }
-        }
 
-        return analysis
+def display_results(osd_metrics: list[OSDMetric], analysis: dict[str, Any]) -> None:
+    """Display formatted results of OSD performance analysis"""
+    print("\n" + "=" * 60)
+    print("OSD ONODE CACHE PERFORMANCE ANALYSIS")
+    print("=" * 60)
+
+    print(f"\nTotal OSDs analyzed: {analysis['total_osds']}")
+    print(f"Mean hit rate: {analysis['mean_hitrate']:.3f}")
+    print(f"Median hit rate: {analysis['median_hitrate']:.3f}")
+    print(
+        f"Hit rate range: {analysis['min_hitrate']:.3f} - {analysis['max_hitrate']:.3f}"
+    )
+
+    if "stdev_hitrate" in analysis:
+        print(f"Standard deviation: {analysis['stdev_hitrate']:.3f}")
+
+    dist = analysis["performance_distribution"]
+    print(f"\nPerformance Distribution:")
+    print(f"  Excellent (≥95%): {dist['excellent_cache_performance']} OSDs")
+    print(f"  Good (80-94%): {dist['good_cache_performance']} OSDs")
+    print(f"  Poor (<80%): {dist['poor_cache_performance']} OSDs")
+
+    print(f"\nDetailed OSD Metrics:")
+    print(
+        f"{'OSD':<6} {'Host':<15} {'Class':<10} {'Hits':<12} {'Misses':<12} {'Hit Rate':<10}"
+    )
+    print("-" * 70)
+
+    for osd in osd_metrics:
+        print(
+            f"{str(osd.osd_id):<6} {osd.host:<15} {osd.device_class:<10} "
+            + f"{osd.onode_hits:<12} {osd.onode_misses:<12} {osd.onode_hitrate:<10.3f}"
+        )
 
 
 class OSDPerfFormatter:
-    """Handles display formatting for OSD performance analysis"""
+    """Formatter class for OSD performance analysis results"""
 
     @staticmethod
-    def format_results(analysis: dict, osd_metrics: list, failed_osds: list) -> str:
-        """Format OSD performance analysis results"""
-        output = []
-
-        if len(osd_metrics) == 1:
-            osd = osd_metrics[0]
-            output.append("=" * 40)
-            output.append("OSD PERFORMANCE ANALYSIS")
-            output.append("=" * 40)
-            output.append(f"\nOSD {osd['osd_id']} Onode Metrics:")
-            output.append(f"  Hit Rate: {osd['onode_hitrate']:.2%}")
-            output.append(f"  Hits:     {osd['onode_hits']:,}")
-            output.append(f"  Misses:   {osd['onode_misses']:,}")
-            if osd["host"] != "unknown":
-                output.append(f"  Host:     {osd['host']}")
-            if osd["device_class"] != "unknown":
-                output.append(f"  Device:   {osd['device_class']}")
-        else:
-            output.append("=" * 50)
-            output.append("ONODE PERFORMANCE ANALYSIS")
-            output.append("=" * 50)
-
-            overall = analysis["overall"]
-            output.append("\nOnode Hit Rate Distribution:")
-            output.append(f"  Sampled OSDs: {overall['count']}")
-            output.append(f"  Average: {overall['mean']:.2%}")
-            output.append(f"  Median:  {overall['median']:.2%}")
-            output.append(f"  Min:     {overall['min']:.2%}")
-            output.append(f"  Max:     {overall['max']:.2%}")
-            output.append(f"  Std Dev: {overall['std_dev']:.2%}")
-
-            output.append("\nIndividual OSD Hit Rate %:")
-            sorted_osds = sorted(osd_metrics, key=lambda x: x["onode_hitrate"])
-            for osd in sorted_osds:
-                host_info = f" ({osd['host']})" if osd["host"] != "unknown" else ""
-                output.append(
-                    f"  OSD {osd['osd_id']}{host_info}: {osd['onode_hitrate']:.2%}"
-                )
+    def display_results(
+        analysis: dict[str, object],
+        osd_metrics: list[OSDMetric],
+        failed_osds: list[int],
+    ) -> None:
+        """Display formatted analysis results"""
+        display_results(osd_metrics, analysis)
 
         if failed_osds:
-            output.append(
-                f"\nFailed to collect metrics from OSDs: {sorted(failed_osds)}"
-            )
-
-        return "\n".join(output)
-
-    @staticmethod
-    def display_results(analysis: dict, osd_metrics: list, failed_osds: list) -> None:
-        """Display OSD performance analysis results"""
-        print(
-            f"\n{OSDPerfFormatter.format_results(analysis, osd_metrics, failed_osds)}"
-        )
+            print(f"\nFailed OSDs: {sorted(failed_osds)}")
