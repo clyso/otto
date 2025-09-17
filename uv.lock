@@ -34,7 +34,7 @@ wheels = [
 
 [[package]]
 name = "ceph-copilot"
-version = "0.3.5+g0507271d3.d20250910"
+version = "0.3.5+gc36d19138.d20250917"
 source = { editable = "copilot" }
 dependencies = [
     { name = "humanize" },
