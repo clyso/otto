@@ -3,12 +3,15 @@ Pydantic schemas for Ceph JSON API responses.
 
 This module provides typed interfaces for Ceph command JSON outputs,
 enabling better type checking and IntelliSense support with validation.
+
+Latest updated to reef 18.2.7
+
 """
 # NOTE: pydantic makes basedpyright complain about 'Any' when using Field
-# defaults. Disable 'reportAny' temporarily.
+# defaults. Disable warnings temporarily.
 #
-# pyright: reportAny=false
-# pyright: reportExplicitAny=false
+# basedpyright: reportAny=false
+# basedpyright: reportExplicitAny=false
 
 from __future__ import annotations
 
@@ -45,17 +48,17 @@ class OSDNode(BaseModel):
 
     id: int
     name: str
-    type: str  # "root", "host", "osd"
+    type: str
     type_id: int
-    children: list[int] = Field(default_factory=list)  # root and host nodes
-    device_class: str | None = None  # osd nodes
-    crush_weight: float | None = None  # osd nodes
-    depth: int | None = None  # osd nodes
+    children: list[int] = Field(default_factory=list)
+    device_class: str | None = None
+    crush_weight: float | None = None
+    depth: int | None = None
     pool_weights: dict[str, float] = Field(default_factory=dict)
-    exists: int | None = None  # osd nodes (0 or 1)
-    status: str | None = None  # osd nodes ("up", "down")
-    reweight: float | None = None  # osd nodes
-    primary_affinity: float | None = None  # osd nodes
+    exists: int | None = None
+    status: str | None = None
+    reweight: float | None = None
+    primary_affinity: float | None = None
 
 
 class OSDTree(BaseModel):
@@ -347,6 +350,229 @@ class PGDump(BaseModel):
         return cls.loads(raw)
 
 
-# Rebuild models to resolve forward references
-OSDTree.model_rebuild()
-PGDump.model_rebuild()
+class OSDDFNode(BaseModel):
+    """Schema for OSD disk usage node from 'ceph osd df --format=json'"""
+
+    id: int
+    device_class: str
+    name: str
+    type: str
+    type_id: int
+    crush_weight: float
+    depth: int
+    pool_weights: dict[str, Any] = Field(default_factory=dict)
+    reweight: float
+    kb: int
+    kb_used: int
+    kb_used_data: int
+    kb_used_omap: int
+    kb_used_meta: int
+    kb_avail: int
+    utilization: float
+    var: float
+    pgs: int
+    status: str
+
+
+class OSDDFResponse(BaseModel):
+    """Schema for 'ceph osd df --format=json' response"""
+
+    nodes: list[OSDDFNode]
+
+    @classmethod
+    def loads(cls, raw: str) -> OSDDFResponse:
+        """Parse OSD DF from JSON string"""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(f"Failed to parse OSD DF: {e}") from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> OSDDFResponse:
+        """Load and parse OSD DF from file"""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
+class LastPGMergeMeta(BaseModel):
+    """Schema for last PG merge metadata"""
+
+    source_pgid: str
+    ready_epoch: int
+    last_epoch_started: int
+    last_epoch_clean: int
+    source_version: str
+    target_version: str
+
+
+class HitSetParams(BaseModel):
+    """Schema for hit set parameters"""
+
+    type: str
+
+
+class PoolConfig(BaseModel):
+    """Schema for pool configuration from osd dump"""
+
+    pool: int
+    pool_name: str
+    create_time: str
+    flags: int
+    flags_names: str
+    type: int
+    size: int
+    min_size: int
+    crush_rule: int
+    peering_crush_bucket_count: int = 0
+    peering_crush_bucket_target: int = 0
+    peering_crush_bucket_barrier: int = 0
+    peering_crush_bucket_mandatory_member: int = 2147483647
+    object_hash: int
+    pg_autoscale_mode: str
+    pg_num: int
+    pg_placement_num: int
+    pg_placement_num_target: int
+    pg_num_target: int
+    pg_num_pending: int
+    last_pg_merge_meta: LastPGMergeMeta
+    last_change: str
+    last_force_op_resend: str
+    last_force_op_resend_prenautilus: str
+    last_force_op_resend_preluminous: str
+    auid: int
+    snap_mode: str
+    snap_seq: int
+    snap_epoch: int
+    pool_snaps: list[Any] = Field(default_factory=list)
+    removed_snaps: str
+    quota_max_bytes: int
+    quota_max_objects: int
+    tiers: list[Any] = Field(default_factory=list)
+    tier_of: int
+    read_tier: int
+    write_tier: int
+    cache_mode: str
+    target_max_bytes: int
+    target_max_objects: int
+    cache_target_dirty_ratio_micro: int
+    cache_target_dirty_high_ratio_micro: int
+    cache_target_full_ratio_micro: int
+    cache_min_flush_age: int
+    cache_min_evict_age: int
+    erasure_code_profile: str
+    hit_set_params: HitSetParams
+    hit_set_period: int
+    hit_set_count: int
+    # Optional fields - may be present in some Ceph versions
+    hit_set_archive: bool = False
+    min_read_recency_for_promote: int = 0
+    min_write_recency_for_promote: int = 0
+    fast_read: bool = False
+    hit_set_grade_decay_rate: int = 0
+    hit_set_search_last_n: int = 0
+    grade_table: list[Any] = Field(default_factory=list)
+    stripe_width: int = 0
+    expected_num_objects: int = 0
+    compression_algorithm: str = ""
+    compression_mode: str = ""
+    compression_required_ratio: float = 0.0
+    compression_max_blob_size: int = 0
+    compression_min_blob_size: int = 0
+    is_stretch_pool: bool = False
+    stretch_rule_id: int = 0
+    pg_autoscale_bias: float = 1.0
+    pg_num_min: int = 0
+    recovery_priority: int = 0
+    recovery_op_priority: int = 0
+    scrub_min_interval: int = 0
+    scrub_max_interval: int = 0
+    deep_scrub_interval: int = 0
+    recovery_deletes: bool = False
+    auto_repair: bool = False
+    bulk: bool = False
+    fingerprint_algorithm: str | None = None
+    pg_autoscale_max_growth: float | None = None
+    target_size_bytes: int | None = None
+    target_size_ratio: float | None = None
+    pg_num_max: int | None = None
+    # Additional fields that may be present
+    nodelete: bool = False
+    nopgchange: bool = False
+    nosizechange: bool = False
+    write_fadvise_dontneed: bool = False
+    noscrub: bool = False
+    nodeep_scrub: bool = False
+    use_gmt_hitset: bool = False
+    debug_fake_ec_pool: bool = False
+    debug_pool: bool = False
+    hashpspool: bool = False
+    backfillfull: bool = False
+    selfmanaged_snaps: bool = False
+    pool_metadata: dict[str, Any] = Field(default_factory=dict)
+    read_balance_score: int = 0
+    pg_autoscale_max_objects: int = 0
+    application_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OSDDumpResponse(BaseModel):
+    """Schema for 'ceph osd dump --format=json' response"""
+
+    epoch: int
+    fsid: str
+    created: str
+    modified: str
+    last_up_change: str
+    last_in_change: str
+    flags: str
+    flags_num: int
+    flags_set: list[str]
+    crush_version: int
+    full_ratio: float
+    backfillfull_ratio: float
+    nearfull_ratio: float
+    cluster_snapshot: str
+    pool_max: int
+    max_osd: int
+    require_min_compat_client: str
+    min_compat_client: str
+    require_osd_release: str
+    allow_crimson: bool
+    pools: list[PoolConfig]
+    osds: list[dict[str, Any]] = Field(default_factory=list)
+    pg_upmap: list[Any] = Field(default_factory=list)
+    pg_upmap_items: list[Any] = Field(default_factory=list)
+    pg_temp: list[Any] = Field(default_factory=list)
+    primary_temp: list[Any] = Field(default_factory=list)
+    blacklist: dict[str, Any] = Field(default_factory=dict)
+    erasure_code_profiles: dict[str, Any] = Field(default_factory=dict)
+    removed_snaps_queue: list[Any] = Field(default_factory=list)
+    new_removed_snaps: list[Any] = Field(default_factory=list)
+    new_purged_snaps: list[Any] = Field(default_factory=list)
+    crush_node_flags: dict[str, Any] = Field(default_factory=dict)
+    device_class_flags: dict[str, Any] = Field(default_factory=dict)
+    stretch_mode: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def loads(cls, raw: str) -> OSDDumpResponse:
+        """Parse OSD dump from JSON string"""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(f"Failed to parse OSD dump: {e}") from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> OSDDumpResponse:
+        """Load and parse OSD dump from file"""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
+# to resolve forward references
+_ = OSDTree.model_rebuild()
+_ = PGDump.model_rebuild()
+_ = OSDDFResponse.model_rebuild()
+_ = OSDDumpResponse.model_rebuild()

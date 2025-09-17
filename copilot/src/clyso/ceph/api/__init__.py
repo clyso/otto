@@ -18,16 +18,35 @@ Example usage:
     print(f"Total objects: {pg_stats['stat_sum']['num_objects']}")
 """
 
-from .commands import ceph_osd_tree, ceph_pg_dump
-from .schemas import OSDTree, PGDump, OSDNode, PGMap, PGStat, PoolStat
+from .commands import ceph_osd_tree, ceph_pg_dump, ceph_osd_df, ceph_osd_dump
+from .schemas import (
+    OSDTree,
+    PGDump,
+    OSDNode,
+    PGMap,
+    PGStat,
+    PoolStat,
+    OSDDFResponse,
+    OSDDFNode,
+    OSDDumpResponse,
+    PoolConfig,
+)
 
 __all__ = [
+    # Command functions
     "ceph_osd_tree",
     "ceph_pg_dump",
+    "ceph_osd_df",
+    "ceph_osd_dump",
+    # Schema classes
     "OSDTree",
     "PGDump",
     "OSDNode",
     "PGMap",
     "PGStat",
     "PoolStat",
+    "OSDDFResponse",
+    "OSDDFNode",
+    "OSDDumpResponse",
+    "PoolConfig",
 ]

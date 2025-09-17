@@ -12,7 +12,13 @@ import sys
 import math
 from typing import Any, Dict
 
-from .schemas import OSDTree, PGDump, MalformedCephDataError
+from .schemas import (
+    OSDTree,
+    PGDump,
+    OSDDFResponse,
+    OSDDumpResponse,
+    MalformedCephDataError,
+)
 
 
 def _json_loads(json_data: str) -> Any:
@@ -163,6 +169,50 @@ def ceph_report(skip_confirmation: bool = True) -> Dict[str, Any]:
         return raw_data
     except Exception as e:
         raise MalformedCephDataError(f"Failed to get cluster report: {e}") from e
+
+
+def ceph_osd_df(skip_confirmation: bool = True) -> OSDDFResponse:
+    """
+    Get OSD disk usage information with proper typing and validation.
+
+    Args:
+        skip_confirmation: If True, skip interactive confirmation
+
+    Returns:
+        Validated OSD disk usage data containing utilization and capacity info
+
+    Raises:
+        MalformedCephDataError: If the response cannot be parsed or validated
+    """
+    try:
+        raw_data = _execute_ceph_command(
+            "ceph osd df --format=json", skip_confirmation=skip_confirmation
+        )
+        return OSDDFResponse.model_validate(raw_data)
+    except Exception as e:
+        raise MalformedCephDataError(f"Failed to get OSD DF: {e}") from e
+
+
+def ceph_osd_dump(skip_confirmation: bool = True) -> OSDDumpResponse:
+    """
+    Get comprehensive OSD configuration dump with proper typing and validation.
+
+    Args:
+        skip_confirmation: If True, skip interactive confirmation
+
+    Returns:
+        Validated OSD dump containing cluster configuration and pool settings
+
+    Raises:
+        MalformedCephDataError: If the response cannot be parsed or validated
+    """
+    try:
+        raw_data = _execute_ceph_command(
+            "ceph osd dump --format=json", skip_confirmation=skip_confirmation
+        )
+        return OSDDumpResponse.model_validate(raw_data)
+    except Exception as e:
+        raise MalformedCephDataError(f"Failed to get OSD dump: {e}") from e
 
 
 def ceph_command(
