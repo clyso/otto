@@ -17,6 +17,7 @@ from .schemas import (
     PGDump,
     OSDDFResponse,
     OSDDumpResponse,
+    OSDPerfDumpResponse,
     MalformedCephDataError,
 )
 
@@ -124,16 +125,18 @@ def ceph_pg_dump(skip_confirmation: bool = True) -> PGDump:
         raise MalformedCephDataError(f"Failed to get PG dump: {e}") from e
 
 
-def ceph_osd_perf_dump(osd_id: int, skip_confirmation: bool = True) -> Dict[str, Any]:
+def ceph_osd_perf_dump(
+    osd_id: int, skip_confirmation: bool = True
+) -> OSDPerfDumpResponse:
     """
-    Get OSD performance dump for a specific OSD.
+    Get OSD performance dump for a specific OSD with proper typing and validation.
 
     Args:
         osd_id: The ID of the OSD to get performance data for
         skip_confirmation: If True, skip interactive confirmation
 
     Returns:
-        Raw performance dump data as dictionary
+        Validated OSD performance dump containing BlueStore, BlueFS, and other metrics
 
     Raises:
         MalformedCephDataError: If the response cannot be parsed or validated
@@ -142,7 +145,7 @@ def ceph_osd_perf_dump(osd_id: int, skip_confirmation: bool = True) -> Dict[str,
         raw_data = _execute_ceph_command(
             f"ceph tell osd.{osd_id} perf dump", skip_confirmation=skip_confirmation
         )
-        return raw_data
+        return OSDPerfDumpResponse(**raw_data)
     except Exception as e:
         raise MalformedCephDataError(
             f"Failed to get OSD {osd_id} perf dump: {e}"

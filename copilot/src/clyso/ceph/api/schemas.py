@@ -9,12 +9,7 @@ All fields in this module use default values (= 0, = "", = Field(default_factory
 to ensure backward and forward compatibility across Ceph versions:
 
 Older Ceph versions may not have newer metrics/fields
-- FORWARD COMPATIBILITY: Newer Ceph versions may add metrics not yet in our schema
-- DEFAULT VALUES: Allow parsing to succeed even when fields are missing
-- EXTRA FIELDS: model_config = {"extra": "allow"} permits unknown fields from newer versions
-
-This enables the same schema to work across versions without breaking when metrics are added/removed between Ceph releases.
-
+Newer Ceph versions may add metrics not yet in our schema and allows parsing to succeed even when fields are missing
 """
 # NOTE: pydantic makes basedpyright complain about 'Any' when using Field
 # defaults. Disable warnings temporarily.
