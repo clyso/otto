@@ -1,27 +1,35 @@
 from collections import defaultdict
 
 from clyso.ceph.api.commands import ceph_osd_tree
+from clyso.ceph.api.schemas import OSDTree
 
 
 class OSDTopology:
     """Manages OSD cluster topology information"""
 
     def __init__(self):
-        osd_tree_data = ceph_osd_tree()
-        self.osd_tree = osd_tree_data.model_dump()
-        self.nodes = self.osd_tree.get("nodes", [])
+        self.osd_tree: OSDTree = ceph_osd_tree()
+        self.nodes = self.osd_tree.nodes
         self._host_to_osds: dict[str, list[int]] | None = None
         self._device_class_to_osds: dict[str, list[int]] | None = None
         self._up_osds: list[int] | None = None
         self._osd_metadata: dict[int, dict[str, str]] | None = None
+        self._host_lookup: dict[int, str] | None = None
         self._parse_topology()
 
-    def _find_osd_host(self, osd_id: int) -> str | None:
-        """Find the host name for a given OSD ID"""
+    def _build_host_lookup(self) -> dict[int, str]:
+        host_lookup = {}
         for node in self.nodes:
-            if node["type"] == "host" and osd_id in node.get("children", []):
-                return node["name"]
-        return None
+            if node.type == "host" and node.children:
+                for child_id in node.children:
+                    host_lookup[child_id] = node.name
+        return host_lookup
+
+    def _find_osd_host(self, osd_id: int) -> str | None:
+        """Find the host name for a given OSD ID using efficient lookup"""
+        if self._host_lookup is None:
+            self._host_lookup = self._build_host_lookup()
+        return self._host_lookup.get(osd_id)
 
     def _parse_topology(self):
         """Parse OSD tree and build topology mappings"""
