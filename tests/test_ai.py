@@ -76,7 +76,9 @@ class TestClysoCephAI(unittest.TestCase):
         out = json.loads(result.dump())
 
         # Write the new JSON output to a temp file
-        Path("tests/temp_copilot.json").write_text(json.dumps(out, indent=2, ensure_ascii=False))
+        Path("tests/temp_copilot.json").write_text(
+            json.dumps(out, indent=2, ensure_ascii=False)
+        )
 
         expected = json.loads(Path("tests/copilot.json").read_text())
 

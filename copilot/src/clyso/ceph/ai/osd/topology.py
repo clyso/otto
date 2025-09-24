@@ -37,9 +37,9 @@ class OSDTopology:
     def _parse_topology(self):
         """Parse OSD tree and build topology mappings"""
         host_to_osds: dict[str, list[int]] = defaultdict(list)
-        device_class_to_osds: dict[str,list[int]] = defaultdict(list)
+        device_class_to_osds: dict[str, list[int]] = defaultdict(list)
         up_osds: list[int] = []
-        osd_metadata: dict[int, dict[str,str]] = {}
+        osd_metadata: dict[int, dict[str, str]] = {}
 
         for node in self.nodes:
             if node.type == "osd" and node.status == "up":
@@ -58,8 +58,6 @@ class OSDTopology:
                         "host": host_name,
                         "device_class": device_class,
                     }
-
-
 
         self._host_to_osds = dict(host_to_osds)
         self._device_class_to_osds = dict(device_class_to_osds)
