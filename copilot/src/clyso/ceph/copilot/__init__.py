@@ -512,7 +512,7 @@ Operation cancelled by user.")
 def main():
     # Create the top-level parser
     parser = CopilotParser(
-        prog="ceph-copilot", description="Ceph Copilot: Your Expert Ceph Assistant."
+        prog="clyq", description="Clyq: Your Expert Ceph Assistant."
     )
 
     parser.add_argument(
@@ -533,7 +533,7 @@ def main():
         "-v",
         "-V",
         action="version",
-        version=f"Clyso Ceph Copilot v{__version__}",
+        version=f"Clyq v{__version__}",
     )
     subparsers.required = True
 

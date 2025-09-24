@@ -3,4 +3,4 @@
 
 import importlib.metadata
 
-__version__ = importlib.metadata.version("ceph-copilot")
+__version__ = importlib.metadata.version("clyq")

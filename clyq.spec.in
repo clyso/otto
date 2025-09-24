@@ -1,11 +1,11 @@
-%define name ceph-copilot
+%define name clyq
 %define version @VERSION@
 %define release @RELEASE@
 
 Name: %{name}
 Version:%{version}
 Release: %{release}%{?dist}clyso 
-Summary: Clyso Ceph Copilot
+Summary: Clyso Clyq
 
 License: TBD
 URL: https://www.clyso.com/
@@ -14,7 +14,7 @@ Source0: %{name}-%{version}.tar.bz2
 BuildArch: x86_64
 
 %description
-Clyso Ceph Copilot.
+Clyso Clyq.
 
 %global debug_package %{nil}
 
@@ -24,7 +24,7 @@ Clyso Ceph Copilot.
 %build
 
 %install
-install -m 755 -t %{buildroot}/%{_bindir} -D ceph-copilot
+install -m 755 -t %{buildroot}/%{_bindir} -D clyq
 
 %files
 %license LICENSE

@@ -3,8 +3,8 @@ requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ceph-copilot"
-description = "Ceph AI Copilot Assistant"
+name = "clyq"
+description = "Ceph AI Assistant"
 readme = "README.md"
 license = "LicenseRef-Proprietary"
 authors = [{ name = "Clyso GmbH", email = "support@clyso.com" }]
@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ceph-copilot = "clyso.ceph.copilot:main"
+clyq = "clyso.ceph.copilot:main"
 
 [tool.uv]
 cache-keys = [
