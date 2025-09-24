@@ -22,6 +22,8 @@ from clyso.ceph.otto.upmap import add_command_upmap
 from clyso.__version__ import __version__
 
 from clyso.ceph.ai.osd.command import OSDPerfCommand
+from clyso.ceph.ai.pg import pg_distribution
+from clyso.ceph.copilot.upmap import upmap_remapped
 
 CONFIG_FILE = "otto.yaml"
 
@@ -538,26 +540,8 @@ def main():
     help_parser = subparsers.add_parser("help", help="Show this help message and exit")
     help_parser.set_defaults(func=lambda args: parser.print_help())
 
-    # create the parser for the "cluster" command
-    parser_cluster = subparsers.add_parser(
-        "cluster", help="List of commands related to the cluster"
-    )
-    cluster_subparsers = parser_cluster.add_subparsers(
-        dest="{checkup}", description="valid subcommands", help="additional help"
-    )
-    cluster_subparsers.required = True
-
-    # create the parser for the "pool" command
-    parser_pool = subparsers.add_parser(
-        "pools", help="Operations and management of Ceph pools"
-    )
-    pool_subparsers = parser_pool.add_subparsers(
-        dest="{pg}", description="valid subcommands for pools", help="additional help"
-    )
-    pool_subparsers.required = True
-
     # create the parser for the "checkup" command
-    parser_checkup = cluster_subparsers.add_parser(
+    parser_checkup = subparsers.add_parser(
         "checkup", help="Perform an overall health and safety check on the cluster"
     )
     parser_checkup.add_argument(
@@ -566,6 +550,10 @@ def main():
     parser_checkup.add_argument(
         "--ceph-config-dump", type=str, help="analyze this config dump file"
     )
+    parser_checkup.add_argument("--summary", action="store_true", help="Summary output")
+    parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
+    parser_checkup.set_defaults(func=subcommand_checkup)
+
     # TODO: add back once we start collecting for this
     # parser_checkup.add_argument(
     #     "--ceph-osd-tree", type=str, help="analyze this OSD tree file"
@@ -573,13 +561,19 @@ def main():
     # parser_checkup.add_argument(
     #     "--ceph-pg-dump", type=str, help="analyze this PG dump file"
     # )
-    parser_checkup.add_argument("--summary", action="store_true", help="Summary output")
-    parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
-    parser_checkup.set_defaults(func=subcommand_checkup)
 
-    # Create the parser for the "osd-perf" command
-    parser_osd_perf = cluster_subparsers.add_parser(
-        "osd-perf", help="Analyze OSD performance metrics across the cluster"
+    # create the parser for the "osd" related commands
+    parser_osd = subparsers.add_parser(
+        "osd", help="OSD-related operations and analysis"
+    )
+    osd_subparsers = parser_osd.add_subparsers(
+        description="OSD subcommands"
+    )
+    osd_subparsers.required = True
+
+    # OSD Performance command
+    parser_osd_perf = osd_subparsers.add_parser(
+        "perf", help="Analyze OSD performance metrics across the cluster"
     )
     parser_osd_perf.add_argument(
         "osd_id",
@@ -602,8 +596,11 @@ def main():
     )
     parser_osd_perf.set_defaults(func=subcommand_osd_perf)
 
-    # Add the upmap command
-    add_command_upmap(cluster_subparsers)
+    # Create the parser for the "pg" related commands
+    add_command_pg(subparsers)
+
+    # Create the parser for the "upmap" command
+    add_command_upmap_remapped(subparsers)
 
     # HIDE THE PLANNER and PROFILE COMMANDS FOR NOW
 
@@ -677,9 +674,6 @@ def main():
     )
 
     parser_toolkit_run.set_defaults(func=toolkit_run)
-
-    # Create the parser for "pg" command
-    add_command_pg(pool_subparsers)
 
     # Parse the arguments and call the appropriate function
     args = parser.parse_args()
