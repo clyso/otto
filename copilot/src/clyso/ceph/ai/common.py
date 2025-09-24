@@ -39,42 +39,6 @@ def json_load(f):
     return json_loads(f.read())
 
 
-def jsoncmd(command, timeout=30, skip_confirmation=True):
-    """Execute a Ceph command and return JSON output with optional interactive confirmation.
-
-    Args:
-        command: The ceph command to execute
-        timeout: Command timeout in seconds
-        skip_confirmation: If True, skip interactive confirmation
-
-    Returns:
-        Parsed JSON output from the command
-    """
-    if not skip_confirmation:
-        try:
-            response = input(f"+ {command} [y/n]: ").strip().lower()
-            if response not in ("y", "yes"):
-                print("Command execution cancelled by user.")
-                sys.exit(1)
-        except (KeyboardInterrupt, EOFError):
-            print("
-Operation cancelled by user.")
-            sys.exit(1)
-
-    try:
-        with open(os.devnull, "w") as devnull:
-            out = subprocess.check_output(
-                command.split(), stderr=devnull, timeout=timeout
-            ).decode("utf-8")
-    except subprocess.CalledProcessError:
-        print("ERROR: ceph command is no where to be found")
-        sys.exit(1)
-    except subprocess.TimeoutExpired:
-        print(f"ERROR: command '{command}' timed out after {timeout} seconds")
-        sys.exit(1)
-    return json_loads(out)
-
-
 def load_ceph_report_file(filepath):
     """Load and parse ceph report file"""
     try:
