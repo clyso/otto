@@ -37,4 +37,3 @@ def load_osd_perf_from_stdin() -> OSDPerfDumpResponse:
         raise DataLoadingError(
             f"Invalid performance data structure from stdin: {e}"
         ) from e
-

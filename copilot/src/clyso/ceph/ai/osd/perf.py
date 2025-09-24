@@ -1,6 +1,5 @@
 from __future__ import annotations
 import statistics
-from typing import Any
 from pydantic import BaseModel
 
 from clyso.ceph.api.loaders import (
@@ -9,6 +8,7 @@ from clyso.ceph.api.loaders import (
 )
 from clyso.ceph.api.commands import ceph_osd_perf_dump
 from clyso.ceph.api.schemas import OSDPerfDumpResponse
+
 
 class OSDMetric(BaseModel):
     """Schema for OSD performance metric data"""
@@ -19,6 +19,17 @@ class OSDMetric(BaseModel):
     onode_hits: int
     onode_misses: int
     onode_hitrate: float
+
+
+class OnodeDistributionAnalysis(BaseModel):
+    """Schema for onode cache hit rate distribution analysis results"""
+
+    total_osds: int
+    mean_hitrate: float
+    median_hitrate: float
+    min_hitrate: float
+    max_hitrate: float
+    stdev_hitrate: float | None = None
 
 
 class OSDPerf:
@@ -118,8 +129,8 @@ class OSDPerf:
         skip_confirmation: bool = True,
     ) -> tuple[list[OSDMetric], list[int]]:
         """Collect performance metrics from multiple OSDs"""
-        osd_metrics = []
-        failed_osds = []
+        osd_metrics: list[OSDMetric] = []
+        failed_osds: list[int] = []
 
         for osd_id in osd_ids:
             try:
@@ -139,67 +150,51 @@ class OSDPerf:
         return osd_metrics, failed_osds
 
     @classmethod
-    def analyze_onode_distribution(cls, osd_metrics: list[OSDMetric]) -> dict[str, Any]:
+    def analyze_onode_distribution(
+        cls, osd_metrics: list[OSDMetric]
+    ) -> OnodeDistributionAnalysis:
         """Analyze onode cache hit rate distribution across OSDs"""
         return analyze_onode_distribution(osd_metrics)
 
 
-def analyze_onode_distribution(osd_metrics: list[OSDMetric]) -> dict[str, Any]:
+def analyze_onode_distribution(
+    osd_metrics: list[OSDMetric],
+) -> OnodeDistributionAnalysis:
     """Analyze onode cache hit rate distribution across OSDs"""
     hit_rates = [osd.onode_hitrate for osd in osd_metrics]
 
     if not hit_rates:
-        return {"error": "No valid hit rate data found"}
+        raise ValueError("No valid hit rate data found")
 
-    # TODO: make a schema for this dict if we are passing it around
-    result: dict[str, float | int] = {
-        "total_osds": len(hit_rates),
-        "mean_hitrate": statistics.mean(hit_rates),
-        "median_hitrate": statistics.median(hit_rates),
-        "min_hitrate": min(hit_rates),
-        "max_hitrate": max(hit_rates),
-    }
-
-    if len(hit_rates) > 1:
-        result["stdev_hitrate"] = statistics.stdev(hit_rates)
-
-    # # Categorize OSDs by hit rate performance
-    # excellent = sum(1 for rate in hit_rates if rate >= 0.95)
-    # good = sum(1 for rate in hit_rates if 0.8 <= rate < 0.95)
-    # poor = sum(1 for rate in hit_rates if rate < 0.8)
-    #
-    # result["performance_distribution"] = {
-    #     "excellent_cache_performance": excellent,
-    #     "good_cache_performance": good,
-    #     "poor_cache_performance": poor,
-    # }
+    result = OnodeDistributionAnalysis(
+        total_osds=len(hit_rates),
+        mean_hitrate=statistics.mean(hit_rates),
+        median_hitrate=statistics.median(hit_rates),
+        min_hitrate=min(hit_rates),
+        max_hitrate=max(hit_rates),
+        stdev_hitrate=statistics.stdev(hit_rates) if len(hit_rates) > 1 else None,
+    )
 
     return result
 
 
-def display_results(osd_metrics: list[OSDMetric], analysis: dict[str, Any]) -> None:
+def display_results(
+    osd_metrics: list[OSDMetric], analysis: OnodeDistributionAnalysis
+) -> None:
     """Display formatted results of OSD performance analysis"""
     print("\n" + "=" * 60)
     print("OSD ONODE CACHE PERFORMANCE ANALYSIS")
     print("=" * 60)
 
-    print(f"\nTotal OSDs analyzed: {analysis['total_osds']}")
-    print(f"Mean hit rate: {analysis['mean_hitrate']:.3f}")
-    print(f"Median hit rate: {analysis['median_hitrate']:.3f}")
-    print(
-        f"Hit rate range: {analysis['min_hitrate']:.3f} - {analysis['max_hitrate']:.3f}"
-    )
+    print(f"\nTotal OSDs analyzed: {analysis.total_osds}")
+    print(f"Mean hit rate: {analysis.mean_hitrate:.3f}")
+    print(f"Median hit rate: {analysis.median_hitrate:.3f}")
+    print(f"Hit rate range: {analysis.min_hitrate:.3f} - {analysis.max_hitrate:.3f}")
 
-    if "stdev_hitrate" in analysis:
-        print(f"Standard deviation: {analysis['stdev_hitrate']:.3f}")
+    if analysis.stdev_hitrate is not None:
+        print(f"Standard deviation: {analysis.stdev_hitrate:.3f}")
 
-    dist = analysis["performance_distribution"]
-    print(f"\nPerformance Distribution:")
-    print(f"  Excellent (≥95%): {dist['excellent_cache_performance']} OSDs")
-    print(f"  Good (80-94%): {dist['good_cache_performance']} OSDs")
-    print(f"  Poor (<80%): {dist['poor_cache_performance']} OSDs")
-
-    print(f"\nDetailed OSD Metrics:")
+    print("\nDetailed OSD Metrics:")
     print(
         f"{'OSD':<6} {'Host':<15} {'Class':<10} {'Hits':<12} {'Misses':<12} {'Hit Rate':<10}"
     )
@@ -217,7 +212,7 @@ class OSDPerfFormatter:
 
     @staticmethod
     def display_results(
-        analysis: dict[str, object],
+        analysis: OnodeDistributionAnalysis,
         osd_metrics: list[OSDMetric],
         failed_osds: list[int],
     ) -> None:
