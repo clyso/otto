@@ -4,10 +4,10 @@ import subprocess
 import argparse
 
 
-def add_command_upmap(subparsers) -> None:
+def add_command_upmap_remapped(subparsers) -> None:
     """Add the upmap command to the cluster subparser."""
     parser_upmap = subparsers.add_parser(
-        "upmap",
+        "upmap-remapped",
         help="PG upmap tools to quickly make remapped PGs active+clean",
         description=(
             "Upmap tools use Ceph's pg-upmap-items functionality to quickly modify "
@@ -20,8 +20,8 @@ Usage procedure:
     1. Backup your osdmaps, crush maps, ...
     2. Set the norebalance flag: 'ceph osd set norebalance'
     3. Make your change (tunables, add osds, etc...)
-    4. Run this command to generate the script: 'otto cluster upmap'
-    5. Execute the script twice: 'otto cluster upmap | sh -x'
+    4. Run this command to generate the script: 'otto upmap-remapped'
+    5. Execute the script twice: 'otto upmap-remapped | sh -x'
     6. After cluster is 100% active+clean, unset norebalance: 'ceph osd unset norebalance'
     7. The ceph-mgr balancer in upmap mode will gradually remove the added upmap-items entries
 """,
