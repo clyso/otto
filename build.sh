@@ -17,10 +17,10 @@ run_build() {
   uv pip install -e ./copilot/ || exit 1
 
   # Data directories are relative to specpath.
-  # We set 'src/' as the specpath so the resulting 'ceph-copilot.spec' does not
+  # We set 'src/' as the specpath so the resulting 'clyq.spec' does not
   # conflict with the rpm one.
   python3 -m PyInstaller --onefile \
-    --name ceph-copilot \
+    --name clyq \
     --specpath copilot/ \
     --clean \
     --add-data 'src/clyso/ceph/copilot/tools:clyso/ceph/copilot/tools' \
@@ -30,8 +30,8 @@ run_build() {
   # ensure we deactivate the environment.
   deactivate
 
-  ./dist/ceph-copilot --version || exit 1
-  ./dist/ceph-copilot --help || exit 1
+  ./dist/clyq --version || exit 1
+  ./dist/clyq --help || exit 1
 
   rm -fr ./build/ ./clyso/ceph-copilot.spec || exit 1
   rm -fr .venv-installer/ || exit 1
@@ -69,13 +69,13 @@ run_with_ctr() {
   fi
 
   ${ctr_tool} build -f ./pyinstaller.Dockerfile \
-    -t ceph-copilot-builder:latest \
+    -t clyq-builder:latest \
     . || exit 1
 
   # shellcheck disable=SC2068
   ${ctr_tool} run ${extra_run_args[@]} \
     -v .:/app \
-    ceph-copilot-builder:latest || exit 1
+    clyq-builder:latest || exit 1
 }
 
 run_ctr=0
