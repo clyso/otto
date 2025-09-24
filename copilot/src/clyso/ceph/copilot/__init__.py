@@ -9,8 +9,7 @@ import yaml
 from clyso.ceph.ai import generate_result
 from clyso.ceph.ai.common import (
     CopilotParser,
-    load_ceph_report_file,
-    CEPH_FILES,
+    load_ceph_report_file
 )
 from clyso.ceph.api.commands import ceph_report, ceph_command
 from clyso.ceph.ai.data import CephData
@@ -29,8 +28,7 @@ def collect(args=None):
 
 
 def collect_data_source(
-    explicit_file,
-    file_patterns,
+    explicit_file
     cli_command,
     data_source_name,
     verbose=False,
@@ -38,8 +36,7 @@ def collect_data_source(
 ):
     """
     1. Check if file is explicitly provided via CLI argument
-    2. Check if file exists in current directory (using file patterns)
-    3. Fall back to running ceph CLI command
+    2. Fall back to running ceph CLI command
     """
     skip_confirmation = getattr(args, "yes", True) if args else True
     if explicit_file:
@@ -53,19 +50,6 @@ def collect_data_source(
                     file=sys.stderr,
                 )
             return None
-
-    for pattern in file_patterns:
-        if os.path.exists(pattern):
-            try:
-                with open(pattern, "r") as file:
-                    return json.load(file)
-            except Exception as e:
-                if verbose:
-                    print(
-                        f"Warning: Failed to read {data_source_name} from {pattern}: {e}",
-                        file=sys.stderr,
-                    )
-                continue
 
     if cli_command:
         return ceph_command(cli_command, skip_confirmation=skip_confirmation)
@@ -88,21 +72,18 @@ def collect_all_data(args):
     if using_static_report:
         report = load_ceph_report_file(args.ceph_report_json)
         data.add_ceph_report(report)
-    elif os.path.exists(CEPH_FILES["ceph-report"]):
-        report = load_ceph_report_file(CEPH_FILES["ceph-report"])
-        data.add_ceph_report(report)
     else:
         try:
             report = collect(args)
             data.add_ceph_report(report)
         except Exception as e:
-            print(f"Error: Failed to collect ceph report via CLI: {e}", file=sys.stderr)
+            print(
+                f"Error: Failed to collect ceph report via CLI: {e}", file=sys.stderr)
             sys.exit(1)
 
     # Collect Config Dump - avoid CLI commands when using static report
     config_dump = collect_data_source(
         getattr(args, "ceph_config_dump", None),
-        [CEPH_FILES["config_dump"]],
         None if using_static_report else "ceph config dump -f json",
         "config dump",
         verbose,
@@ -528,7 +509,8 @@ def main():
     subparsers.required = True
 
     # # Add a subparser for the 'help' command
-    help_parser = subparsers.add_parser("help", help="Show this help message and exit")
+    help_parser = subparsers.add_parser(
+        "help", help="Show this help message and exit")
     help_parser.set_defaults(func=lambda args: parser.print_help())
 
     # create the parser for the "cluster" command
@@ -566,8 +548,10 @@ def main():
     # parser_checkup.add_argument(
     #     "--ceph-pg-dump", type=str, help="analyze this PG dump file"
     # )
-    parser_checkup.add_argument("--summary", action="store_true", help="Summary output")
-    parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
+    parser_checkup.add_argument(
+        "--summary", action="store_true", help="Summary output")
+    parser_checkup.add_argument(
+        "--verbose", action="store_true", help="Verbose output")
     parser_checkup.set_defaults(func=subcommand_checkup)
 
     # Create the parser for the "osd-perf" command

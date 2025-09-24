@@ -5,14 +5,6 @@ import sys
 import argparse
 import math
 
-CEPH_FILES = {
-    "ceph-report": "cluster_health-report",
-    "config_dump": "ceph_cluster_info-config_dump.json",
-    "osd_tree": "osd_info-tree.json",
-    "pg_dump": "pg_info-dump.json",
-}
-
-
 def json_loads(json_data):
     def parse_json_constants(arg):
         if arg == "Infinity":
