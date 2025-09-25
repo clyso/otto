@@ -100,4 +100,3 @@ class CopilotParser(argparse.ArgumentParser):
         self.print_usage()
         print(f"copilot: error: {message}")
         sys.exit(2)
-

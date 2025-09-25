@@ -9,6 +9,30 @@ env:
   GIT_DEPTH: 0
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/astral-sh/uv:python3.11-alpine
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python environment
+        run: |
+          uv --no-cache venv
+          source .venv/bin/activate
+          uv sync --all-packages 
+
+      - name: Run ruff check
+        run: |
+          source .venv/bin/activate
+          uv run ruff check .
+
+      - name: Run ruff format check
+        run: |
+          source .venv/bin/activate
+          uv run ruff format --check .
+
   run_tests:
     runs-on: ubuntu-latest
     container:
