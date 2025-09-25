@@ -49,7 +49,6 @@ class SmokeTestOttoCLI(unittest.TestCase):
             process = subprocess.Popen(  # noqa: S603
                 [  # noqa: S607
                     "otto",
-                    "pools",
                     "pg",
                     "distribution",
                     f"--pg_dump_json=tests/histogram/pgdumps/{pg_dump}",
@@ -77,7 +76,7 @@ class SmokeTestOttoCLI(unittest.TestCase):
     def test_arguments(self):
         # We are testing that appropriate help messages are printed when no
         # arguments are passed
-        valid_commands = ["cluster", "pools", "toolkit", ""]
+        valid_commands = ["osd", "pg", "toolkit", ""]
 
         for cmd in valid_commands:
             args = ["otto"]
@@ -99,6 +98,7 @@ class SmokeTestOttoCLI(unittest.TestCase):
                     stdout.decode(),
                     f"Unexpected usage line for {cmd}:\n{stdout}",
                 )
+
 
 
 if __name__ == "__main__":
