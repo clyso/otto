@@ -23,7 +23,7 @@ from clyso.__version__ import __version__
 
 from clyso.ceph.ai.osd.command import OSDPerfCommand
 from clyso.ceph.ai.pg import pg_distribution
-from clyso.ceph.copilot.upmap import upmap_remapped
+from clyso.ceph.otto.upmap import upmap_remapped
 
 CONFIG_FILE = "otto.yaml"
 
@@ -287,6 +287,7 @@ def subcommand_checkup(args):
         compact_result(result.dump())
 
 
+
 def subcommand_osd_perf(args):
     """Execute OSD performance analysis command"""
     command = OSDPerfCommand(args)
@@ -444,17 +445,36 @@ def list_executable_files(directory):
     return executable_files
 
 
-def toolkit_list(args):
+def toolkit_help(args):
     tools_dir = get_tools_dir()
 
-    print(f"Ceph Tools are installed to {tools_dir}")
-    print("
-Tools:
-")
+    if not tools_dir:
+        print("Ceph Tools directory not found", file=sys.stderr)
+        exit(1)
+    print("Available scripts:")
     tools = list_executable_files(tools_dir)
-    for t in tools:
-        print(f"{t}")
-    return
+    for tool in tools:
+        print(f"  {tool}")
+    print("
+Use 'otto toolkit <script> -h' for script-specific help")
+
+
+def toolkit_echo(args):
+    tools_dir = get_tools_dir()
+    if not tools_dir:
+        print("Ceph Tools directory not found", file=sys.stderr)
+        exit(1)
+    script_path = os.path.join(tools_dir, args.script)
+    if not os.path.exists(script_path):
+        print(f"Script {args.script} not found", file=sys.stderr)
+        exit(1)
+    try:
+        with open(script_path, "r") as f:
+            content = f.read()
+            print(content)
+    except Exception as e:
+        print(f"Error reading script {args.script}: {e}", file=sys.stderr)
+        exit(1)
 
 
 def toolkit_run(args):
@@ -463,10 +483,13 @@ def toolkit_run(args):
         print("Ceph Tools directory not found", file=sys.stderr)
         exit(1)
 
-    cmd = [os.path.join(tools_dir, args.tool)] + args.args
-    cmd_str = f"{args.tool} {' '.join(args.args)}"
+    if hasattr(args, "help") and args.help:
+        cmd = [os.path.join(tools_dir, args.script), "-h"]
+    else:
+        cmd = [os.path.join(tools_dir, args.script)] + args.args
+        cmd_str = f"{args.script} {' '.join(args.args)}"
+        print(f"Running tool: {cmd_str}")
 
-    print(f"Running tool: {cmd_str}")
     subprocess.run(cmd, check=False)
 
 
@@ -508,6 +531,7 @@ Operation cancelled by user.")
     except subprocess.CalledProcessError as e:
         print(f"Error: {e.output.decode('utf-8')}")
         exit(1)
+
 
 
 def main():
@@ -566,9 +590,7 @@ def main():
     parser_osd = subparsers.add_parser(
         "osd", help="OSD-related operations and analysis"
     )
-    osd_subparsers = parser_osd.add_subparsers(
-        description="OSD subcommands"
-    )
+    osd_subparsers = parser_osd.add_subparsers(description="OSD subcommands")
     osd_subparsers.required = True
 
     # OSD Performance command
@@ -648,32 +670,43 @@ def main():
         "toolkit", help="A selection of useful Ceph Tools"
     )
     toolkit_subparsers = parser_toolkit.add_subparsers(
-        dest="{list, run}", help="tool help"
+        dest="toolkit_command", help="A selection of useful Ceph Tools", metavar=""
     )
-    toolkit_subparsers.required = True
+    toolkit_subparsers.required = False
+    parser_toolkit.set_defaults(func=toolkit_help)
 
-    # Create the parser for the "toolkit list" command
-    parser_toolkit_list = toolkit_subparsers.add_parser(
-        "list", help="List the included Ceph tools"
+    parser_echo = toolkit_subparsers.add_parser(
+        "echo", help="Display the contents of a script"
     )
-    parser_toolkit_list.set_defaults(func=toolkit_list)
+    parser_echo.add_argument("script", type=str, help="Name of the script to display")
+    parser_echo.set_defaults(func=toolkit_echo)
 
-    # Create the parser for the "toolkit run" command
-    parser_toolkit_run = toolkit_subparsers.add_parser(
-        "run",
-        help="Run an included Ceph tool",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Example:
-	otto toolkit run contrib/jj_ceph_balancer -h",
-    )
-    parser_toolkit_run.add_argument("tool", type=str, help="tool name")
-    parser_toolkit_run.add_argument(
-        "args",
-        nargs=argparse.REMAINDER,
-        help="Name of the tool to run and its arguments",
-    )
-
-    parser_toolkit_run.set_defaults(func=toolkit_run)
+    tools_dir = get_tools_dir()
+    if tools_dir and os.path.exists(tools_dir):
+        tools = list_executable_files(tools_dir)
+        for tool in tools:
+            try:
+                parser_tool = toolkit_subparsers.add_parser(
+                    tool,
+                    help=f"Use 'otto toolkit {tool} -h' for help",
+                    add_help=False,
+                    formatter_class=argparse.RawDescriptionHelpFormatter,
+                )
+                parser_tool.add_argument(
+                    "-h",
+                    "--help",
+                    action="store_true",
+                    help=f"Use 'otto toolkit {tool} -h' for help",
+                )
+                parser_tool.add_argument(
+                    "args",
+                    nargs=argparse.REMAINDER,
+                    help=f"Arguments for {tool}",
+                )
+                parser_tool.set_defaults(func=toolkit_run, script=tool)
+            except Exception as e:
+                print(f"Error adding parser for {tool}: {e}", file=sys.stderr)
+                exit(1)
 
     # Parse the arguments and call the appropriate function
     args = parser.parse_args()
