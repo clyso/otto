@@ -19,9 +19,7 @@ class OSDPerf:
         self.onode_misses = None
         self.onode_hitrate = None
 
-    def load_from_subprocess(
-        self, osd_id: int, skip_confirmation: bool = True
-    ) -> None:
+    def load_from_subprocess(self, osd_id: int, skip_confirmation: bool = True) -> None:
         """Load performance data by running subprocess command"""
         self.osd_id = osd_id
         self.perf_dump = self._collect_perf_data_subprocess(skip_confirmation)
@@ -177,7 +175,7 @@ class OSDPerf:
                     }
                 )
 
-            except Exception as e:
+            except Exception:
                 failed_osds.append(osd_id)
 
         return osd_metrics, failed_osds
@@ -204,9 +202,7 @@ class OSDPerf:
         ]
 
     @staticmethod
-    def collect_single_osd_metrics(
-        osd_id: int, skip_confirmation: bool = True
-    ) -> list:
+    def collect_single_osd_metrics(osd_id: int, skip_confirmation: bool = True) -> list:
         """Collect performance metrics from a single OSD"""
         try:
             osd_perf = OSDPerf()
@@ -277,7 +273,7 @@ class OSDPerfFormatter:
             output.append("=" * 50)
 
             overall = analysis["overall"]
-            output.append(f"\nOnode Hit Rate Distribution:")
+            output.append("\nOnode Hit Rate Distribution:")
             output.append(f"  Sampled OSDs: {overall['count']}")
             output.append(f"  Average: {overall['mean']:.2%}")
             output.append(f"  Median:  {overall['median']:.2%}")
@@ -285,7 +281,7 @@ class OSDPerfFormatter:
             output.append(f"  Max:     {overall['max']:.2%}")
             output.append(f"  Std Dev: {overall['std_dev']:.2%}")
 
-            output.append(f"\nIndividual OSD Hit Rate %:")
+            output.append("\nIndividual OSD Hit Rate %:")
             sorted_osds = sorted(osd_metrics, key=lambda x: x["onode_hitrate"])
             for osd in sorted_osds:
                 host_info = f" ({osd['host']})" if osd["host"] != "unknown" else ""
