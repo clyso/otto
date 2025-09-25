@@ -104,7 +104,7 @@ def update_result(airesult: Any, ceph_data: Any) -> None:
     for check_func in config_check_functions:
         try:
             check_func(airesult, ceph_data, facts, config_lookup)
-        except Exception as e:
+        except Exception:
             builtins.print(
                 f"An exception occurred in config check function {check_func.__name__}!",
                 file=sys.stderr,
