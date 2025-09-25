@@ -12,7 +12,6 @@ import yaml
 from clyso.ceph.ai import generate_result
 from clyso.ceph.ai.common import (
     CopilotParser,
-    json_load,
     jsoncmd,
     load_ceph_report_file,
     CEPH_FILES,
@@ -81,7 +80,6 @@ def collect_all_data(args):
     """
     Returns a populated CephData object and a list of warnings.
     """
-    skip_confirmation = getattr(args, "yes", True)
     data = CephData()
     warnings = []
     verbose = getattr(args, "verbose", False)
@@ -285,6 +283,7 @@ def subcommand_checkup(args):
         verbose_result(result.dump())
     else:
         compact_result(result.dump())
+
 
 def subcommand_osd_perf(args):
     """Execute OSD performance analysis command"""
@@ -509,11 +508,10 @@ Operation cancelled by user.")
         print(f"Error: {e.output.decode('utf-8')}")
         exit(1)
 
+
 def main():
     # Create the top-level parser
-    parser = CopilotParser(
-        prog="clyq", description="Clyq: Your Expert Ceph Assistant."
-    )
+    parser = CopilotParser(prog="clyq", description="Clyq: Your Expert Ceph Assistant.")
 
     parser.add_argument(
         "--yes",
