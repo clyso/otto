@@ -45,7 +45,7 @@ run_test "./dist/otto pools -h" "Pools help command" || ((FAILURES++))
 run_test "./dist/otto pools pg -h" "Pools pg help command" || ((FAILURES++))
 
 run_test "./dist/otto toolkit -h" "Toolkit help command" || ((FAILURES++))
-run_test "./dist/otto toolkit list" "Toolkit list command" || ((FAILURES++))
+run_test "./dist/otto toolkit echo -h" "Toolkit echo help command" || ((FAILURES++))
 
 run_test "./dist/otto cluster -h" "Cluster help command" || ((FAILURES++))
 run_test "./dist/otto cluster upmap -h" "Cluster upmap help command" || ((FAILURES++))
