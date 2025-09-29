@@ -99,7 +99,8 @@ def collect_all_data(args):
             report = collect(args)
             data.add_ceph_report(report)
         except Exception as e:
-            print(f"Error: Failed to collect ceph report via CLI: {e}", file=sys.stderr)
+            print(
+                f"Error: Failed to collect ceph report via CLI: {e}", file=sys.stderr)
             sys.exit(1)
 
     # Collect Config Dump - avoid CLI commands when using static report
@@ -553,7 +554,8 @@ Operation cancelled by user.")
 
 def main():
     # Create the top-level parser
-    parser = OttoParser(prog="otto", description="Otto: Your Expert Ceph Assistant.")
+    parser = OttoParser(
+        prog="otto", description="Otto: Your Expert Ceph Assistant.")
 
     parser.add_argument(
         "--yes",
@@ -578,7 +580,8 @@ def main():
     subparsers.required = True
 
     # # Add a subparser for the 'help' command
-    help_parser = subparsers.add_parser("help", help="Show this help message and exit")
+    help_parser = subparsers.add_parser(
+        "help", help="Show this help message and exit")
     help_parser.set_defaults(func=lambda args: parser.print_help())
 
     # create the parser for the "checkup" command
@@ -591,8 +594,10 @@ def main():
     parser_checkup.add_argument(
         "--ceph-config-dump", type=str, help="analyze this config dump file"
     )
-    parser_checkup.add_argument("--summary", action="store_true", help="Summary output")
-    parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
+    parser_checkup.add_argument(
+        "--summary", action="store_true", help="Summary output")
+    parser_checkup.add_argument(
+        "--verbose", action="store_true", help="Verbose output")
     parser_checkup.set_defaults(func=subcommand_checkup)
 
     # TODO: add back once we start collecting for this
@@ -695,7 +700,8 @@ def main():
     parser_echo = toolkit_subparsers.add_parser(
         "echo", help="Display the contents of a script"
     )
-    parser_echo.add_argument("script", type=str, help="Name of the script to display")
+    parser_echo.add_argument(
+        "script", type=str, help="Name of the script to display")
     parser_echo.set_defaults(func=toolkit_echo)
 
     tools_dir = get_tools_dir()
