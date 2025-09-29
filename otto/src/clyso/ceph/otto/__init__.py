@@ -3,7 +3,8 @@ import json
 import os
 import subprocess
 import sys
-
+from pathlib import Path
+import errno
 import yaml
 
 from clyso.ceph.ai import generate_result
@@ -15,12 +16,10 @@ from clyso.ceph.ai.common import (
 from clyso.ceph.api.commands import ceph_report, ceph_command
 from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.pg import add_command_pg
-from clyso.ceph.otto.upmap import add_command_upmap
+from clyso.ceph.otto.upmap import add_command_upmap_remapped
 from clyso.__version__ import __version__
 
 from clyso.ceph.ai.osd.command import OSDPerfCommand
-from clyso.ceph.ai.pg import pg_distribution
-from clyso.ceph.otto.upmap import upmap_remapped
 
 CONFIG_FILE = "otto.yaml"
 
@@ -46,8 +45,8 @@ def collect_data_source(
     skip_confirmation = getattr(args, "yes", True) if args else True
     if explicit_file:
         try:
-            with open(explicit_file, "r") as file:
-                return json.load(file)
+            file_path = Path(explicit_file)
+            return json.loads(file_path.read_text(encoding="utf-8"))
         except Exception as e:
             if verbose:
                 print(
@@ -279,7 +278,6 @@ def subcommand_checkup(args):
         compact_result(result.dump())
 
 
-
 def subcommand_osd_perf(args):
     """Execute OSD performance analysis command"""
     command = OSDPerfCommand(args)
@@ -341,19 +339,28 @@ def profile_set(args):
         profile_list(args)
         return
 
-    with open(CONFIG_FILE, "w") as f:
-        yaml.dump({"active_profile": profile_name}, f)
+    config_file = Path(CONFIG_FILE)
+    config_data = {"active_profile": profile_name}
+    try:
+        config_file.write_text(yaml.dump(config_data), encoding="utf-8")
+    except Exception as e:
+        print(f"Error writing config file: {e}")
+        return
 
     print(f"Successfully set active tuning profile to '{profile_name}'.")
 
 
 def profile_show(args):
-    if not os.path.exists(CONFIG_FILE):
+    config_file = Path(CONFIG_FILE)
+    if not config_file.exists():
         print("Error: No active tuning profile found.")
         return
 
-    with open(CONFIG_FILE, "r") as f:
-        config = yaml.safe_load(f)
+    try:
+        config = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"Error reading config file: {e}")
+        return
 
     active_profile = config.get("active_profile")
     if not active_profile:
@@ -364,12 +371,16 @@ def profile_show(args):
 
 
 def profile_verify(args):
-    if not os.path.exists(CONFIG_FILE):
+    config_file = Path(CONFIG_FILE)
+    if not config_file.exists():
         print("Error: No active tuning profile found.")
         return
 
-    with open(CONFIG_FILE, "r") as f:
-        config = yaml.safe_load(f)
+    try:
+        config = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"Error reading config file: {e}")
+        return
 
     active_profile = config.get("active_profile")
     if not active_profile:
@@ -400,39 +411,43 @@ def profile_verify(args):
 
 def get_tools_dir():
     tools_dir_candidates = [
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "tools")),
-        "/usr/libexec/otto/tools",
-        "/usr/share/otto/tools",
-        "/usr/lib/otto/tools",
+        (Path(__file__).parent / "tools").resolve(),
+        Path("/usr/libexec/otto/tools"),
+        Path("/usr/share/otto/tools"),
+        Path("/usr/lib/otto/tools"),
     ]
 
     for tools_dir in tools_dir_candidates:
-        if os.path.exists(tools_dir):
+        if tools_dir.exists():
             return tools_dir
 
     return None
 
 
-def list_executable_files(directory):
+def list_executable_files(directory: Path) -> list[str]:
     """
     Recursively lists executable files in the given directory and all subdirectories.
 
     Parameters:
-    directory (str): The path to the directory to search in.
+    directory (Path): The path to the directory to search in.
 
     Returns:
     list: A list of paths to executable files.
     """
-    assert os.path.exists(directory)
-    executable_files = []
+    if not directory.exists():
+        raise FileNotFoundError(errno.ENOENT, f"Directory {directory} does not exist")
+    if not directory.is_dir():
+        raise NotADirectoryError(
+            errno.ENOTDIR, f"Directory {directory} is not a directory"
+        )
+
+    executable_files: list[str] = []
 
     # Walk through the directory
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            file_path = os.path.join(root, file)
-            # Check if the file is executable
-            if os.path.isfile(file_path) and os.access(file_path, os.X_OK):
-                executable_files.append(os.path.relpath(file_path, directory))
+    for file_path in directory.rglob("*"):
+        # Check if the file is executable
+        if file_path.is_file() and os.access(file_path, os.X_OK):
+            executable_files.append(str(file_path.relative_to(directory)))
 
     return executable_files
 
@@ -440,44 +455,48 @@ def list_executable_files(directory):
 def toolkit_help(args):
     tools_dir = get_tools_dir()
 
-    if not tools_dir:
+    if not tools_dir.exists():
         print("Ceph Tools directory not found", file=sys.stderr)
-        exit(1)
-    print("Available scripts:")
-    tools = list_executable_files(tools_dir)
-    for tool in tools:
-        print(f"  {tool}")
-    print("\nUse 'otto toolkit <script> -h' for script-specific help")
+        exit(errno.ENOENT)
+
+    try:
+        print("Available scripts:")
+        tools = list_executable_files(tools_dir)
+        for tool in tools:
+            print(f"  {tool}")
+        print("\tUse 'otto toolkit <script> -h' for script-specific help")
+    except (FileNotFoundError, NotADirectoryError) as e:
+        print(f"Error accessing tools directory: {e}", file=sys.stderr)
+        exit(e.errno)
 
 
 def toolkit_echo(args):
     tools_dir = get_tools_dir()
-    if not tools_dir:
+    if not tools_dir.exists():
         print("Ceph Tools directory not found", file=sys.stderr)
-        exit(1)
-    script_path = os.path.join(tools_dir, args.script)
-    if not os.path.exists(script_path):
+        exit(errno.ENOENT)
+    script_path = tools_dir / args.script
+    if not script_path.exists():
         print(f"Script {args.script} not found", file=sys.stderr)
-        exit(1)
+        exit(errno.ENOENT)
     try:
-        with open(script_path, "r") as f:
-            content = f.read()
-            print(content)
+        content = script_path.read_text()
+        print(content)
     except Exception as e:
         print(f"Error reading script {args.script}: {e}", file=sys.stderr)
-        exit(1)
+        exit(errno.EIO)
 
 
 def toolkit_run(args):
     tools_dir = get_tools_dir()
-    if not tools_dir:
+    if not tools_dir.exists():
         print("Ceph Tools directory not found", file=sys.stderr)
-        exit(1)
+        exit(errno.ENOENT)
 
     if hasattr(args, "help") and args.help:
-        cmd = [os.path.join(tools_dir, args.script), "-h"]
+        cmd = [tools_dir / args.script, "-h"]
     else:
-        cmd = [os.path.join(tools_dir, args.script)] + args.args
+        cmd = [tools_dir / args.script] + args.args
         cmd_str = f"{args.script} {' '.join(args.args)}"
         print(f"Running tool: {cmd_str}")
 
@@ -520,8 +539,7 @@ def run_ceph_command(args):
         print(output.decode("utf-8"))
     except subprocess.CalledProcessError as e:
         print(f"Error: {e.output.decode('utf-8')}")
-        exit(1)
-
+        exit(errno.EIO)
 
 
 def main():
@@ -672,7 +690,7 @@ def main():
     parser_echo.set_defaults(func=toolkit_echo)
 
     tools_dir = get_tools_dir()
-    if tools_dir and os.path.exists(tools_dir):
+    if tools_dir.exists():
         tools = list_executable_files(tools_dir)
         for tool in tools:
             try:
@@ -696,7 +714,7 @@ def main():
                 parser_tool.set_defaults(func=toolkit_run, script=tool)
             except Exception as e:
                 print(f"Error adding parser for {tool}: {e}", file=sys.stderr)
-                exit(1)
+                exit(errno.EIO)
 
     # Parse the arguments and call the appropriate function
     args = parser.parse_args()

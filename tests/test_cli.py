@@ -85,7 +85,7 @@ class SmokeTestOttoCLI(unittest.TestCase):
             process = subprocess.Popen(  # noqa: S603
                 args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
-            stdout, stderr_output = process.communicate()
+            stdout, _stderr_output = process.communicate()
             if cmd == "toolkit":
                 self.assertIn(
                     "Available scripts:",
@@ -98,7 +98,6 @@ class SmokeTestOttoCLI(unittest.TestCase):
                     stdout.decode(),
                     f"Unexpected usage line for {cmd}:\n{stdout}",
                 )
-
 
 
 if __name__ == "__main__":
