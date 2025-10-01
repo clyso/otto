@@ -52,10 +52,10 @@ jobs:
       - name: Test RPM installation
         if: ${{ inputs.run_tests }}
         run: |
-          dnf install -y ./clyq-*.x86_64.rpm
-          clyq --help
-          clyq --version
-          clyq toolkit list
+          dnf install -y ./otto-*.x86_64.rpm
+          otto --help
+          otto --version
+          otto toolkit list
 
       - name: Upload RPM artifact
         uses: actions/upload-artifact@v4

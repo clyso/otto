@@ -38,11 +38,11 @@ fi
 
 dist_version=".el${EL_VERSION}."
 
-# build copilot python binary
+# build otto python binary
 ./build.sh || exit 1
 
 pkg_name="${NAME}-${VERSION}"
-basedir="$(mktemp --suffix=-copilot-rpm -d)"
+basedir="$(mktemp --suffix=-otto-rpm -d)"
 rpmdir="${basedir}/rpms"
 srcdir="${basedir}/${pkg_name}"
 

@@ -48,9 +48,9 @@ jobs:
 
       - name: Test binary
         run: |
-          ./dist/clyq --version
-          ./dist/clyq --help
-          VERSION=$(./dist/clyq --version | grep -oP 'v\d+\.\d+\.\d+')
+          ./dist/otto --version
+          ./dist/otto --help
+          VERSION=$(./dist/otto --version | grep -oP 'v\d+\.\d+\.\d+')
           if [ "$VERSION" = "v0.0.0" ]; then
             echo "Error: Version is v0.0.0, git tags not properly detected"
             exit 1

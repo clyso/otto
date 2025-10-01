@@ -6,23 +6,23 @@ and parsing their JSON output with proper validation using Pydantic models.
 """
 
 import json
+import math
 import subprocess
 import sys
-import math
 from typing import Any
 
 from .schemas import (
-    OSDTree,
-    PGDump,
+    MalformedCephDataError,
     OSDDFResponse,
     OSDDumpResponse,
     OSDPerfDumpResponse,
-    MalformedCephDataError,
+    OSDTree,
+    PGDump,
 )
 
 
 def _json_loads(json_data: str) -> Any:
-    """Parse JSON data"""
+    """Parse JSON data."""
 
     def parse_json_constants(arg):
         if arg == "Infinity":

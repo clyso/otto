@@ -1,9 +1,8 @@
-"""
-Data loading functions for Ceph data from files and stdin.
-"""
+"""Data loading functions for Ceph data from files and stdin."""
 
 import sys
 from pathlib import Path
+
 from pydantic import ValidationError
 
 from .schemas import OSDPerfDumpResponse
@@ -16,7 +15,7 @@ class DataLoadingError(Exception):
 
 
 def load_osd_perf_from_file(file_path: str) -> OSDPerfDumpResponse:
-    """Load OSD performance dump from JSON file"""
+    """Load OSD performance dump from JSON file."""
     try:
         content = Path(file_path).read_text()
         return OSDPerfDumpResponse.model_validate_json(content)
@@ -29,7 +28,7 @@ def load_osd_perf_from_file(file_path: str) -> OSDPerfDumpResponse:
 
 
 def load_osd_perf_from_stdin() -> OSDPerfDumpResponse:
-    """Load OSD performance dump from stdin"""
+    """Load OSD performance dump from stdin."""
     try:
         content = sys.stdin.read()
         return OSDPerfDumpResponse.model_validate_json(content)

@@ -14,18 +14,18 @@ run_build() {
   # 'uv' will automatically use the sourced venv
 
   uv pip install pyinstaller || exit 1
-  uv pip install -e ./copilot/ || exit 1
+  uv pip install -e ./otto/ || exit 1
 
   # Data directories are relative to specpath.
   # We set 'src/' as the specpath so the resulting 'otto.spec' does not
   # conflict with the rpm one.
   python3 -m PyInstaller --onefile \
     --name otto \
-    --specpath copilot/ \
+    --specpath otto/ \
     --clean \
-    --add-data 'src/clyso/ceph/copilot/tools:clyso/ceph/copilot/tools' \
+    --add-data 'src/clyso/ceph/otto/tools:clyso/ceph/otto/tools' \
     --add-data 'src/clyso/ceph/ai/*.yaml:clyso/ceph/ai' \
-    copilot/src/clyso/ceph/copilot/__main__.py || exit 1
+    otto/src/clyso/ceph/otto/__main__.py || exit 1
 
   # ensure we deactivate the environment.
   deactivate

@@ -8,19 +8,19 @@ import yaml
 
 from clyso.ceph.ai import generate_result
 from clyso.ceph.ai.common import (
-    CopilotParser,
+    OttoParser,
     load_ceph_report_file,
     CEPH_FILES,
 )
 from clyso.ceph.api.commands import ceph_report, ceph_command
 from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.pg import add_command_pg
-from clyso.ceph.copilot.upmap import add_command_upmap
+from clyso.ceph.otto.upmap import add_command_upmap
 from clyso.__version__ import __version__
 
 from clyso.ceph.ai.osd.command import OSDPerfCommand
 
-CONFIG_FILE = "copilot.yaml"
+CONFIG_FILE = "otto.yaml"
 
 
 def collect(args=None):
@@ -398,9 +398,9 @@ def profile_verify(args):
 def get_tools_dir():
     tools_dir_candidates = [
         os.path.abspath(os.path.join(os.path.dirname(__file__), "tools")),
-        "/usr/libexec/ceph-copilot/tools",
-        "/usr/share/ceph-copilot/tools",
-        "/usr/lib/ceph-copilot/tools",
+        "/usr/libexec/otto/tools",
+        "/usr/share/otto/tools",
+        "/usr/lib/otto/tools",
     ]
 
     for tools_dir in tools_dir_candidates:
@@ -473,7 +473,6 @@ def planner_replacement(args):
     return
 
 
-# note: use jsoncmd to run ceph comamnds with json
 def run_ceph_command(args):
     skip_confirmation = getattr(args, "yes", True)
     command = ["ceph"]
@@ -500,7 +499,7 @@ def run_ceph_command(args):
 
 def main():
     # Create the top-level parser
-    parser = CopilotParser(prog="otto", description="Otto: Your Expert Ceph Assistant.")
+    parser = OttoParser(prog="otto", description="Otto: Your Expert Ceph Assistant.")
 
     parser.add_argument(
         "--yes",
@@ -656,7 +655,7 @@ def main():
         "run",
         help="Run an included Ceph tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Example:\n\tceph-copilot toolkit run contrib/jj_ceph_balancer -h",
+        epilog="Example:\n\totto toolkit run contrib/jj_ceph_balancer -h",
     )
     parser_toolkit_run.add_argument("tool", type=str, help="tool name")
     parser_toolkit_run.add_argument(

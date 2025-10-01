@@ -2,7 +2,7 @@
 
 repo_root="$(realpath "$(dirname "$0")")"
 
-DATADIR=/tmp/copilot.test
+DATADIR=/tmp/otto.test
 rm -rf ${DATADIR}
 mkdir ${DATADIR}
 
