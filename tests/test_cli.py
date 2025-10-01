@@ -9,7 +9,7 @@ class SmokeTestCopilotCLI(unittest.TestCase):
         for report in os.listdir("tests/reports/"):
             process = subprocess.Popen(  # noqa: S603
                 [  # noqa: S607
-                    "clyq",
+                    "otto",
                     "checkup",
                     f"--ceph_report_json=tests/reports/{report}",
                 ],
@@ -48,7 +48,7 @@ class SmokeTestCopilotCLI(unittest.TestCase):
         ):
             process = subprocess.Popen(  # noqa: S603
                 [  # noqa: S607
-                    "clyq",
+                    "otto",
                     "pools",
                     "pg",
                     "distribution",
@@ -80,7 +80,7 @@ class SmokeTestCopilotCLI(unittest.TestCase):
         valid_commands = ["cluster", "pools", "toolkit", ""]
 
         for cmd in valid_commands:
-            args = ["clyq"]
+            args = ["otto"]
             if cmd is not None:
                 args.append(cmd)
             process = subprocess.Popen(  # noqa: S603
@@ -90,7 +90,7 @@ class SmokeTestCopilotCLI(unittest.TestCase):
 
             # Make sure that usage line is printed
             self.assertIn(
-                f"usage: clyq {cmd if cmd else ''}",
+                f"usage: otto {cmd if cmd else ''}",
                 stdout.decode(),
                 f"Unexpected usage line for {cmd}:\n{stdout}",
             )

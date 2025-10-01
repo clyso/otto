@@ -17,10 +17,10 @@ run_build() {
   uv pip install -e ./copilot/ || exit 1
 
   # Data directories are relative to specpath.
-  # We set 'src/' as the specpath so the resulting 'clyq.spec' does not
+  # We set 'src/' as the specpath so the resulting 'otto.spec' does not
   # conflict with the rpm one.
   python3 -m PyInstaller --onefile \
-    --name clyq \
+    --name otto \
     --specpath copilot/ \
     --clean \
     --add-data 'src/clyso/ceph/copilot/tools:clyso/ceph/copilot/tools' \
@@ -30,10 +30,10 @@ run_build() {
   # ensure we deactivate the environment.
   deactivate
 
-  ./dist/clyq --version || exit 1
-  ./dist/clyq --help || exit 1
+  ./dist/otto --version || exit 1
+  ./dist/otto --help || exit 1
 
-  rm -fr ./build/ ./clyso/ceph-copilot.spec || exit 1
+  rm -fr ./build/ ./clyso/otto.spec || exit 1
   rm -fr .venv-installer/ || exit 1
 }
 
@@ -41,13 +41,13 @@ usage() {
   cat <<EOF >/dev/stderr
 usage: $0 [options]
 
-Helper to build ceph-copilot's installer.
+Helper to build otto's installer.
 
 Builds either in the developer's local environment, or, if '--container' is
 specified, within the context of a container.
 
 If '--container' is specified, a container image will be created from scratch
-and will be named 'ceph-copilot-builder'. It is up to the user to remove the
+and will be named 'otto-builder'. It is up to the user to remove the
 image should they want to.
 
 options:
@@ -69,13 +69,13 @@ run_with_ctr() {
   fi
 
   ${ctr_tool} build -f ./pyinstaller.Dockerfile \
-    -t clyq-builder:latest \
+    -t otto-builder:latest \
     . || exit 1
 
   # shellcheck disable=SC2068
   ${ctr_tool} run ${extra_run_args[@]} \
     -v .:/app \
-    clyq-builder:latest || exit 1
+    otto-builder:latest || exit 1
 }
 
 run_ctr=0

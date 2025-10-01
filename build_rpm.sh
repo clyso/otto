@@ -1,6 +1,6 @@
 #!/bin/bash -ex
 
-NAME=clyq
+NAME=otto
 RELEASE=${RELEASE:-0}
 EL_VERSION="${EL_VERSION:-9}"
 DEST="${DEST:-${PWD}}"
@@ -53,7 +53,7 @@ specfile="${rpmdir}/rpmbuild/SPECS/${NAME}.spec"
 sed "s/@VERSION@/$VERSION/g; s/@RELEASE@/$RELEASE/g" ${NAME}.spec.in >"${specfile}"
 
 mkdir "${srcdir}" || exit 1
-install -m 755 dist/clyq "${srcdir}"/ || exit 1
+install -m 755 dist/otto "${srcdir}"/ || exit 1
 install -m 644 LICENSE "${srcdir}"/ || exit 1
 install -m 644 README.md "${srcdir}"/ || exit 1
 
@@ -68,5 +68,5 @@ rpmbuild \
     --define "dist ${dist_version}" \
     -bb "${specfile}" || exit 1
 
-cp "${rpmdir}"/rpmbuild/RPMS/x86_64/clyq-*.rpm "${DEST}"/
+cp "${rpmdir}"/rpmbuild/RPMS/x86_64/otto-*.rpm "${DEST}"/
 rm -fr "${basedir}"

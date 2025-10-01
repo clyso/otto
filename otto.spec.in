@@ -1,11 +1,11 @@
-%define name clyq
+%define name otto
 %define version @VERSION@
 %define release @RELEASE@
 
 Name: %{name}
 Version:%{version}
 Release: %{release}%{?dist}clyso 
-Summary: Clyso Clyq
+Summary: Clyso Otto
 
 License: TBD
 URL: https://www.clyso.com/
@@ -14,7 +14,7 @@ Source0: %{name}-%{version}.tar.bz2
 BuildArch: x86_64
 
 %description
-Clyso Clyq.
+Clyso Otto.
 
 %global debug_package %{nil}
 
@@ -24,12 +24,12 @@ Clyso Clyq.
 %build
 
 %install
-install -m 755 -t %{buildroot}/%{_bindir} -D clyq
+install -m 755 -t %{buildroot}/%{_bindir} -D otto
 
 %files
 %license LICENSE
 %doc README.md
-%{_bindir}/clyq
+%{_bindir}/otto
 
 %changelog
 

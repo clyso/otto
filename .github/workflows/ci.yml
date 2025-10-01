@@ -100,6 +100,6 @@ jobs:
 
       - name: Run binary tests
         run: |
-          chmod +x ./dist/clyq
+          chmod +x ./dist/otto
           chmod +x tests/test_binary.sh
           ./tests/test_binary.sh

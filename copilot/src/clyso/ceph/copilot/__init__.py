@@ -500,7 +500,7 @@ def run_ceph_command(args):
 
 def main():
     # Create the top-level parser
-    parser = CopilotParser(prog="clyq", description="Clyq: Your Expert Ceph Assistant.")
+    parser = CopilotParser(prog="otto", description="Otto: Your Expert Ceph Assistant.")
 
     parser.add_argument(
         "--yes",
@@ -520,7 +520,7 @@ def main():
         "-v",
         "-V",
         action="version",
-        version=f"Clyq v{__version__}",
+        version=f"Otto v{__version__}",
     )
     subparsers.required = True
 
