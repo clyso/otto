@@ -3,7 +3,7 @@ Data loading functions for Ceph data from files and stdin.
 """
 
 import sys
-from typing import Any
+from pathlib import Path
 from pydantic import ValidationError
 
 from .schemas import OSDPerfDumpResponse
@@ -18,8 +18,7 @@ class DataLoadingError(Exception):
 def load_osd_perf_from_file(file_path: str) -> OSDPerfDumpResponse:
     """Load OSD performance dump from JSON file"""
     try:
-        with open(file_path, "r") as f:
-            content = f.read()
+        content = Path(file_path).read_text()
         return OSDPerfDumpResponse.model_validate_json(content)
     except FileNotFoundError:
         raise DataLoadingError(f"Performance data file '{file_path}' not found")

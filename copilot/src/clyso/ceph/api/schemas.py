@@ -237,7 +237,9 @@ class OSDStat(BaseModel):
     up_from: int = Field(default=0)
     seq: int = Field(default=0)
     num_pgs: int = Field(default=0)
-    num_osds: int = Field(default=1)  # this appears to always be 1 for individual OSD stats
+    num_osds: int = Field(
+        default=1
+    )  # this appears to always be 1 for individual OSD stats
     num_per_pool_osds: int = Field(default=0)
     num_per_pool_omap_osds: int = Field(default=0)
     kb: int = Field(default=0)
