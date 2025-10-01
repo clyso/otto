@@ -1,9 +1,8 @@
 import json
-import subprocess
-import os
 import sys
 import argparse
 import math
+from pathlib import Path
 
 CEPH_FILES = {
     "ceph-report": "cluster_health-report",
@@ -75,8 +74,8 @@ def jsoncmd(command, timeout=30, skip_confirmation=True):
 def load_ceph_report_file(filepath):
     """Load and parse ceph report file"""
     try:
-        with open(filepath, "r") as file:
-            return json_load(file)
+        content = Path(filepath).read_text()
+        return json_loads(content)
     except Exception as e:
         print(
             f"Error: Failed to read ceph report from {filepath}: {e}",
