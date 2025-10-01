@@ -3,6 +3,7 @@
 
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 from .perf import OSDPerf, OSDPerfFormatter
@@ -73,8 +74,7 @@ class OSDPerfCommand:
     def _collect_from_file(self) -> list[dict[str, Any]]:
         """Collect data from file input"""
         try:
-            with open(self.args.file, "r") as f:
-                perf_data = json.load(f)
+            perf_data = json.loads(Path(self.args.file).read_text())
             return self.perf_class.process_perf_dump_file(perf_data)
         except FileNotFoundError:
             print(f"Error: Input file '{self.args.file}' not found", file=sys.stderr)
