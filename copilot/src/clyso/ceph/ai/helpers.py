@@ -2,26 +2,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 import fnmatch
-import os
+from pathlib import Path
 
 import yaml
 
-local_path = os.path.dirname(os.path.abspath(__file__))
-versions_file = os.path.join(local_path, "versions.yaml")
-with open(versions_file) as file:
-    versiondb = yaml.safe_load(file)
-
-bugs_file = os.path.join(local_path, "bugs.yaml")
-with open(bugs_file) as file:
-    bugdb = yaml.safe_load(file)
-
-health_file = os.path.join(local_path, "health.yaml")
-with open(health_file) as file:
-    healthdb = yaml.safe_load(file)
-
-os_file = os.path.join(local_path, "os.yaml")
-with open(os_file) as file:
-    osdb = yaml.safe_load(file)
+local_path = Path(__file__).parent
+versiondb = yaml.safe_load((local_path / "versions.yaml").read_text())
+bugdb = yaml.safe_load((local_path / "bugs.yaml").read_text())
+healthdb = yaml.safe_load((local_path / "health.yaml").read_text())
+osdb = yaml.safe_load((local_path / "os.yaml").read_text())
 
 
 def to_version(version: str) -> str:

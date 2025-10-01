@@ -4,7 +4,7 @@
 from clyso.ceph.ai.pg.distribution import PGHistogram
 from clyso.ceph.api.commands import ceph_osd_tree, ceph_pg_dump
 import json
-import os
+from pathlib import Path
 
 
 def add_command_pg(subparsers):
@@ -78,21 +78,17 @@ def pg_distribution(args):
     Now using typed API functions for better type safety and validation.
     """
     if args.osd_tree_json:
-        with open(args.osd_tree_json, "r") as file:
-            osd_weights = json.load(file)
-    elif os.path.exists("osd_info-tree_json"):
-        with open("osd_info-tree_json", "r") as file:
-            osd_weights = json.load(file)
+        osd_weights = json.loads(Path(args.osd_tree_json).read_text())
+    elif Path("osd_info-tree_json").exists():
+        osd_weights = json.loads(Path("osd_info-tree_json").read_text())
     else:
         osd_tree = ceph_osd_tree()
         osd_weights = osd_tree.model_dump()
 
     if args.pg_dump_json:
-        with open(args.pg_dump_json, "r") as file:
-            pg_stats = json.load(file)
-    elif os.path.exists("pg_info-dump_json"):
-        with open("pg_info-dump_json", "r") as file:
-            pg_stats = json.load(file)
+        pg_stats = json.loads(Path(args.pg_dump_json).read_text())
+    elif Path("pg_info-dump_json").exists():
+        pg_stats = json.loads(Path("pg_info-dump_json").read_text())
     else:
         pg_dump = ceph_pg_dump()
         pg_stats = pg_dump.model_dump()
