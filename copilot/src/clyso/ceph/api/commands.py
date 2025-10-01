@@ -7,9 +7,9 @@ and parsing their JSON output with proper validation using Pydantic models.
 
 import json
 import subprocess
-import os
 import sys
 import math
+from pathlib import Path
 from typing import Any
 
 from .schemas import (
@@ -59,10 +59,9 @@ def _execute_ceph_command(
             sys.exit(1)
 
     try:
-        with open(os.devnull, "w") as devnull:
-            out = subprocess.check_output(
-                command.split(), stderr=devnull, timeout=timeout
-            ).decode("utf-8")
+        out = subprocess.check_output(
+            command.split(), stderr=subprocess.DEVNULL, timeout=timeout
+        ).decode("utf-8")
     except subprocess.CalledProcessError:
         print("ERROR: ceph command is no where to be found")
         sys.exit(1)

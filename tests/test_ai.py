@@ -1,6 +1,6 @@
 import json
-import os
 import unittest
+from pathlib import Path
 
 import clyso.ceph.ai as ai_module
 
@@ -56,21 +56,18 @@ class TestClassResult(unittest.TestCase):
 
 class TestClysoCephAI(unittest.TestCase):
     def setUp(self) -> None:
-        test_path = os.path.dirname(os.path.abspath(__file__))
-        _report = os.path.join(test_path, "report.pacific.json")
-        with open(_report) as file:
-            self.report_json = json.load(file)
+        test_path = Path(__file__).parent
+        _report = test_path / "report.pacific.json"
+        self.report_json = json.loads(_report.read_text())
 
     def test_check_report(self) -> None:
         result = ai_module.generate_result(report_json=self.report_json)
         out = json.loads(result.dump())
 
         # Write the new JSON output to a temp file
-        with open("tests/temp_copilot.json", "w") as f:
-            json.dump(out, f, indent=2, ensure_ascii=False)
+        Path("tests/temp_copilot.json").write_text(json.dumps(out, indent=2, ensure_ascii=False))
 
-        with open("tests/copilot.json") as f:
-            expected = json.load(f)
+        expected = json.loads(Path("tests/copilot.json").read_text())
 
         failures = []
 
@@ -201,7 +198,7 @@ class TestClysoCephAI(unittest.TestCase):
             print("test_check_report passed")
 
     def test_check_version_releases(self) -> None:
-        test_path = os.path.dirname(os.path.abspath(__file__))
+        test_path = Path(__file__).parent
 
         test_cases = [
             ("report-reef.json", "reef", "18.2.0"),
@@ -230,9 +227,8 @@ class TestClysoCephAI(unittest.TestCase):
         release_name,
         current_version,
     ) -> None:
-        _report = os.path.join(test_path, report_file)
-        with open(_report) as file:
-            report_json = json.load(file)
+        _report = test_path / report_file
+        report_json = json.loads(_report.read_text())
 
         result = ai_module.generate_result(report_json=report_json)
         result_json = json.loads(result.dump())
