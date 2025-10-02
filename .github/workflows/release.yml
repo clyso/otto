@@ -13,44 +13,9 @@ env:
 
 jobs:
   build_binary:
-    runs-on: ubuntu-latest
-    container:
-      image: centos:8
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: ${{ env.GIT_DEPTH }}
-
-      - name: Setup CentOS repositories
-        run: |
-          cd /etc/yum.repos.d/
-          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
-          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
-
-      - name: Install dependencies
-        run: |
-          yum install -y curl git
-          curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/bin UV_DISABLE_UPDATE=1 UV_NO_MODIFY_PATH=1 /bin/sh
-
-      - name: Generate version
-        run: |
-          git describe --tags --long --always | awk -F'-' '{ printf "%s+g%s.d%s\n", $1, $3, strftime("%Y%m%d") }' > GIT_VERSION
-
-      - name: Build binary
-        run: ./build.sh
-
-      - name: Test binary
-        run: |
-          ./dist/clyq --version
-          ./dist/clyq --help
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: binary
-          path: dist/clyq
-          retention-days: 1
+    uses: ./.github/workflows/build-binary-job.yml
+    with:
+      artifact_name: binary
 
   build_rpm:
     runs-on: ubuntu-latest

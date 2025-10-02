@@ -114,49 +114,8 @@ jobs:
           clyq toolkit list
 
   build_binary:
-    runs-on: ubuntu-latest
+    uses: ./.github/workflows/build-binary-job.yml
     needs: run_tests
-    container:
-      image: centos:8
-    env:
-      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: ${{ env.GIT_DEPTH }}
-
-      - name: Setup CentOS repositories
-        run: |
-          cd /etc/yum.repos.d/
-          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
-          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
-
-      - name: Install dependencies
-        run: |
-          yum install -y curl git
-          git config --global --add safe.directory .
-          curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/bin UV_DISABLE_UPDATE=1 UV_NO_MODIFY_PATH=1 /bin/sh
-
-      - name: Build binary
-        run: ./build.sh
-
-      - name: Test binary
-        run: |
-          ./dist/clyq --version
-          ./dist/clyq --help
-          VERSION=$(./dist/clyq --version | grep -oP 'v\d+\.\d+\.\d+')
-          if [ "$VERSION" = "v0.0.0" ]; then
-            echo "Error: Version is v0.0.0, git tags not properly detected"
-            exit 1
-          fi
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: binary-dist
-          path: dist/
-          retention-days: 1
 
   test_binary:
     runs-on: ubuntu-latest
