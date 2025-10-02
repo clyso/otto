@@ -19,21 +19,28 @@ jobs:
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: ${{ env.GIT_DEPTH }}
-
       - name: Setup CentOS repositories
         run: |
           cd /etc/yum.repos.d/
           sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
           sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
 
-      - name: Install dependencies
+      # Git must be installed and configured before checkout
+      # setuptools-scm (used in copilot/pyproject.toml) needs git to read tags during build
+      # If git isn't properly configured, setuptools-scm falls back to version 0.0.0
+      - name: Install git and configure safe directory
         run: |
-          yum install -y curl git
+          yum install -y git
           git config --global --add safe.directory .
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ env.GIT_DEPTH }}
+
+      - name: Install remaining dependencies
+        run: |
+          yum install -y curl
           curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/bin UV_DISABLE_UPDATE=1 UV_NO_MODIFY_PATH=1 /bin/sh
 
       - name: Build binary
