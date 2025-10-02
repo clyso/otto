@@ -1,0 +1,65 @@
+name: Build RPM Job
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        required: false
+        type: string
+        default: rpm-dist
+      run_tests:
+        required: false
+        type: boolean
+        default: true
+
+env:
+  GIT_DEPTH: 0
+
+jobs:
+  build_rpm:
+    runs-on: ubuntu-latest
+    container:
+      image: rockylinux:9
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+    steps:
+      - name: Install git 
+        run: |
+          dnf install -y git
+          git config --global --add safe.directory .
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ env.GIT_DEPTH }}
+
+      - name: Download version artifact
+        if: ${{ inputs.run_tests }}
+        uses: actions/download-artifact@v4
+        with:
+          name: git-version
+
+      - name: Install dependencies
+        run: |
+          dnf install -y epel-release
+          dnf config-manager --enable crb
+          dnf install -y git rpm-build rpmdevtools python3-devel
+          curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/bin UV_DISABLE_UPDATE=1 UV_NO_MODIFY_PATH=1 /bin/sh
+
+      - name: Build RPM
+        run: ./build_rpm.sh
+
+      - name: Test RPM installation
+        if: ${{ inputs.run_tests }}
+        run: |
+          dnf install -y ./clyq-*.x86_64.rpm
+          clyq --help
+          clyq --version
+          clyq toolkit list
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: "*.rpm"
+          retention-days: 1
