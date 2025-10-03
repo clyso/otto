@@ -3,7 +3,7 @@ __pycache__
 *.egg-info
 **/.env
 dist/
-ceph-copilot.spec
+otto.spec
 **/.venv
 *.rpm
 node_modules

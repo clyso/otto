@@ -5,6 +5,6 @@
 .basedpyright/baseline.json
 .venv
 tests/**/*.json
-copilot/src/clyso/ceph/copilot/tools/
+otto/src/clyso/ceph/otto/tools/
 .go/
 __pycache__

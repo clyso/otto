@@ -9,7 +9,7 @@
   },
   "ignores": [
     "node_modules",
-    "copilot/src/clyso/ceph/copilot/tools",
+    "otto/src/clyso/ceph/otto/tools",
     ".go",
     ".venv",
     ".ruff_cache",
