@@ -46,7 +46,7 @@ jobs:
       - name: upload to release
         run: |
          gh release upload ${{ github.ref_name }} \
-            binary/clyq \
+            binary/otto \
             rpm/*.rpm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

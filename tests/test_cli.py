@@ -4,12 +4,12 @@ import textwrap
 import unittest
 
 
-class SmokeTestCopilotCLI(unittest.TestCase):
+class SmokeTestOttoCLI(unittest.TestCase):
     def test_cli(self):
         for report in os.listdir("tests/reports/"):
             process = subprocess.Popen(  # noqa: S603
                 [  # noqa: S607
-                    "clyq",
+                    "otto",
                     "checkup",
                     f"--ceph_report_json=tests/reports/{report}",
                 ],
@@ -19,7 +19,7 @@ class SmokeTestCopilotCLI(unittest.TestCase):
             _, stderr_output = process.communicate()
 
             assert not stderr_output, (
-                f"Copilot produced stderr output for infile {report}:\n"
+                f"Otto produced stderr output for infile {report}:\n"
                 + f"{stderr_output.decode()}"
             )
             print(f"tests/reports/{report} OK")
@@ -48,7 +48,7 @@ class SmokeTestCopilotCLI(unittest.TestCase):
         ):
             process = subprocess.Popen(  # noqa: S603
                 [  # noqa: S607
-                    "clyq",
+                    "otto",
                     "pools",
                     "pg",
                     "distribution",
@@ -61,7 +61,7 @@ class SmokeTestCopilotCLI(unittest.TestCase):
             stdout, stderr_output = process.communicate()
 
             assert not stderr_output, (
-                f"Copilot produced stderr output for infile {pg_dump} and {osd_tree}:\n"
+                f"Otto produced stderr output for infile {pg_dump} and {osd_tree}:\n"
                 + f"{stderr_output.decode()}"
             )
             print(f"tests/pg_dump/{pg_dump} and tests/osd_tree/{osd_tree} OK")
@@ -80,17 +80,17 @@ class SmokeTestCopilotCLI(unittest.TestCase):
         valid_commands = ["cluster", "pools", "toolkit", ""]
 
         for cmd in valid_commands:
-            args = ["clyq"]
+            args = ["otto"]
             if cmd is not None:
                 args.append(cmd)
             process = subprocess.Popen(  # noqa: S603
                 args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
-            stdout, stderr_output = process.communicate()
+            stdout, _stderr_output = process.communicate()
 
             # Make sure that usage line is printed
             self.assertIn(
-                f"usage: clyq {cmd if cmd else ''}",
+                f"usage: otto {cmd if cmd else ''}",
                 stdout.decode(),
                 f"Unexpected usage line for {cmd}:\n{stdout}",
             )

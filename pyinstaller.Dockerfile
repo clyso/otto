@@ -1,6 +1,6 @@
-# This dockerfile will build copilot intto a single binary when run.
+# This dockerfile will build otto intto a single binary when run.
 # It will require the repository to be mounted as a volume into '/app'.
-# The resulting ceph-copilot binary will be available at './dist'.
+# The resulting otto binary will be available at './dist'.
 #
 # A CentOS 8 image is chosen purely because it has a lower glibc version,
 # thus a potentially broader reach.

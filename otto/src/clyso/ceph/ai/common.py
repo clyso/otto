@@ -49,18 +49,18 @@ def load_ceph_report_file(filepath):
         sys.exit(1)
 
 
-class CopilotParser(argparse.ArgumentParser):
+class OttoParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
-        super(CopilotParser, self).__init__(*args, **kwargs)
+        super(OttoParser, self).__init__(*args, **kwargs)
 
     def error(self, message):
-        copilot_error = "{cluster, pool, toolkit}"
+        otto_error = "{cluster, pool, toolkit}"
 
-        if copilot_error in message:
+        if otto_error in message:
             print(f"{message}")
             self.print_help()
             sys.exit(2)
 
         self.print_usage()
-        print(f"copilot: error: {message}")
+        print(f"otto: error: {message}")
         sys.exit(2)

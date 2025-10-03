@@ -1,4 +1,4 @@
-# Ceph Copilot - Facts extraction models
+# Otto - Facts extraction models
 # Copyright (C) 2025 Clyso. All rights reserved.
 
 # NOTE: basedpyright has issues with stub files in this environment

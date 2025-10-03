@@ -1,4 +1,4 @@
-# Ceph Copilot - Configuration analysis module
+# Otto - Configuration analysis module
 # Copyright (C) 2025 Clyso. All rights reserved.
 
 # NOTE: basedpyright has issues with stub files in this environment

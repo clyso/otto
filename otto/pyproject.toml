@@ -3,7 +3,7 @@ requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "clyq"
+name = "otto"
 description = "Ceph AI Assistant"
 readme = "README.md"
 license = "LicenseRef-Proprietary"
@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-clyq = "clyso.ceph.copilot:main"
+otto = "clyso.ceph.otto:main"
 
 [tool.uv]
 cache-keys = [
@@ -43,7 +43,7 @@ where = ["src"]
   "health.yaml",
   "versions.yaml"
 ]
-"clyso.ceph.copilot" = [
+"clyso.ceph.otto" = [
   "tools/cern/README.md",
   "tools/cern/upmap-remapped.py",
   "tools/cern/",
@@ -63,5 +63,5 @@ where = ["src"]
 
 [tool.ruff]
 exclude = [
-  "src/clyso/ceph/copilot/tools"
+  "src/clyso/ceph/otto/tools"
 ]
