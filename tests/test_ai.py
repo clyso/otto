@@ -76,11 +76,11 @@ class TestClysoCephAI(unittest.TestCase):
         out = json.loads(result.dump())
 
         # Write the new JSON output to a temp file
-        Path("tests/temp_copilot.json").write_text(
+        Path("tests/temp_otto.json").write_text(
             json.dumps(out, indent=2, ensure_ascii=False)
         )
 
-        expected = json.loads(Path("tests/copilot.json").read_text())
+        expected = json.loads(Path("tests/otto.json").read_text())
 
         failures = []
 
@@ -201,11 +201,11 @@ class TestClysoCephAI(unittest.TestCase):
             for failure in failures:
                 print(f"- {failure}")
             print(
-                "Copilot output with new changes saved to tests/temp_copilot.json. "
-                + "Replace copilot.json to pass the tests if you are sure of the new "
-                + "copilot changes
+                "Otto output with new changes saved to tests/temp_otto.json. "
+                + "Replace otto.json to pass the tests if you are sure of the new "
+                + "otto changes
 "
-                + "cp tests/temp_copilot.json tests/copilot.json
+                + "cp tests/temp_otto.json tests/otto.json
 ",
             )
             self.fail(f"{len(failures)} checks failed. See above for details.")
