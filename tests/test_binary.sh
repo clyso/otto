@@ -10,7 +10,7 @@ RED='[0;31m'
 YELLOW='[0;33m'
 NC='[0m' # No Color
 
-echo "===== Testing clyq binary ====="
+echo "===== Testing otto binary ====="
 
 run_test() {
   local cmd="$1"
@@ -35,25 +35,25 @@ run_test() {
   fi
 }
 
-if [ ! -f "dist/clyq" ]; then
-  echo -e "${RED}ERROR${NC}: clyq binary not found in dist/ directory"
+if [ ! -f "dist/otto" ]; then
+  echo -e "${RED}ERROR${NC}: otto binary not found in dist/ directory"
   exit 1
 fi
 
 FAILURES=0
 
-run_test "./dist/clyq --version" "Version command" || ((FAILURES++))
-run_test "./dist/clyq --help" "Help command" || ((FAILURES++))
+run_test "./dist/otto --version" "Version command" || ((FAILURES++))
+run_test "./dist/otto --help" "Help command" || ((FAILURES++))
 
-run_test "./dist/clyq pools -h" "Pools help command" || ((FAILURES++))
-run_test "./dist/clyq pools pg -h" "Pools pg help command" || ((FAILURES++))
+run_test "./dist/otto pools -h" "Pools help command" || ((FAILURES++))
+run_test "./dist/otto pools pg -h" "Pools pg help command" || ((FAILURES++))
 
-run_test "./dist/clyq toolkit -h" "Toolkit help command" || ((FAILURES++))
-run_test "./dist/clyq toolkit list" "Toolkit list command" || ((FAILURES++))
+run_test "./dist/otto toolkit -h" "Toolkit help command" || ((FAILURES++))
+run_test "./dist/otto toolkit list" "Toolkit list command" || ((FAILURES++))
 
-run_test "./dist/clyq cluster -h" "Cluster help command" || ((FAILURES++))
-run_test "./dist/clyq cluster upmap -h" "Cluster upmap help command" || ((FAILURES++))
-run_test "./dist/clyq cluster checkup -h" "Cluster checkup help command" || ((FAILURES++))
+run_test "./dist/otto cluster -h" "Cluster help command" || ((FAILURES++))
+run_test "./dist/otto cluster upmap -h" "Cluster upmap help command" || ((FAILURES++))
+run_test "./dist/otto cluster checkup -h" "Cluster checkup help command" || ((FAILURES++))
 
 if [ -d "tests/reports" ]; then
   echo -e "
@@ -67,7 +67,7 @@ if [ -d "tests/reports" ]; then
     for report_file in tests/reports/*.json; do
       if [ -f "$report_file" ]; then
         file_name=$(basename "$report_file")
-        run_test "./dist/clyq cluster checkup --ceph_report_json $report_file" "Cluster checkup with report $file_name" || ((FAILURES++))
+        run_test "./dist/otto cluster checkup --ceph_report_json $report_file" "Cluster checkup with report $file_name" || ((FAILURES++))
       fi
     done
   else
@@ -77,8 +77,8 @@ else
   echo -e "${YELLOW}Warning${NC}: tests/reports directory not found"
 fi
 
-run_test "./dist/clyq cluster checkup --ceph_report_json tests/reports/01.json --ceph-config-dump tests/configs/ceph_cluster_info-config_dump.json" "Cluster checkup with report and config dump" || ((FAILURES++))
-run_test "./dist/clyq cluster osd-perf -f tests/osd-perf-dump.json" "OSD perf analysis command" || ((FAILURES++))
+run_test "./dist/otto cluster checkup --ceph_report_json tests/reports/01.json --ceph-config-dump tests/configs/ceph_cluster_info-config_dump.json" "Cluster checkup with report and config dump" || ((FAILURES++))
+run_test "./dist/otto cluster osd-perf -f tests/osd-perf-dump.json" "OSD perf analysis command" || ((FAILURES++))
 
 # Summary
 echo -e "

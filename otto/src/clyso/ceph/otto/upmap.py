@@ -23,8 +23,8 @@ Usage procedure:
     1. Backup your osdmaps, crush maps, ...
     2. Set the norebalance flag: 'ceph osd set norebalance'
     3. Make your change (tunables, add osds, etc...)
-    4. Run this command to generate the script: 'ceph-copilot cluster upmap'
-    5. Execute the script twice: 'ceph-copilot cluster upmap | sh -x'
+    4. Run this command to generate the script: 'otto cluster upmap'
+    5. Execute the script twice: 'otto cluster upmap | sh -x'
     6. After cluster is 100% active+clean, unset norebalance: 'ceph osd unset norebalance'
     7. The ceph-mgr balancer in upmap mode will gradually remove the added upmap-items entries
 """,
@@ -81,9 +81,9 @@ def get_tools_dir() -> str:
     """Get the directory containing the tools."""
     tools_dir_candidates = [
         os.path.abspath(os.path.join(os.path.dirname(__file__), "tools")),
-        "/usr/libexec/ceph-copilot/tools",
-        "/usr/share/ceph-copilot/tools",
-        "/usr/lib/ceph-copilot/tools",
+        "/usr/libexec/otto/tools",
+        "/usr/share/otto/tools",
+        "/usr/lib/otto/tools",
     ]
 
     for tools_dir in tools_dir_candidates:

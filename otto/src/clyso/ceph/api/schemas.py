@@ -32,14 +32,14 @@ class MalformedCephDataError(Exception):
 
 
 class OpQueueAgeHist(BaseModel):
-    """Schema for operation queue age histogram"""
+    """Schema for operation queue age histogram."""
 
     histogram: list[int]
     upper_bound: int = Field(default=0)
 
 
 class PerfStat(BaseModel):
-    """Schema for OSD performance statistics"""
+    """Schema for OSD performance statistics."""
 
     commit_latency_ms: int = Field(default=0)
     apply_latency_ms: int = Field(default=0)
@@ -48,7 +48,7 @@ class PerfStat(BaseModel):
 
 
 class OSDNode(BaseModel):
-    """Schema for an OSD node in the OSD tree"""
+    """Schema for an OSD node in the OSD tree."""
 
     id: int = Field(default=0)
     name: str = Field(default="")
@@ -66,7 +66,7 @@ class OSDNode(BaseModel):
 
 
 class OSDTree(BaseModel):
-    """Schema for `ceph osd tree --format=json` response"""
+    """Schema for `ceph osd tree --format=json` response."""
 
     model_config = {"extra": "allow"}
 
@@ -75,7 +75,7 @@ class OSDTree(BaseModel):
 
     @classmethod
     def loads(cls, raw: str) -> OSDTree:
-        """Parse OSD tree from JSON string"""
+        """Parse OSD tree from JSON string."""
         try:
             return cls.model_validate_json(raw)
         except Exception as e:
@@ -83,7 +83,7 @@ class OSDTree(BaseModel):
 
     @classmethod
     def load(cls, path: pathlib.Path) -> OSDTree:
-        """Load and parse OSD tree from file"""
+        """Load and parse OSD tree from file."""
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(f"File not found: {path}")
         raw = path.read_text()
@@ -91,7 +91,7 @@ class OSDTree(BaseModel):
 
 
 class PGStatSum(BaseModel):
-    """Schema for PG statistics summary"""
+    """Schema for PG statistics summary."""
 
     num_bytes: int = Field(default=0)
     num_objects: int = Field(default=0)
@@ -136,7 +136,7 @@ class PGStatSum(BaseModel):
 
 
 class PGStoreStats(BaseModel):
-    """Schema for PG store statistics"""
+    """Schema for PG store statistics."""
 
     total: int = Field(default=0)
     available: int = Field(default=0)
@@ -151,7 +151,7 @@ class PGStoreStats(BaseModel):
 
 
 class PGStatsSum(BaseModel):
-    """Schema for PG stats summary"""
+    """Schema for PG stats summary."""
 
     stat_sum: PGStatSum
     store_stats: PGStoreStats
@@ -163,7 +163,7 @@ class PGStatsSum(BaseModel):
 
 
 class PGStatsDelta(BaseModel):
-    """Schema for PG stats delta"""
+    """Schema for PG stats delta."""
 
     stat_sum: PGStatSum
     store_stats: PGStoreStats
@@ -176,7 +176,7 @@ class PGStatsDelta(BaseModel):
 
 
 class PGStat(BaseModel):
-    """Schema for individual PG statistics"""
+    """Schema for individual PG statistics."""
 
     pgid: str = Field(default="")
     version: str = Field(default="")
@@ -234,7 +234,7 @@ class PGStat(BaseModel):
 
 
 class OSDStat(BaseModel):
-    """Schema for individual OSD statistics"""
+    """Schema for individual OSD statistics."""
 
     osd: int = Field(default=0)
     up_from: int = Field(default=0)
@@ -263,7 +263,7 @@ class OSDStat(BaseModel):
 
 
 class OSDStatsSum(BaseModel):
-    """Schema for aggregated OSD statistics summary"""
+    """Schema for aggregated OSD statistics summary."""
 
     up_from: int = Field(default=0)
     seq: int = Field(default=0)
@@ -289,7 +289,7 @@ class OSDStatsSum(BaseModel):
 
 
 class PoolStatfs(BaseModel):
-    """Schema for pool statfs entries"""
+    """Schema for pool statfs entries."""
 
     poolid: int = Field(default=0)
     osd: int = Field(default=0)
@@ -306,7 +306,7 @@ class PoolStatfs(BaseModel):
 
 
 class PoolStat(BaseModel):
-    """Schema for pool statistics"""
+    """Schema for pool statistics."""
 
     poolid: int = Field(default=0)
     num_pg: int = Field(default=0)
@@ -320,7 +320,7 @@ class PoolStat(BaseModel):
 
 
 class PGMap(BaseModel):
-    """Schema for PG map"""
+    """Schema for PG map."""
 
     version: int = Field(default=0)
     stamp: str = Field(default="")
@@ -336,14 +336,14 @@ class PGMap(BaseModel):
 
 
 class PGDump(BaseModel):
-    """Schema for `ceph pg dump --format=json` response"""
+    """Schema for `ceph pg dump --format=json` response."""
 
     pg_ready: bool
     pg_map: PGMap
 
     @classmethod
     def loads(cls, raw: str) -> PGDump:
-        """Parse PG dump from JSON string"""
+        """Parse PG dump from JSON string."""
         try:
             return cls.model_validate_json(raw)
         except Exception as e:
@@ -351,7 +351,7 @@ class PGDump(BaseModel):
 
     @classmethod
     def load(cls, path: pathlib.Path) -> PGDump:
-        """Load and parse PG dump from file"""
+        """Load and parse PG dump from file."""
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(f"File not found: {path}")
         raw = path.read_text()
@@ -359,7 +359,7 @@ class PGDump(BaseModel):
 
 
 class OSDDFNode(BaseModel):
-    """Schema for OSD disk usage node from `ceph osd df --format=json`"""
+    """Schema for OSD disk usage node from `ceph osd df --format=json`."""
 
     id: int = Field(default=0)
     device_class: str = Field(default="")
@@ -383,7 +383,7 @@ class OSDDFNode(BaseModel):
 
 
 class OSDDFResponse(BaseModel):
-    """Schema for `ceph osd df --format=json` response"""
+    """Schema for `ceph osd df --format=json` response."""
 
     model_config = {"extra": "allow"}
 
@@ -391,7 +391,7 @@ class OSDDFResponse(BaseModel):
 
     @classmethod
     def loads(cls, raw: str) -> OSDDFResponse:
-        """Parse OSD DF from JSON string"""
+        """Parse OSD DF from JSON string."""
         try:
             return cls.model_validate_json(raw)
         except Exception as e:
@@ -399,7 +399,7 @@ class OSDDFResponse(BaseModel):
 
     @classmethod
     def load(cls, path: pathlib.Path) -> OSDDFResponse:
-        """Load and parse OSD DF from file"""
+        """Load and parse OSD DF from file."""
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(f"File not found: {path}")
         raw = path.read_text()
@@ -407,7 +407,7 @@ class OSDDFResponse(BaseModel):
 
 
 class LastPGMergeMeta(BaseModel):
-    """Schema for last PG merge metadata"""
+    """Schema for last PG merge metadata."""
 
     source_pgid: str = Field(default="")
     ready_epoch: int = Field(default=0)
@@ -418,13 +418,13 @@ class LastPGMergeMeta(BaseModel):
 
 
 class HitSetParams(BaseModel):
-    """Schema for hit set parameters"""
+    """Schema for hit set parameters."""
 
     type: str = Field(default="")
 
 
 class PoolConfig(BaseModel):
-    """Schema for pool configuration from osd dump"""
+    """Schema for pool configuration from osd dump."""
 
     pool: int = Field(default=0)
     pool_name: str = Field(default="")
@@ -527,7 +527,7 @@ class PoolConfig(BaseModel):
 
 
 class OSDDumpResponse(BaseModel):
-    """Schema for `ceph osd dump --format=json` response"""
+    """Schema for `ceph osd dump --format=json` response."""
 
     model_config = {"extra": "allow"}
 
@@ -568,7 +568,7 @@ class OSDDumpResponse(BaseModel):
 
     @classmethod
     def loads(cls, raw: str) -> OSDDumpResponse:
-        """Parse OSD dump from JSON string"""
+        """Parse OSD dump from JSON string."""
         try:
             return cls.model_validate_json(raw)
         except Exception as e:
@@ -576,7 +576,7 @@ class OSDDumpResponse(BaseModel):
 
     @classmethod
     def load(cls, path: pathlib.Path) -> OSDDumpResponse:
-        """Load and parse OSD dump from file"""
+        """Load and parse OSD dump from file."""
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(f"File not found: {path}")
         raw = path.read_text()
@@ -584,7 +584,7 @@ class OSDDumpResponse(BaseModel):
 
 
 class LatencyHistogram(BaseModel):
-    """Schema for latency histogram with count, sum and average time"""
+    """Schema for latency histogram with count, sum and average time."""
 
     avgcount: int = Field(default=0)
     sum: float = Field(default=0.0)
@@ -592,7 +592,7 @@ class LatencyHistogram(BaseModel):
 
 
 class AsyncMessengerWorker(BaseModel):
-    """Schema for AsyncMessenger worker performance metrics"""
+    """Schema for AsyncMessenger worker performance metrics."""
 
     msgr_recv_messages: int = Field(default=0)
     msgr_send_messages: int = Field(default=0)
@@ -613,7 +613,7 @@ class AsyncMessengerWorker(BaseModel):
 
 
 class BlueFS(BaseModel):
-    """Schema for BlueFS performance metrics"""
+    """Schema for BlueFS performance metrics."""
 
     db_total_bytes: int = Field(default=0)
     db_used_bytes: int = Field(default=0)
@@ -681,7 +681,7 @@ class BlueFS(BaseModel):
 
 
 class BlueStore(BaseModel):
-    """Schema for BlueStore performance metrics"""
+    """Schema for BlueStore performance metrics."""
 
     allocated: int = Field(default=0)
     stored: int = Field(default=0)
@@ -781,7 +781,7 @@ class BlueStore(BaseModel):
 
 
 class BlueStorePriCache(BaseModel):
-    """Schema for BlueStore priority cache metrics"""
+    """Schema for BlueStore priority cache metrics."""
 
     target_bytes: int = Field(default=0)
     mapped_bytes: int = Field(default=0)
@@ -791,7 +791,7 @@ class BlueStorePriCache(BaseModel):
 
 
 class BlueStorePriCachePool(BaseModel):
-    """Schema for BlueStore priority cache pool (data/kv/meta/onode)"""
+    """Schema for BlueStore priority cache pool (data/kv/meta/onode)."""
 
     pri0_bytes: int = Field(default=0)
     pri1_bytes: int = Field(default=0)
@@ -810,21 +810,21 @@ class BlueStorePriCachePool(BaseModel):
 
 
 class CCT(BaseModel):
-    """Schema for Ceph Context Tracker metrics"""
+    """Schema for Ceph Context Tracker metrics."""
 
     total_workers: int = Field(default=0)
     unhealthy_workers: int = Field(default=0)
 
 
 class FinisherMetrics(BaseModel):
-    """Schema for finisher queue metrics"""
+    """Schema for finisher queue metrics."""
 
     queue_len: int = Field(default=0)
     complete_latency: LatencyHistogram = Field(default_factory=LatencyHistogram)
 
 
 class MemPoolMetrics(BaseModel):
-    """Schema for memory pool metrics"""
+    """Schema for memory pool metrics."""
 
     bloom_filter_bytes: int = Field(default=0)
     bloom_filter_items: int = Field(default=0)
@@ -897,7 +897,7 @@ class MemPoolMetrics(BaseModel):
 
 
 class ObjecterMetrics(BaseModel):
-    """Schema for Objecter client metrics"""
+    """Schema for Objecter client metrics."""
 
     op_active: int = Field(default=0)
     op_laggy: int = Field(default=0)
@@ -972,7 +972,7 @@ class ObjecterMetrics(BaseModel):
 
 
 class OSDMetrics(BaseModel):
-    """Schema for OSD daemon performance metrics"""
+    """Schema for OSD daemon performance metrics."""
 
     op_wip: int = Field(default=0)
     op: int = Field(default=0)
@@ -1109,13 +1109,13 @@ class OSDMetrics(BaseModel):
 
 
 class OSDSlowOps(BaseModel):
-    """Schema for OSD slow operations metrics"""
+    """Schema for OSD slow operations metrics."""
 
     slow_ops_count: int = Field(default=0)
 
 
 class RecoveryStatePerf(BaseModel):
-    """Schema for recovery state performance metrics"""
+    """Schema for recovery state performance metrics."""
 
     initial_latency: LatencyHistogram = Field(default_factory=LatencyHistogram)
     started_latency: LatencyHistogram = Field(default_factory=LatencyHistogram)
@@ -1163,7 +1163,7 @@ class RecoveryStatePerf(BaseModel):
 
 
 class RocksDBMetrics(BaseModel):
-    """Schema for RocksDB performance metrics"""
+    """Schema for RocksDB performance metrics."""
 
     get_latency: LatencyHistogram = Field(default_factory=LatencyHistogram)
     submit_latency: LatencyHistogram = Field(default_factory=LatencyHistogram)
@@ -1183,7 +1183,7 @@ class RocksDBMetrics(BaseModel):
 
 
 class ThrottleMetrics(BaseModel):
-    """Schema for throttling metrics"""
+    """Schema for throttling metrics."""
 
     val: int = Field(default=0)
     max: int = Field(default=0)
@@ -1200,7 +1200,7 @@ class ThrottleMetrics(BaseModel):
 
 
 class OSDPerfDumpResponse(BaseModel):
-    """Schema for `ceph tell osd.X perf dump` response"""
+    """Schema for `ceph tell osd.X perf dump` response."""
 
     model_config = {"extra": "allow"}
 
@@ -1226,7 +1226,7 @@ class OSDPerfDumpResponse(BaseModel):
 
     @property
     def async_messenger_workers(self) -> dict[str, AsyncMessengerWorker]:
-        """Get all AsyncMessenger workers"""
+        """Get all AsyncMessenger workers."""
         return getattr(self, "_async_workers", {})
 
     bluefs: BlueFS = Field(default_factory=BlueFS)
@@ -1300,7 +1300,7 @@ class OSDPerfDumpResponse(BaseModel):
 
     @classmethod
     def loads(cls, raw: str) -> OSDPerfDumpResponse:
-        """Parse OSD performance dump from JSON string"""
+        """Parse OSD performance dump from JSON string."""
         try:
             return cls.model_validate_json(raw)
         except Exception as e:
@@ -1308,7 +1308,7 @@ class OSDPerfDumpResponse(BaseModel):
 
     @classmethod
     def load(cls, path: pathlib.Path) -> OSDPerfDumpResponse:
-        """Load and parse OSD performance dump from file"""
+        """Load and parse OSD performance dump from file."""
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(f"File not found: {path}")
         raw = path.read_text()
