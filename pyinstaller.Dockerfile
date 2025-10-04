@@ -13,7 +13,6 @@ RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* && \
 RUN yum install -y git
 WORKDIR /app
 
-# Make build script executable and run it
 SHELL [ "/bin/bash", "-o", "pipefail", "-c" ]
 RUN curl -LsSf https://astral.sh/uv/install.sh | \
   UV_INSTALL_DIR=/usr/bin \
