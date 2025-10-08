@@ -133,3 +133,15 @@ Or use the script:
 ```bash
 ./run_tests.sh
 ```
+
+## Release
+
+Making a new release through the github UI can be done and it will automatically create a new binary and packages to attach to the new release. 
+
+## When to update uv.lock file
+
+Two scenarios on when to update a new uv.lock file. 
+
+1. Adding/removing/updating packages in pyproject.toml
+2. When you create a release tag - e.g., git tag v0.4.0 will update the version
+
