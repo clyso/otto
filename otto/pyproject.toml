@@ -25,7 +25,7 @@ otto = "clyso.ceph.otto:main"
 [tool.uv]
 cache-keys = [
   { file = "pyproject.toml" }, 
-  { git = { commit = true, tags = true } }
+  { git = { tags = true } }
 ]
 
 [tool.setuptools_scm]
