@@ -55,7 +55,7 @@ jobs:
           dnf install -y ./otto-*.x86_64.rpm
           otto --help
           otto --version
-          otto toolkit list
+          otto toolkit -h
 
       - name: Upload RPM artifact
         uses: actions/upload-artifact@v4
