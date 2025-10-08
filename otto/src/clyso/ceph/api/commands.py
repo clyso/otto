@@ -21,6 +21,9 @@ from .schemas import (
     OSDPerfDumpResponse,
     OSDTree,
     PGDump,
+    CephfsStatusResponse,
+    CephfsMDSStatResponse,
+    CephfsSessionListResponse,
 )
 
 
@@ -150,3 +153,40 @@ def ceph_command(
         raise MalformedCephDataError(
             f"Failed to execute command '{command}': {e}"
         ) from e
+
+
+def ceph_fs_status(
+    fs_name: str = "", skip_confirmation: bool = True
+) -> CephfsStatusResponse:
+    try:
+        command = f"ceph fs status {fs_name} --format=json".strip()
+        raw_data = _execute_ceph_command(command, skip_confirmation=skip_confirmation)
+        return CephfsStatusResponse.model_validate(raw_data)
+    except Exception as e:
+        raise MalformedCephDataError(f"Failed to get CephFS status: {e}") from e
+
+
+def ceph_mds_stat(
+    mds_name: str = "", skip_confirmation: bool = True
+) -> CephfsMDSStatResponse:
+    try:
+        command = f"ceph mds stat {mds_name} --format=json".strip()
+        raw_data = _execute_ceph_command(command, skip_confirmation=skip_confirmation)
+        return CephfsMDSStatResponse.model_validate(raw_data)
+    except Exception as e:
+        raise MalformedCephDataError(f"Failed to get MDS stat: {e}") from e
+
+
+def ceph_mds_session_ls(
+    mds_name: str = "", skip_confirmation: bool = True
+) -> CephfsSessionListResponse:
+    """Get CephFS session list from MDS daemon."""
+    try:
+        raw_data = _execute_ceph_command(
+            f"ceph tell mds.{mds_name} session ls --format=json",
+            skip_confirmation=skip_confirmation,
+        )
+        # The response is a list, so we need to wrap it
+        return CephfsSessionListResponse.model_validate(raw_data)
+    except Exception as e:
+        raise MalformedCephDataError(f"Failed to get MDS session list: {e}") from e
