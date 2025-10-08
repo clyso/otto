@@ -21,7 +21,15 @@ Example usage:
     print(f"Total objects: {pg_stats['stat_sum']['num_objects']}")
 """
 
-from .commands import ceph_osd_df, ceph_osd_dump, ceph_osd_tree, ceph_pg_dump
+from .commands import (
+    ceph_osd_df,
+    ceph_osd_dump,
+    ceph_osd_tree,
+    ceph_pg_dump,
+    ceph_fs_status,
+    ceph_mds_stat,
+    ceph_mds_session_ls,
+)
 from .schemas import (
     OSDDFNode,
     OSDDFResponse,
@@ -33,6 +41,12 @@ from .schemas import (
     PGStat,
     PoolConfig,
     PoolStat,
+    CephfsStatusResponse,
+    CephfsMDSStatResponse,
+    MDSInfo,
+    FilesystemInfo,
+    CephfsSession,
+    CephfsSessionListResponse,
 )
 
 __all__ = [
@@ -52,4 +66,13 @@ __all__ = [
     # Command functions
     "ceph_osd_tree",
     "ceph_pg_dump",
+    "ceph_fs_status",
+    "ceph_mds_stat",
+    "ceph_mds_session_ls",
+    "CephfsStatusResponse",
+    "CephfsMDSStatResponse",
+    "MDSInfo",
+    "FilesystemInfo",
+    "CephfsSession",
+    "CephfsSessionListResponse",
 ]
