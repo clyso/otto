@@ -1,12 +1,19 @@
-name: Upload Release to S3
+name: Upload Release to S3 Job
 
 on:
-  workflow_run:
-    workflows: [ Release ]
-    types: [completed]
+  workflow_call:
+    inputs:
+      artifact_name:
+        required: false
+        type: string
+        default: binary
+      release_tag:
+        required: true
+        type: string
+        description: 'Release tag to upload'
 
 jobs:
-  upload-release-to-s3:
+  upload_binary_to_s3:
     runs-on: ubuntu-latest
     steps:
       - name: Install s3cmd
@@ -37,22 +44,19 @@ jobs:
           s3cmd --version
           s3cmd ls
       
-      - name: Download binary artifact from release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ./
+      
+      - name: Verify binary exists
         run: |
-
-          # Download only the otto binary from the release
-          gh release download ${{ github.event.release.tag_name }} \
-            --repo ${{ github.repository }} \
-            --pattern "otto"
-          
-          # Verify the binary was downloaded
           if [ ! -f "otto" ]; then
-            echo "ERROR: otto binary not found in release assets"
+            echo "ERROR: otto binary not found in artifact"
+            ls -la
             exit 1
           fi
-          
           echo "Downloaded otto binary:"
           ls -la otto
 
@@ -60,7 +64,7 @@ jobs:
         env:
           S3_BUCKET: ${{ vars.S3_BUCKET_NAME }}
         run: |
-          TAG_NAME="${{ github.event.release.tag_name }}"
+          TAG_NAME="${{ inputs.release_tag }}"
 
           echo "Uploading ${TAG_NAME} binary to S3"
           s3cmd put otto s3://${S3_BUCKET}/${TAG_NAME}/otto \
@@ -85,7 +89,7 @@ jobs:
         env:
           S3_BUCKET: ${{ vars.S3_BUCKET_NAME }}
         run: |
-          TAG_NAME="${{ github.event.release.tag_name }}"
+          TAG_NAME="${{ inputs.release_tag }}"
           echo "Verifying uploads..."
           
           echo "Tagged version (${TAG_NAME}):"
