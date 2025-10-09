@@ -1,7 +1,8 @@
 from .command import CephfsSessionTopCommand
+import argparse
 
 
-def add_command_cephfs(subparsers):
+def add_command_cephfs(subparsers: argparse.ArgumentParser) -> None:
     parser_cephfs = subparsers.add_parser(
         "cephfs", help="CephFS-related operations and analysis"
     )
@@ -97,7 +98,7 @@ def add_command_cephfs(subparsers):
     )
 
 
-def subcommand_session_top(args):
+def subcommand_session_top(args: argparse.Namespace) -> None:
     """Execute the session top subcommand"""
     command = CephfsSessionTopCommand(args)
     command.execute()

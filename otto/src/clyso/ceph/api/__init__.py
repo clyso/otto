@@ -40,9 +40,6 @@ from .schemas import (
     PoolStat,
     CephfsStatusResponse,
     CephfsMDSStatResponse,
-    MDSInfo,
-    FilesystemInfo,
-    CephfsSession,
     CephfsSessionListResponse,
 )
 
@@ -68,8 +65,5 @@ __all__ = [
     "ceph_mds_session_ls",
     "CephfsStatusResponse",
     "CephfsMDSStatResponse",
-    "MDSInfo",
-    "FilesystemInfo",
-    "CephfsSession",
     "CephfsSessionListResponse",
 ]

@@ -8,6 +8,7 @@ from clyso.ceph.api.schemas import (
     CephfsSession,
     CephfsSessionMetricValue,
     MalformedCephDataError,
+    CephfsMDSMapEntry,
 )
 from pydantic import BaseModel, Field
 from pathlib import Path
@@ -48,7 +49,7 @@ class CephfsSessionTop:
         """Compile regex pattern (validation already done in command layer)"""
         return re.compile(pattern) if pattern else None
 
-    def run_session_analysis(self, mds: dict[str, Any]) -> None:
+    def run_session_analysis(self, mds: CephfsMDSMapEntry) -> None:
         """Run complete session analysis for a single MDS"""
         sessions = self._load_sessions(mds)
         self._print_mds_info(mds, len(sessions))
@@ -57,20 +58,22 @@ class CephfsSessionTop:
         processed_sessions = self._process_sessions(sessions)
         self._display_sessions(processed_sessions)
 
-    def _load_sessions(self, mds: dict[str, Any]) -> list[CephfsSession]:
+    def _load_sessions(self, mds: CephfsMDSMapEntry) -> list[CephfsSession]:
         """Load session data from file or MDS"""
-        if mds.get("file"):
-            return self._load_from_file(mds["file"])
+        if mds.file:
+            return self._load_from_file(mds.file)
         else:
-            return self._load_from_mds(mds["name"])
+            return self._load_from_mds(mds.name)
 
     def _load_from_file(self, file_path: str) -> list[CephfsSession]:
         """Load sessions from a JSON file"""
         if file_path == "-":
             raw_data = json.load(sys.stdin)
         else:
-            with open(file_path, "r") as f:
-                raw_data = json.load(f)
+            file_path = Path(file_path)
+            if not file_path.exists():
+                raise FileNotFoundError(f"file not found: {file_path}")
+            raw_data = json.loads(file_path.read_text())
 
         return [CephfsSession.model_validate(session_data) for session_data in raw_data]
 
@@ -84,13 +87,13 @@ class CephfsSessionTop:
         except MalformedCephDataError as e:
             raise RuntimeError(f"Failed to get sessions from mds.{mds_name}: {e}")
 
-    def _print_mds_info(self, mds: dict[str, Any], session_count: int) -> None:
+    def _print_mds_info(self, mds: CephfsMDSMapEntry, session_count: int) -> None:
         """Print MDS information header"""
-        if mds.get("file"):
-            print(f"File: {Path(mds['file']).name}")
+        if mds.file:
+            print(f"File: {Path(mds.file).name}")
         else:
-            print(f"MDS: {mds['name']}")
-            print(f"Rank: {mds['rank']}")
+            print(f"MDS: {mds.name}")
+            print(f"Rank: {mds.rank}")
 
         print(f"Client Sessions: {session_count}")
         print()

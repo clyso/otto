@@ -17,7 +17,7 @@ Newer Ceph versions may add metrics not yet in our schema and allows parsing to 
 from __future__ import annotations
 
 import pathlib
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, RootModel
 
@@ -1312,14 +1312,6 @@ class OSDPerfDumpResponse(BaseModel):
         return cls.loads(raw)
 
 
-# to resolve forward references
-_ = OSDTree.model_rebuild()
-_ = PGDump.model_rebuild()
-_ = OSDDFResponse.model_rebuild()
-_ = OSDDumpResponse.model_rebuild()
-_ = OSDPerfDumpResponse.model_rebuild()
-
-
 class CephfsClient(BaseModel):
     """Schema for CephFS client information from fs status."""
 
@@ -1345,6 +1337,11 @@ class CephfsMDSMapEntry(BaseModel):
     rank: int = Field(default=-1)
     rate: int = Field(default=0)
     state: str = Field(default="")
+
+    # Optional field for source
+    file: Optional[str] = Field(
+        default=None
+    )  # This field is present for the source logic in cephfs session top command
 
 
 class CephfsPool(BaseModel):
@@ -1712,3 +1709,11 @@ class CephfsSessionListResponse(RootModel[list[CephfsSession]]):
             raise FileNotFoundError(f"File not found: {path}")
         raw = path.read_text()
         return cls.loads(raw)
+
+
+# to resolve forward references
+_ = OSDTree.model_rebuild()
+_ = PGDump.model_rebuild()
+_ = OSDDFResponse.model_rebuild()
+_ = OSDDumpResponse.model_rebuild()
+_ = OSDPerfDumpResponse.model_rebuild()
