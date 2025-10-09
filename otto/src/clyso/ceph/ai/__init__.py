@@ -1,5 +1,6 @@
 from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.result import AIResult
+from clyso.ceph.api.schemas import CephReport
 
 from . import config as aiconfig
 from . import report as aireport
@@ -7,13 +8,13 @@ from . import report as aireport
 
 def generate_result(
     ceph_data: CephData | None = None,
-    report_json: dict[str, object] | None = None,
+    report_json: dict[str, object] | CephReport | None = None,
     config_dump_json: list[dict[str, object]] | None = None,
 ) -> AIResult:
     """
     Args:
         ceph_data: CephData object (preferred method)
-        report_json: Legacy parameter for backward compatibility
+        report_json: Legacy parameter for backward compatibility (dict or CephReport)
         config_dump_json: Legacy parameter for backward compatibility
     """
 
@@ -26,6 +27,9 @@ def generate_result(
         if report_json is None:
             report_json = {}
         data = CephData()
+        # Convert dict to CephReport if needed
+        if isinstance(report_json, dict):
+            report_json = CephReport.model_validate(report_json)
         data.add_ceph_report(ceph_report=report_json)
         data.add_ceph_config_dump(ceph_config_dump=config_dump_json)
 
