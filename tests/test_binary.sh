@@ -41,15 +41,14 @@ FAILURES=0
 run_test "./dist/otto --version" "Version command" || ((FAILURES++))
 run_test "./dist/otto --help" "Help command" || ((FAILURES++))
 
-run_test "./dist/otto pools -h" "Pools help command" || ((FAILURES++))
-run_test "./dist/otto pools pg -h" "Pools pg help command" || ((FAILURES++))
+run_test "./dist/otto osd -h" "OSD help command" || ((FAILURES++))
+run_test "./dist/otto pg -h" "PG help command" || ((FAILURES++))
 
 run_test "./dist/otto toolkit -h" "Toolkit help command" || ((FAILURES++))
-run_test "./dist/otto toolkit list" "Toolkit list command" || ((FAILURES++))
+run_test "./dist/otto toolkit echo -h" "Toolkit echo help command" || ((FAILURES++))
 
-run_test "./dist/otto cluster -h" "Cluster help command" || ((FAILURES++))
-run_test "./dist/otto cluster upmap -h" "Cluster upmap help command" || ((FAILURES++))
-run_test "./dist/otto cluster checkup -h" "Cluster checkup help command" || ((FAILURES++))
+run_test "./dist/otto upmap-remapped -h" "Cluster upmap help command" || ((FAILURES++))
+run_test "./dist/otto checkup -h" "Cluster checkup help command" || ((FAILURES++))
 
 if [ -d "tests/reports" ]; then
   echo -e "\n>>> Testing with report files from tests/reports/"
@@ -62,7 +61,7 @@ if [ -d "tests/reports" ]; then
     for report_file in tests/reports/*.json; do
       if [ -f "$report_file" ]; then
         file_name=$(basename "$report_file")
-        run_test "./dist/otto cluster checkup --ceph_report_json $report_file" "Cluster checkup with report $file_name" || ((FAILURES++))
+        run_test "./dist/otto checkup --ceph_report_json $report_file" "Cluster checkup with report $file_name" || ((FAILURES++))
       fi
     done
   else
@@ -72,8 +71,8 @@ else
   echo -e "${YELLOW}Warning${NC}: tests/reports directory not found"
 fi
 
-run_test "./dist/otto cluster checkup --ceph_report_json tests/reports/01.json --ceph-config-dump tests/configs/ceph_cluster_info-config_dump.json" "Cluster checkup with report and config dump" || ((FAILURES++))
-run_test "./dist/otto cluster osd-perf -f tests/osd-perf-dump.json" "OSD perf analysis command" || ((FAILURES++))
+run_test "./dist/otto checkup --ceph_report_json tests/reports/01.json --ceph-config-dump tests/configs/ceph_cluster_info-config_dump.json" "Cluster checkup with report and config dump" || ((FAILURES++))
+run_test "./dist/otto osd perf -f tests/osd-perf-dump.json" "OSD perf analysis command" || ((FAILURES++))
 
 # Summary
 echo -e "\n===== Test Summary ====="

@@ -3,7 +3,8 @@ import json
 import os
 import subprocess
 import sys
-
+from pathlib import Path
+import errno
 import yaml
 
 from clyso.ceph.ai import generate_result
@@ -15,7 +16,7 @@ from clyso.ceph.ai.common import (
 from clyso.ceph.api.commands import ceph_report, ceph_command
 from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.pg import add_command_pg
-from clyso.ceph.otto.upmap import add_command_upmap
+from clyso.ceph.otto.upmap import add_command_upmap_remapped
 from clyso.__version__ import __version__
 
 from clyso.ceph.ai.osd.command import OSDPerfCommand
@@ -44,8 +45,8 @@ def collect_data_source(
     skip_confirmation = getattr(args, "yes", True) if args else True
     if explicit_file:
         try:
-            with open(explicit_file, "r") as file:
-                return json.load(file)
+            file_path = Path(explicit_file)
+            return json.loads(file_path.read_text(encoding="utf-8"))
         except Exception as e:
             if verbose:
                 print(
@@ -338,19 +339,28 @@ def profile_set(args):
         profile_list(args)
         return
 
-    with open(CONFIG_FILE, "w") as f:
-        yaml.dump({"active_profile": profile_name}, f)
+    config_file = Path(CONFIG_FILE)
+    config_data = {"active_profile": profile_name}
+    try:
+        config_file.write_text(yaml.dump(config_data), encoding="utf-8")
+    except Exception as e:
+        print(f"Error writing config file: {e}")
+        return
 
     print(f"Successfully set active tuning profile to '{profile_name}'.")
 
 
 def profile_show(args):
-    if not os.path.exists(CONFIG_FILE):
+    config_file = Path(CONFIG_FILE)
+    if not config_file.exists():
         print("Error: No active tuning profile found.")
         return
 
-    with open(CONFIG_FILE, "r") as f:
-        config = yaml.safe_load(f)
+    try:
+        config = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"Error reading config file: {e}")
+        return
 
     active_profile = config.get("active_profile")
     if not active_profile:
@@ -361,12 +371,16 @@ def profile_show(args):
 
 
 def profile_verify(args):
-    if not os.path.exists(CONFIG_FILE):
+    config_file = Path(CONFIG_FILE)
+    if not config_file.exists():
         print("Error: No active tuning profile found.")
         return
 
-    with open(CONFIG_FILE, "r") as f:
-        config = yaml.safe_load(f)
+    try:
+        config = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"Error reading config file: {e}")
+        return
 
     active_profile = config.get("active_profile")
     if not active_profile:
@@ -397,64 +411,95 @@ def profile_verify(args):
 
 def get_tools_dir():
     tools_dir_candidates = [
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "tools")),
-        "/usr/libexec/otto/tools",
-        "/usr/share/otto/tools",
-        "/usr/lib/otto/tools",
+        (Path(__file__).parent / "tools").resolve(),
+        Path("/usr/libexec/otto/tools"),
+        Path("/usr/share/otto/tools"),
+        Path("/usr/lib/otto/tools"),
     ]
 
     for tools_dir in tools_dir_candidates:
-        if os.path.exists(tools_dir):
+        if tools_dir.exists():
             return tools_dir
 
     return None
 
 
-def list_executable_files(directory):
+def list_executable_files(directory: Path) -> list[str]:
     """
     Recursively lists executable files in the given directory and all subdirectories.
 
     Parameters:
-    directory (str): The path to the directory to search in.
+    directory (Path): The path to the directory to search in.
 
     Returns:
     list: A list of paths to executable files.
     """
-    assert os.path.exists(directory)
-    executable_files = []
+    if not directory.exists():
+        raise FileNotFoundError(errno.ENOENT, f"Directory {directory} does not exist")
+    if not directory.is_dir():
+        raise NotADirectoryError(
+            errno.ENOTDIR, f"Directory {directory} is not a directory"
+        )
+
+    executable_files: list[str] = []
 
     # Walk through the directory
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            file_path = os.path.join(root, file)
-            # Check if the file is executable
-            if os.path.isfile(file_path) and os.access(file_path, os.X_OK):
-                executable_files.append(os.path.relpath(file_path, directory))
+    for file_path in directory.rglob("*"):
+        # Check if the file is executable
+        if file_path.is_file() and os.access(file_path, os.X_OK):
+            executable_files.append(str(file_path.relative_to(directory)))
 
     return executable_files
 
 
-def toolkit_list(args):
+def toolkit_help(args):
     tools_dir = get_tools_dir()
 
-    print(f"Ceph Tools are installed to {tools_dir}")
-    print("\nTools:\n")
-    tools = list_executable_files(tools_dir)
-    for t in tools:
-        print(f"{t}")
-    return
+    if not tools_dir.exists():
+        print("Ceph Tools directory not found", file=sys.stderr)
+        exit(errno.ENOENT)
+
+    try:
+        print("Available scripts:")
+        tools = list_executable_files(tools_dir)
+        for tool in tools:
+            print(f"  {tool}")
+        print("\tUse 'otto toolkit <script> -h' for script-specific help")
+    except (FileNotFoundError, NotADirectoryError) as e:
+        print(f"Error accessing tools directory: {e}", file=sys.stderr)
+        exit(e.errno)
+
+
+def toolkit_echo(args):
+    tools_dir = get_tools_dir()
+    if not tools_dir.exists():
+        print("Ceph Tools directory not found", file=sys.stderr)
+        exit(errno.ENOENT)
+    script_path = tools_dir / args.script
+    if not script_path.exists():
+        print(f"Script {args.script} not found", file=sys.stderr)
+        exit(errno.ENOENT)
+    try:
+        content = script_path.read_text()
+        print(content)
+    except Exception as e:
+        print(f"Error reading script {args.script}: {e}", file=sys.stderr)
+        exit(errno.EIO)
 
 
 def toolkit_run(args):
     tools_dir = get_tools_dir()
-    if not tools_dir:
+    if not tools_dir.exists():
         print("Ceph Tools directory not found", file=sys.stderr)
-        exit(1)
+        exit(errno.ENOENT)
 
-    cmd = [os.path.join(tools_dir, args.tool)] + args.args
-    cmd_str = f"{args.tool} {' '.join(args.args)}"
+    if hasattr(args, "help") and args.help:
+        cmd = [tools_dir / args.script, "-h"]
+    else:
+        cmd = [tools_dir / args.script] + args.args
+        cmd_str = f"{args.script} {' '.join(args.args)}"
+        print(f"Running tool: {cmd_str}")
 
-    print(f"Running tool: {cmd_str}")
     subprocess.run(cmd, check=False)
 
 
@@ -494,7 +539,7 @@ def run_ceph_command(args):
         print(output.decode("utf-8"))
     except subprocess.CalledProcessError as e:
         print(f"Error: {e.output.decode('utf-8')}")
-        exit(1)
+        exit(errno.EIO)
 
 
 def main():
@@ -527,26 +572,8 @@ def main():
     help_parser = subparsers.add_parser("help", help="Show this help message and exit")
     help_parser.set_defaults(func=lambda args: parser.print_help())
 
-    # create the parser for the "cluster" command
-    parser_cluster = subparsers.add_parser(
-        "cluster", help="List of commands related to the cluster"
-    )
-    cluster_subparsers = parser_cluster.add_subparsers(
-        dest="{checkup}", description="valid subcommands", help="additional help"
-    )
-    cluster_subparsers.required = True
-
-    # create the parser for the "pool" command
-    parser_pool = subparsers.add_parser(
-        "pools", help="Operations and management of Ceph pools"
-    )
-    pool_subparsers = parser_pool.add_subparsers(
-        dest="{pg}", description="valid subcommands for pools", help="additional help"
-    )
-    pool_subparsers.required = True
-
     # create the parser for the "checkup" command
-    parser_checkup = cluster_subparsers.add_parser(
+    parser_checkup = subparsers.add_parser(
         "checkup", help="Perform an overall health and safety check on the cluster"
     )
     parser_checkup.add_argument(
@@ -555,6 +582,10 @@ def main():
     parser_checkup.add_argument(
         "--ceph-config-dump", type=str, help="analyze this config dump file"
     )
+    parser_checkup.add_argument("--summary", action="store_true", help="Summary output")
+    parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
+    parser_checkup.set_defaults(func=subcommand_checkup)
+
     # TODO: add back once we start collecting for this
     # parser_checkup.add_argument(
     #     "--ceph-osd-tree", type=str, help="analyze this OSD tree file"
@@ -562,13 +593,17 @@ def main():
     # parser_checkup.add_argument(
     #     "--ceph-pg-dump", type=str, help="analyze this PG dump file"
     # )
-    parser_checkup.add_argument("--summary", action="store_true", help="Summary output")
-    parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
-    parser_checkup.set_defaults(func=subcommand_checkup)
 
-    # Create the parser for the "osd-perf" command
-    parser_osd_perf = cluster_subparsers.add_parser(
-        "osd-perf", help="Analyze OSD performance metrics across the cluster"
+    # create the parser for the "osd" related commands
+    parser_osd = subparsers.add_parser(
+        "osd", help="OSD-related operations and analysis"
+    )
+    osd_subparsers = parser_osd.add_subparsers(description="OSD subcommands")
+    osd_subparsers.required = True
+
+    # OSD Performance command
+    parser_osd_perf = osd_subparsers.add_parser(
+        "perf", help="Analyze OSD performance metrics across the cluster"
     )
     parser_osd_perf.add_argument(
         "osd_id",
@@ -591,8 +626,11 @@ def main():
     )
     parser_osd_perf.set_defaults(func=subcommand_osd_perf)
 
-    # Add the upmap command
-    add_command_upmap(cluster_subparsers)
+    # Create the parser for the "pg" related commands
+    add_command_pg(subparsers)
+
+    # Create the parser for the "upmap" command
+    add_command_upmap_remapped(subparsers)
 
     # HIDE THE PLANNER and PROFILE COMMANDS FOR NOW
 
@@ -640,34 +678,43 @@ def main():
         "toolkit", help="A selection of useful Ceph Tools"
     )
     toolkit_subparsers = parser_toolkit.add_subparsers(
-        dest="{list, run}", help="tool help"
+        dest="toolkit_command", help="A selection of useful Ceph Tools", metavar=""
     )
-    toolkit_subparsers.required = True
+    toolkit_subparsers.required = False
+    parser_toolkit.set_defaults(func=toolkit_help)
 
-    # Create the parser for the "toolkit list" command
-    parser_toolkit_list = toolkit_subparsers.add_parser(
-        "list", help="List the included Ceph tools"
+    parser_echo = toolkit_subparsers.add_parser(
+        "echo", help="Display the contents of a script"
     )
-    parser_toolkit_list.set_defaults(func=toolkit_list)
+    parser_echo.add_argument("script", type=str, help="Name of the script to display")
+    parser_echo.set_defaults(func=toolkit_echo)
 
-    # Create the parser for the "toolkit run" command
-    parser_toolkit_run = toolkit_subparsers.add_parser(
-        "run",
-        help="Run an included Ceph tool",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Example:\n\totto toolkit run contrib/jj_ceph_balancer -h",
-    )
-    parser_toolkit_run.add_argument("tool", type=str, help="tool name")
-    parser_toolkit_run.add_argument(
-        "args",
-        nargs=argparse.REMAINDER,
-        help="Name of the tool to run and its arguments",
-    )
-
-    parser_toolkit_run.set_defaults(func=toolkit_run)
-
-    # Create the parser for "pg" command
-    add_command_pg(pool_subparsers)
+    tools_dir = get_tools_dir()
+    if tools_dir.exists():
+        tools = list_executable_files(tools_dir)
+        for tool in tools:
+            try:
+                parser_tool = toolkit_subparsers.add_parser(
+                    tool,
+                    help=f"Use 'otto toolkit {tool} -h' for help",
+                    add_help=False,
+                    formatter_class=argparse.RawDescriptionHelpFormatter,
+                )
+                parser_tool.add_argument(
+                    "-h",
+                    "--help",
+                    action="store_true",
+                    help=f"Use 'otto toolkit {tool} -h' for help",
+                )
+                parser_tool.add_argument(
+                    "args",
+                    nargs=argparse.REMAINDER,
+                    help=f"Arguments for {tool}",
+                )
+                parser_tool.set_defaults(func=toolkit_run, script=tool)
+            except Exception as e:
+                print(f"Error adding parser for {tool}: {e}", file=sys.stderr)
+                exit(errno.EIO)
 
     # Parse the arguments and call the appropriate function
     args = parser.parse_args()
