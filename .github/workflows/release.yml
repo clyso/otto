@@ -53,6 +53,8 @@ jobs:
 
   upload_binary_to_s3:
     uses: ./.github/workflows/upload-release-s3-job.yml
+    needs: [build_binary, create_release]
+    secrets: inherit
     with:
       artifact_name: binary
       release_tag: ${{ github.ref_name }}
