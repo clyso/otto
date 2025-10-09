@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 import traceback
 from math import ceil, fsum, log2
@@ -6,6 +8,7 @@ import humanize
 from packaging import version
 
 from clyso.ceph.ai.crush import Crush
+from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.helpers import (
     healthdb,
     known_bugs,
@@ -16,6 +19,7 @@ from clyso.ceph.ai.helpers import (
     to_version,
     versiondb,
 )
+from clyso.ceph.ai.result import AIResult
 
 # A list of all check_report functions
 check_functions = []
@@ -28,7 +32,9 @@ def add_check(func):
 
 
 @add_check
-def check_report_header(result, data) -> None:
+def check_report_header(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Cluster"
     check = "Cluster Info"
@@ -47,7 +53,9 @@ def check_report_header(result, data) -> None:
 
 
 @add_check
-def check_report_version(result, data):
+def check_report_version(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
 
     ver = to_version(report.version)
@@ -115,7 +123,9 @@ def _handle_non_recommended_version(result, ver, rec_versions, rec_minor) -> Non
 
 
 @add_check
-def check_report_known_bugs(result, data) -> None:
+def check_report_known_bugs(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Version"
     check = "Check for Known Issues in Running Version"
@@ -152,7 +162,9 @@ def check_report_known_bugs(result, data) -> None:
 
 
 @add_check
-def check_report_mixed_versions(result, data) -> None:
+def check_report_mixed_versions(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Version"
     check = "Mixing Ceph Versions"
@@ -194,7 +206,9 @@ def check_report_mixed_versions(result, data) -> None:
 
 
 @add_check
-def check_report_health(result, data) -> None:
+def check_report_health(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Cluster"
     check = "Health"
@@ -238,7 +252,9 @@ def check_report_health(result, data) -> None:
 
 
 @add_check
-def check_monmap_epoch(result, data) -> None:
+def check_monmap_epoch(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "MON Health"
     check = "Monitor Committed Maps"
@@ -262,7 +278,9 @@ def check_monmap_epoch(result, data) -> None:
 
 
 @add_check
-def check_num_mons(result, data) -> None:
+def check_num_mons(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "MON Health"
     check = "Number of Monitors"
@@ -306,7 +324,9 @@ def check_num_mons(result, data) -> None:
 
 
 @add_check
-def check_even_num_mons(result, data) -> None:
+def check_even_num_mons(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "MON Health"
     check = "Even Number of Monitors"
@@ -337,7 +357,9 @@ def check_even_num_mons(result, data) -> None:
 
 
 @add_check
-def check_report_osdmap(result, data) -> None:
+def check_report_osdmap(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     osdmap = report.osdmap
@@ -407,7 +429,9 @@ def check_report_osdmap(result, data) -> None:
 
 
 @add_check
-def check_report_osd_info(result, data) -> None:
+def check_report_osd_info(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Info"
@@ -431,7 +455,9 @@ def check_report_osd_info(result, data) -> None:
 
 
 @add_check
-def check_report_osd_primary_affinity(result, data) -> None:
+def check_report_osd_primary_affinity(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Check OSD Primary Affinity"
@@ -462,7 +488,9 @@ def check_report_osd_primary_affinity(result, data) -> None:
 
 
 @add_check
-def check_report_osd_weight(result, data) -> None:
+def check_report_osd_weight(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Check OSD Weights"
@@ -495,7 +523,9 @@ def check_report_osd_weight(result, data) -> None:
 
 
 @add_check
-def check_report_pool_info(result, data) -> None:
+def check_report_pool_info(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Info"
@@ -514,7 +544,9 @@ def check_report_pool_info(result, data) -> None:
 
 
 @add_check
-def check_report_capacity_info(result, data) -> None:
+def check_report_capacity_info(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Capacity"
     check = "Info"
@@ -542,7 +574,9 @@ def check_report_capacity_info(result, data) -> None:
 
 
 @add_check
-def check_report_capacity_overfull(result, data) -> None:
+def check_report_capacity_overfull(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Capacity"
     check = "Check Cluster Capacity Fullness"
@@ -591,7 +625,9 @@ def check_report_capacity_overfull(result, data) -> None:
 
 
 @add_check
-def check_report_pool_flags(result, data) -> None:
+def check_report_pool_flags(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Recommended Flags"
@@ -629,7 +665,9 @@ def check_report_pool_flags(result, data) -> None:
 
 
 @add_check
-def check_report_pool_size(result, data) -> None:
+def check_report_pool_size(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Pool Sizing"
@@ -644,9 +682,9 @@ def check_report_pool_size(result, data) -> None:
         if p.type == 1:
             if size < 3:
                 passfail = "WARN"
-                detail.append(f"Replicated pool {p['pool_name']} has size {size}.")
+                detail.append(f"Replicated pool {p.pool_name} has size {size}.")
                 recommend.append(
-                    f"Increase size on pool {p['pool_name']} to 3 to minimize the likelihood of data loss."
+                    f"Increase size on pool {p.pool_name} to 3 to minimize the likelihood of data loss."
                 )
             if min_size < 2:
                 passfail = "FAIL"
@@ -683,7 +721,9 @@ def check_report_pool_size(result, data) -> None:
 
 
 @add_check
-def check_report_pool_autoscale(result, data) -> None:
+def check_report_pool_autoscale(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Pool Autoscale Mode"
@@ -722,7 +762,9 @@ def check_report_pool_autoscale(result, data) -> None:
 
 
 @add_check
-def check_report_rbd_pools(result, data) -> None:
+def check_report_rbd_pools(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "RBD Pools"
@@ -749,7 +791,9 @@ def check_report_rbd_pools(result, data) -> None:
 
 
 @add_check
-def check_report_pool_min_pgnum(result, data) -> None:
+def check_report_pool_min_pgnum(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Minimum PG Count"
@@ -794,13 +838,13 @@ def check_report_pool_min_pgnum(result, data) -> None:
             summary = "Pools have pg_num lower recommended minimum"
             pg_type = "shard" if p.type == 3 else "replica"
             detail.append(
-                f"Pool {p['pool_name']} with current pg_num {p['pg_num']} has "
+                f"Pool {p.pool_name} with current pg_num {p.pg_num} has "
                 f"fewer {pg_type}s ({pg_shard_num}) than OSDs ({osd_num}).",
             )
             recom_pg_num = ceil(osd_num / p.size)
             recom_pg_num = 2 ** ceil(log2(recom_pg_num))  # nearest power of 2
             recommend.append(
-                f"Set pg_num to {recom_pg_num} for pool {p['pool_name']} "
+                f"Set pg_num to {recom_pg_num} for pool {p.pool_name} "
                 f"to have at least one {pg_type} per OSD.",
             )
 
@@ -811,7 +855,9 @@ def check_report_pool_min_pgnum(result, data) -> None:
 
 
 @add_check
-def check_report_pool_crush_domain_buckets(result, data) -> None:
+def check_report_pool_crush_domain_buckets(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Pool CRUSH Failure Domain Buckets"
@@ -864,7 +910,9 @@ def check_report_pool_crush_domain_buckets(result, data) -> None:
 
 
 @add_check
-def check_report_pool_zero_weight_buckets(result, data) -> None:
+def check_report_pool_zero_weight_buckets(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Zero weight buckets in CRUSH Tree"
@@ -910,7 +958,9 @@ def check_report_pool_zero_weight_buckets(result, data) -> None:
 
 
 @add_check
-def check_report_pool_crush_tree_balanced(result, data) -> None:
+def check_report_pool_crush_tree_balanced(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "CRUSH Tree Balanced"
@@ -967,7 +1017,9 @@ def check_report_pool_crush_tree_balanced(result, data) -> None:
 
 
 @add_check
-def check_report_pool_avg_object_size(result, data) -> None:
+def check_report_pool_avg_object_size(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Pool Average Object Size"
@@ -1004,7 +1056,7 @@ def check_report_pool_avg_object_size(result, data) -> None:
             if avg_obj_size < 4096:
                 passfail = "WARN"
                 detail.append(
-                    f"Average object size for replicated pool {p['pool_name']} "
+                    f"Average object size for replicated pool {p.pool_name} "
                     f"is {avg_obj_size:g} bytes.",
                 )
                 recommend.append(
@@ -1036,7 +1088,9 @@ def check_report_pool_avg_object_size(result, data) -> None:
 
 
 @add_check
-def check_report_pool_space_amplification(result, data) -> None:
+def check_report_pool_space_amplification(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Pool Space Amplification"
@@ -1106,7 +1160,9 @@ def check_report_pool_space_amplification(result, data) -> None:
 
 
 @add_check
-def check_report_pool_cache_tiering(result, data) -> None:
+def check_report_pool_cache_tiering(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Cache Tiering"
@@ -1165,7 +1221,9 @@ def check_report_pool_cache_tiering(result, data) -> None:
 
 
 @add_check
-def check_report_pg_upmap(result, data) -> None:
+def check_report_pg_upmap(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Check osdmap pg_upmap list"
@@ -1199,7 +1257,9 @@ def check_report_pg_upmap(result, data) -> None:
 
 
 @add_check
-def check_report_journal_rotational(result, data) -> None:
+def check_report_journal_rotational(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     osd_metadata = data.ceph_report.osd_metadata
     section = "OSD Health"
     check = "Check BlueFS DB/Journal is on Flash"
@@ -1234,7 +1294,9 @@ def check_report_journal_rotational(result, data) -> None:
 
 
 @add_check
-def check_report_bluefs_db_size(result, data) -> None:
+def check_report_bluefs_db_size(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     min_bluefs_db_size = 10737418240  # 10G
     osd_metadata = data.ceph_report.osd_metadata
     section = "OSD Health"
@@ -1270,7 +1332,9 @@ def check_report_bluefs_db_size(result, data) -> None:
 
 
 @add_check
-def check_report_bluefs_wal_size(result, data) -> None:
+def check_report_bluefs_wal_size(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     min_bluefs_wal_size = 1073741824  # 1G
     osd_metadata = data.ceph_report.osd_metadata
     section = "OSD Health"
@@ -1306,7 +1370,9 @@ def check_report_bluefs_wal_size(result, data) -> None:
 
 
 @add_check
-def check_report_bluestore_min_alloc_size(result, data) -> None:
+def check_report_bluestore_min_alloc_size(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     osd_metadata = data.ceph_report.osd_metadata
     section = "OSD Health"
     check = "OSD bluestore min_alloc_size"
@@ -1348,7 +1414,9 @@ def check_report_bluestore_min_alloc_size(result, data) -> None:
 
 
 @add_check
-def check_report_host_memory(result, data) -> None:
+def check_report_host_memory(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     MEM_PER_OSD_CRITICAL = 2 * 1024 * 1024 * 1024  # 2G
     MEM_PER_OSD_WARNING = 4 * 1024 * 1024 * 1024  # 4G
 
@@ -1367,8 +1435,8 @@ def check_report_host_memory(result, data) -> None:
             return
         if host not in hosts:
             mem_total_kb = getattr(osd, "mem_total_kb", None)
-            if mem_total_kb is None:
-                # Old version
+            if mem_total_kb is None or mem_total_kb == "":
+                # Old version or missing data
                 return
             mem_total = int(mem_total_kb) * 1024
             hosts[host] = {
@@ -1417,7 +1485,9 @@ def check_report_host_memory(result, data) -> None:
 
 
 @add_check
-def check_report_host_swap(result, data) -> None:
+def check_report_host_swap(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     osd_metadata = data.ceph_report.osd_metadata
     section = "OSD Health"
     check = "OSD host swap"
@@ -1437,8 +1507,8 @@ def check_report_host_swap(result, data) -> None:
         hosts.add(name)
 
         mem_swap_kb = getattr(osd, "mem_swap_kb", None)
-        if mem_swap_kb is None:
-            # Old version
+        if mem_swap_kb is None or mem_swap_kb == "":
+            # Old version or missing data
             return
         swap = int(mem_swap_kb) > 0
 
@@ -1470,7 +1540,9 @@ def check_report_host_swap(result, data) -> None:
 
 
 @add_check
-def check_report_num_osdmaps(result, data) -> None:
+def check_report_num_osdmaps(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Check number of osdmaps stored"
@@ -1508,7 +1580,9 @@ def check_report_num_osdmaps(result, data) -> None:
 
 
 @add_check
-def check_report_crush_tunables_optimal(result, data) -> None:
+def check_report_crush_tunables_optimal(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Check CRUSH Tunables"
@@ -1559,7 +1633,9 @@ def check_report_crush_tunables_optimal(result, data) -> None:
 
 
 @add_check
-def check_report_fsmap_info(result, data) -> None:
+def check_report_fsmap_info(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "CephFS"
     check = "CephFS Info"
@@ -1577,7 +1653,9 @@ def check_report_fsmap_info(result, data) -> None:
 
 
 @add_check
-def check_report_fsmap_multi_mds(result, data) -> None:
+def check_report_fsmap_multi_mds(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "CephFS"
     check = "Multi-MDS Safety"
@@ -1613,7 +1691,9 @@ def check_report_fsmap_multi_mds(result, data) -> None:
 
 
 @add_check
-def check_report_osd_cluster_network(result, data) -> None:
+def check_report_osd_cluster_network(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Dedicated Cluster Network"
@@ -1652,7 +1732,9 @@ def check_report_osd_cluster_network(result, data) -> None:
 
 
 @add_check
-def check_report_operating_system(result, data) -> None:
+def check_report_operating_system(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Operating System"
     check = "OS Support"
@@ -1730,7 +1812,8 @@ def check_report_operating_system(result, data) -> None:
 # Warning any non-active PGs
 
 
-def update_result(res, data) -> None:
+def update_result(res: AIResult, data: CephData) -> None:
+    assert data.ceph_report is not None, "ceph_report must be present"
     for c in check_functions:
         try:
             c(res, data)
