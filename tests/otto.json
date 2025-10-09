@@ -1,8 +1,8 @@
 {
   "summary": {
-    "score": 26.0,
+    "score": 24.5,
     "grade": "F",
-    "max_score": 33
+    "max_score": 32
   },
   "sections": [
     {
@@ -130,8 +130,8 @@
     },
     {
       "id": "Pools",
-      "score": 8.5,
-      "max_score": 10,
+      "score": 7.5,
+      "max_score": 9,
       "summary": "",
       "info": [
         {
@@ -230,15 +230,6 @@
           "recommend": []
         },
         {
-          "id": "Pool Space Amplification",
-          "result": "PASS",
-          "summary": "All pools have low space amplification",
-          "detail": [
-            "For all pools space amplification is close to 1"
-          ],
-          "recommend": []
-        },
-        {
           "id": "Cache Tiering",
           "result": "PASS",
           "summary": "Cache tiering is not used",
@@ -319,7 +310,7 @@
     },
     {
       "id": "OSD Health",
-      "score": 10.0,
+      "score": 9.5,
       "max_score": 13,
       "summary": "",
       "info": [
@@ -332,12 +323,14 @@
       "checks": [
         {
           "id": "Check osdmap flags",
-          "result": "PASS",
-          "summary": "OSDMap has correct flags set.",
+          "result": "WARN",
+          "summary": "Unable to check osdmap flags",
           "detail": [
-            "osdmap has the expected flags: pglog_hardlimit, purged_snapdirs, recovery_deletes, sortbitwise"
+            "Ceph report does not include the osdmap flags_set field."
           ],
-          "recommend": []
+          "recommend": [
+            "Contact support@clyso.com for assistance."
+          ]
         },
         {
           "id": "Check require_osd_release flag",
@@ -346,7 +339,9 @@
           "detail": [
             "require_osd_release pacific matches running release pacific"
           ],
-          "recommend": []
+          "recommend": [
+            "Contact support@clyso.com for assistance."
+          ]
         },
         {
           "id": "Check OSD Primary Affinity",

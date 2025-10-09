@@ -3,6 +3,7 @@ import sys
 import argparse
 import math
 from pathlib import Path
+from clyso.ceph.api.schemas import CephReport
 
 CEPH_FILES = {
     "ceph-report": "cluster_health-report",
@@ -36,11 +37,12 @@ def json_load(f):
     return json_loads(f.read())
 
 
-def load_ceph_report_file(filepath):
+def load_ceph_report_file(filepath) -> CephReport:
     """Load and parse ceph report file"""
     try:
         content = Path(filepath).read_text()
-        return json_loads(content)
+        raw_data = json_loads(content)
+        return CephReport.model_validate(raw_data)
     except Exception as e:
         print(
             f"Error: Failed to read ceph report from {filepath}: {e}",

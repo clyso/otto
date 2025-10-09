@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 import traceback
 from math import ceil, fsum, log2
@@ -6,6 +8,7 @@ import humanize
 from packaging import version
 
 from clyso.ceph.ai.crush import Crush
+from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.helpers import (
     healthdb,
     known_bugs,
@@ -16,6 +19,7 @@ from clyso.ceph.ai.helpers import (
     to_version,
     versiondb,
 )
+from clyso.ceph.ai.result import AIResult
 
 # A list of all check_report functions
 check_functions = []
@@ -28,15 +32,17 @@ def add_check(func):
 
 
 @add_check
-def check_report_header(result, data) -> None:
+def check_report_header(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Cluster"
     check = "Cluster Info"
 
-    id = report["monmap"]["fsid"]
-    v = report["version"]
-    ts = report["timestamp"]
-    ctime = report["monmap"]["created"]
+    id = report.monmap.fsid
+    v = report.version
+    ts = report.timestamp
+    ctime = report.monmap.created
 
     summary = f"Cluster info for fsid {id}"
     detail = [f"Version {v}"]
@@ -47,10 +53,12 @@ def check_report_header(result, data) -> None:
 
 
 @add_check
-def check_report_version(result, data):
+def check_report_version(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
 
-    ver = to_version(report["version"])
+    ver = to_version(report.version)
     major = to_major(ver)
     release_info = versiondb["releases"].get(major, {})
 
@@ -115,7 +123,9 @@ def _handle_non_recommended_version(result, ver, rec_versions, rec_minor) -> Non
 
 
 @add_check
-def check_report_known_bugs(result, data) -> None:
+def check_report_known_bugs(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Version"
     check = "Check for Known Issues in Running Version"
@@ -125,11 +135,10 @@ def check_report_known_bugs(result, data) -> None:
 
     summary = "No known severe bugs in running release"
 
-    # look for low severity bugs
-    (last_updated, bugs) = known_bugs(report["version"], "low")
+    (last_updated, bugs) = known_bugs(report.version, "low")
     for bug in bugs:
         passfail = "WARN"
-        summary = f"Info: Found {len(bugs)} low severity issue(s) in running version {report['version']}"
+        summary = f"Info: Found {len(bugs)} low severity issue(s) in running version {report.version}"
         detail.append(
             f"{bug['name']} (severity: {bug['severity']}): {bug['description']}"
         )
@@ -137,10 +146,10 @@ def check_report_known_bugs(result, data) -> None:
             f"{bug['name']} (severity: {bug['severity']}): {bug['recommendation']}"
         )
 
-    (last_updated, bugs) = known_bugs(report["version"], "high")
+    (last_updated, bugs) = known_bugs(report.version, "high")
     for bug in bugs:
         passfail = "FAIL"
-        summary = f"CRITICAL: Found {len(bugs)} high severity bugs(s) in running version {report['version']}"
+        summary = f"CRITICAL: Found {len(bugs)} high severity bugs(s) in running version {report.version}"
         detail.append(
             f"{bug['name']} (severity: {bug['severity']}): {bug['description']}"
         )
@@ -153,22 +162,24 @@ def check_report_known_bugs(result, data) -> None:
 
 
 @add_check
-def check_report_mixed_versions(result, data) -> None:
+def check_report_mixed_versions(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Version"
     check = "Mixing Ceph Versions"
     detail = []
     recommend = []
 
-    report["version"]
-    osds = report["osd_metadata"]
+    report.version
+    osds = report.osd_metadata
 
     versions = []
     for osd in osds:
-        if "ceph_version_short" in osd:
-            v = osd["ceph_version_short"]
-        elif "ceph_version" in osd:
-            v = osd["ceph_version"]
+        if hasattr(osd, "ceph_version_short"):
+            v = osd.ceph_version_short
+        elif hasattr(osd, "ceph_version"):
+            v = osd.ceph_version
         else:
             continue
         if v not in versions:
@@ -195,33 +206,35 @@ def check_report_mixed_versions(result, data) -> None:
 
 
 @add_check
-def check_report_health(result, data) -> None:
+def check_report_health(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Cluster"
     check = "Health"
     recommend = []
 
-    health = report["health"]
+    health = report.health
 
-    if health["status"] == "HEALTH_OK":
+    if health.status == "HEALTH_OK":
         summary = "HEALTH_OK"
         detail = ["Cluster is healthy"]
         result.add_check_result(section, check, "PASS", summary, detail, recommend)
         return
 
-    summary = f"{health['status']} with {len(health['checks'])} warnings"
+    summary = f"{health.status} with {len(health.checks)} warnings"
     detail = []
-    for c, d in health["checks"].items():
+    for c, d in health.checks.items():
         detail.append(
-            f"Internal health check {c} with severity {d['severity']} reports {d['summary']['message']}"
+            f"Internal health check {c} with severity {d.severity} reports {d.summary.message}"
         )
         advice = healthdb["warnings"].get(c)
         if advice:
             recommend.append(advice)
 
-    if health["status"] == "HEALTH_WARN":
+    if health.status == "HEALTH_WARN":
         passfail = "WARN"
-    if health["status"] == "HEALTH_ERR":
+    if health.status == "HEALTH_ERR":
         passfail = "FAIL"
     result.add_check_result(section, check, passfail, summary, detail, recommend)
 
@@ -239,13 +252,15 @@ def check_report_health(result, data) -> None:
 
 
 @add_check
-def check_monmap_epoch(result, data) -> None:
+def check_monmap_epoch(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "MON Health"
     check = "Monitor Committed Maps"
     recommend = []
 
-    monmap_epoch = report["monmap"]["epoch"]
+    monmap_epoch = report.monmap.epoch
 
     if monmap_epoch > 100:
         summary = "Large number of monmaps"
@@ -263,14 +278,16 @@ def check_monmap_epoch(result, data) -> None:
 
 
 @add_check
-def check_num_mons(result, data) -> None:
+def check_num_mons(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "MON Health"
     check = "Number of Monitors"
     summary = ""
 
-    num_mons = len(report["monmap"]["mons"])
-    num_osds = len(report["osdmap"]["osds"])
+    num_mons = len(report.monmap.mons)
+    num_osds = len(report.osdmap.osds)
 
     if num_mons > 5:
         summary = "Too many Monitors"
@@ -307,12 +324,14 @@ def check_num_mons(result, data) -> None:
 
 
 @add_check
-def check_even_num_mons(result, data) -> None:
+def check_even_num_mons(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "MON Health"
     check = "Even Number of Monitors"
 
-    num_mons = len(report["monmap"]["mons"])
+    num_mons = len(report.monmap.mons)
     if num_mons % 2 == 0:
         summary = "Even number of Monitors"
         detail = [
@@ -338,10 +357,12 @@ def check_even_num_mons(result, data) -> None:
 
 
 @add_check
-def check_report_osdmap(result, data) -> None:
+def check_report_osdmap(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
-    osdmap = report["osdmap"]
+    osdmap = report.osdmap
     check = "Check osdmap flags"
     recommend = []
     passfail = "PASS"
@@ -356,7 +377,7 @@ def check_report_osdmap(result, data) -> None:
         ]
         missing = []
         for f in flags:
-            if f not in osdmap["flags_set"]:
+            if f not in osdmap.flags_set:
                 passfail = "FAIL"
                 missing.append(f)
         if passfail == "FAIL":
@@ -384,8 +405,8 @@ def check_report_osdmap(result, data) -> None:
 
     # check require_osd_release
     check = "Check require_osd_release flag"
-    major = to_major(report["version"])
-    r_o_r = osdmap["require_osd_release"]
+    major = to_major(report.version)
+    r_o_r = osdmap.require_osd_release
     running_release = to_release(major)
     if r_o_r != running_release:
         summary = "CRITICAL: require_osd_release is incorrect!"
@@ -408,12 +429,14 @@ def check_report_osdmap(result, data) -> None:
 
 
 @add_check
-def check_report_osd_info(result, data) -> None:
+def check_report_osd_info(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Info"
 
-    osds = report["osdmap"]["osds"]
+    osds = report.osdmap.osds
     num_osds = len(osds)
     summary = f"Cluster has {num_osds} OSDs configured"
     detail = []
@@ -432,16 +455,18 @@ def check_report_osd_info(result, data) -> None:
 
 
 @add_check
-def check_report_osd_primary_affinity(result, data) -> None:
+def check_report_osd_primary_affinity(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Check OSD Primary Affinity"
 
-    osds = report["osdmap"]["osds"]
+    osds = report.osdmap.osds
     bad = []
     for o in osds:
-        if o["primary_affinity"] != 1:
-            bad.append(str(o["osd"]))
+        if o.primary_affinity != 1:
+            bad.append(str(o.osd))
     if bad:
         passfail = "FAIL"
         summary = "Some OSDs have suboptimal primary-affinity"
@@ -463,16 +488,18 @@ def check_report_osd_primary_affinity(result, data) -> None:
 
 
 @add_check
-def check_report_osd_weight(result, data) -> None:
+def check_report_osd_weight(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Check OSD Weights"
 
-    osds = report["osdmap"]["osds"]
+    osds = report.osdmap.osds
     bad = []
     for o in osds:
-        if o["in"] == 1 and o["weight"] != 1:
-            bad.append(str(o["osd"]))
+        if o.in_field == 1 and o.weight != 1:
+            bad.append(str(o.osd))
     if bad:
         passfail = "FAIL"
         summary = "Some OSDs have suboptimal weights"
@@ -496,45 +523,49 @@ def check_report_osd_weight(result, data) -> None:
 
 
 @add_check
-def check_report_pool_info(result, data) -> None:
+def check_report_pool_info(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Info"
 
-    pools = report["osdmap"]["pools"]
+    pools = report.osdmap.pools
     num_pools = len(pools)
     summary = f"Cluster has {num_pools} pools configured"
     detail = []
     for p in pools:
-        ptype = "EC" if p["type"] == 3 else "replica"
-        create_time = p.get("create_time", "unknown")
+        ptype = "EC" if p.type == 3 else "replica"
+        create_time = p.create_time or "unknown"
         detail.append(
-            f"Pool {p['pool_name']} with {ptype} size {p['size']}, created {create_time}"
+            f"Pool {p.pool_name} with {ptype} size {p.size}, created {create_time}"
         )
     result.add_info_result(section, check, summary, detail)
 
 
 @add_check
-def check_report_capacity_info(result, data) -> None:
+def check_report_capacity_info(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Capacity"
     check = "Info"
     summary = "Cluster Capacity Info"
     detail = []
 
-    pool_sum = report["pool_sum"]
-    osd_sum = report["osd_sum"]
-    report["pool_stats"]
+    pool_sum = report.pool_sum
+    osd_sum = report.osd_sum
+    report.pool_stats
 
     total_pool_size = humanize.naturalsize(
-        pool_sum["stat_sum"]["num_bytes"], binary=True
+        pool_sum.stat_sum.num_bytes, binary=True
     )
-    total_pool_objects = humanize.intword(pool_sum["stat_sum"]["num_objects"])
+    total_pool_objects = humanize.intword(pool_sum.stat_sum.num_objects)
     detail.append(f"Pools storing {total_pool_size} and {total_pool_objects} objects")
 
-    total_osd_size = humanize.naturalsize(osd_sum["kb"] * 1024, binary=True)
-    total_osd_used = humanize.naturalsize(osd_sum["kb_used"] * 1024, binary=True)
-    total_osd_avail = humanize.naturalsize(osd_sum["kb_avail"] * 1024, binary=True)
+    total_osd_size = humanize.naturalsize(osd_sum.kb * 1024, binary=True)
+    total_osd_used = humanize.naturalsize(osd_sum.kb_used * 1024, binary=True)
+    total_osd_avail = humanize.naturalsize(osd_sum.kb_avail * 1024, binary=True)
     detail.append(
         f"OSD total capacity {total_osd_size}. Used: {total_osd_used}. Available: {total_osd_avail}."
     )
@@ -543,7 +574,9 @@ def check_report_capacity_info(result, data) -> None:
 
 
 @add_check
-def check_report_capacity_overfull(result, data) -> None:
+def check_report_capacity_overfull(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Capacity"
     check = "Check Cluster Capacity Fullness"
@@ -551,14 +584,14 @@ def check_report_capacity_overfull(result, data) -> None:
     detail = []
     recommend = []
 
-    report["pool_sum"]
-    osd_sum = report["osd_sum"]
-    report["pool_stats"]
+    report.pool_sum
+    osd_sum = report.osd_sum
+    report.pool_stats
 
-    humanize.naturalsize(osd_sum["kb"] * 1024, binary=True)
-    humanize.naturalsize(osd_sum["kb_used"] * 1024, binary=True)
+    humanize.naturalsize(osd_sum.kb * 1024, binary=True)
+    humanize.naturalsize(osd_sum.kb_used * 1024, binary=True)
 
-    if osd_sum["kb"] == 0:
+    if osd_sum.kb == 0:
         passfail = "WARN"
         summary = "Unable to calculate cluster capacity"
         detail.append("Cluster capacity data is unavailable or zero.")
@@ -568,7 +601,7 @@ def check_report_capacity_overfull(result, data) -> None:
         result.add_check_result(section, check, passfail, summary, detail, recommend)
         return
 
-    percent_used = osd_sum["kb_used"] / osd_sum["kb"]
+    percent_used = osd_sum.kb_used / osd_sum.kb
 
     if percent_used > 0.9:
         passfail = "FAIL"
@@ -592,7 +625,9 @@ def check_report_capacity_overfull(result, data) -> None:
 
 
 @add_check
-def check_report_pool_flags(result, data) -> None:
+def check_report_pool_flags(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Recommended Flags"
@@ -602,15 +637,15 @@ def check_report_pool_flags(result, data) -> None:
         "nodelete",
         "nosizechange",
     ]
-    pools = report["osdmap"]["pools"]
+    pools = report.osdmap.pools
     detail = []
     passfail = "PASS"
     for f in flags:
         pools_missing_flag = []
         for p in pools:
-            if f not in p["flags_names"]:
+            if f not in p.flags_names:
                 passfail = "FAIL"
-                pools_missing_flag.append(p["pool_name"])
+                pools_missing_flag.append(p.pool_name)
         if pools_missing_flag:
             detail.append(
                 f"Pools missing recommended '{f}' flag: {', '.join(pools_missing_flag)}"
@@ -630,46 +665,48 @@ def check_report_pool_flags(result, data) -> None:
 
 
 @add_check
-def check_report_pool_size(result, data) -> None:
+def check_report_pool_size(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Pool Sizing"
 
     # check pool size/min_size
-    pools = report["osdmap"]["pools"]
+    pools = report.osdmap.pools
     detail = []
     recommend = []
     for p in pools:
-        size = p["size"]
-        min_size = p["min_size"]
-        if p["type"] == 1:
+        size = p.size
+        min_size = p.min_size
+        if p.type == 1:
             if size < 3:
                 passfail = "WARN"
-                detail.append(f"Replicated pool {p['pool_name']} has size {size}.")
+                detail.append(f"Replicated pool {p.pool_name} has size {size}.")
                 recommend.append(
-                    f"Increase size on pool {p['pool_name']} to 3 to minimize the likelihood of data loss."
+                    f"Increase size on pool {p.pool_name} to 3 to minimize the likelihood of data loss."
                 )
             if min_size < 2:
                 passfail = "FAIL"
                 detail.append(
-                    f"Replicated pool {p['pool_name']} has min_size {min_size}."
+                    f"Replicated pool {p.pool_name} has min_size {min_size}."
                 )
                 recommend.append(
-                    f"Increase min_size on pool {p['pool_name']} to 2 to minimize the likelihood of data loss."
+                    f"Increase min_size on pool {p.pool_name} to 2 to minimize the likelihood of data loss."
                 )
-        elif p["type"] == 3:
-            profile_name = p["erasure_code_profile"]
-            profile = report["osdmap"]["erasure_code_profiles"].get(profile_name)
+        elif p.type == 3:
+            profile_name = p.erasure_code_profile
+            profile = report.osdmap.erasure_code_profiles.get(profile_name)
             if not profile:
                 # FIXME: do not silently ignore?
                 continue
             expected_min_size = int(profile["k"]) + 1
             if min_size < expected_min_size:
                 detail.append(
-                    f"Erasure {profile['k']}+{profile['m']} pool {p['pool_name']} has min_size {min_size}."
+                    f"Erasure {profile['k']}+{profile['m']} pool {p.pool_name} has min_size {min_size}."
                 )
                 recommend.append(
-                    f"Increase min_size on pool {p['pool_name']} to {expected_min_size} to minimize likelihood of data loss."
+                    f"Increase min_size on pool {p.pool_name} to {expected_min_size} to minimize likelihood of data loss."
                 )
 
     if not detail:
@@ -684,13 +721,15 @@ def check_report_pool_size(result, data) -> None:
 
 
 @add_check
-def check_report_pool_autoscale(result, data) -> None:
+def check_report_pool_autoscale(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Pool Autoscale Mode"
 
-    pools = report["osdmap"]["pools"]
-    report["version"].split("-")[0]
+    pools = report.osdmap.pools
+    report.version.split("-")[0]
     detail = []
     recommend = []
     summary = "All pools have pg_autoscaler disabled"
@@ -698,14 +737,14 @@ def check_report_pool_autoscale(result, data) -> None:
     affected_pools = []
     for p in pools:
         try:
-            mode = p["pg_autoscale_mode"]
+            mode = p.pg_autoscale_mode
         except KeyError:
             # Old version, no pg_autoscale_mode flag
             return
         if mode == "on":
             passfail = "WARN"
             summary = "pg_autoscaler is on which may cause unexpected data movement"
-            affected_pools.append(p["pool_name"])
+            affected_pools.append(p.pool_name)
 
     if passfail == "PASS":
         detail.append(
@@ -723,13 +762,15 @@ def check_report_pool_autoscale(result, data) -> None:
 
 
 @add_check
-def check_report_rbd_pools(result, data) -> None:
+def check_report_rbd_pools(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "RBD Pools"
 
-    pools = report["osdmap"]["pools"]
-    rbd_pools = [p["pool_name"] for p in pools if "rbd" in p["application_metadata"]]
+    pools = report.osdmap.pools
+    rbd_pools = [p.pool_name for p in pools if "rbd" in p.application_metadata]
 
     if len(rbd_pools) < 5:
         return
@@ -750,28 +791,30 @@ def check_report_rbd_pools(result, data) -> None:
 
 
 @add_check
-def check_report_pool_min_pgnum(result, data) -> None:
+def check_report_pool_min_pgnum(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Minimum PG Count"
 
-    pools = report["osdmap"]["pools"]
-    pool_stats = {p["poolid"]: p for p in report["pool_stats"]}
+    pools = report.osdmap.pools
+    pool_stats = {p.poolid: p for p in report.pool_stats}
     detail = []
     recommend = []
     summary = "All pools have pg_num higher or equal recommended minimum"
     passfail = "PASS"
-    crush = Crush(report["crushmap"])
+    crush = Crush(report.crushmap)
     for p in pools:
         application = (
-            len(p["application_metadata"])
-            and next(iter(p["application_metadata"].keys()))
+            len(p.application_metadata)
+            and next(iter(p.application_metadata.keys()))
         ) or None
         if application in ("mgr", "mgr_devicehealth"):
             # MGR special pools
             continue
-        p["pg_num"]
-        crush_rule = crush.get_rule_by_id(p["crush_rule"])
+        p.pg_num
+        crush_rule = crush.get_rule_by_id(p.crush_rule)
         if not crush_rule:
             # FIXME: do not silently ignore?
             continue
@@ -779,29 +822,29 @@ def check_report_pool_min_pgnum(result, data) -> None:
         if not crush_rule:
             # FIXME: do not silently ignore?
             continue
-        stats = pool_stats.get(p["pool"])
+        stats = pool_stats.get(p.pool)
         if not stats:
             continue
-        pg_num_objects = stats["stat_sum"]["num_objects"]
-        total_num_objects = report["pool_sum"]["stat_sum"]["num_objects"]
+        pg_num_objects = stats.stat_sum.num_objects
+        total_num_objects = report.pool_sum.stat_sum.num_objects
         if pg_num_objects < total_num_objects * 0.01:
             # We don't care much about small pools
             continue
 
         osd_num = len(set(crush.get_osds_under(root_id)))
-        pg_shard_num = p["pg_num"] * p["size"]
+        pg_shard_num = p.pg_num * p.size
         if pg_shard_num < osd_num:
             passfail = "FAIL"
             summary = "Pools have pg_num lower recommended minimum"
-            pg_type = "shard" if p["type"] == 3 else "replica"
+            pg_type = "shard" if p.type == 3 else "replica"
             detail.append(
-                f"Pool {p['pool_name']} with current pg_num {p['pg_num']} has "
+                f"Pool {p.pool_name} with current pg_num {p.pg_num} has "
                 f"fewer {pg_type}s ({pg_shard_num}) than OSDs ({osd_num}).",
             )
-            recom_pg_num = ceil(osd_num / p["size"])
+            recom_pg_num = ceil(osd_num / p.size)
             recom_pg_num = 2 ** ceil(log2(recom_pg_num))  # nearest power of 2
             recommend.append(
-                f"Set pg_num to {recom_pg_num} for pool {p['pool_name']} "
+                f"Set pg_num to {recom_pg_num} for pool {p.pool_name} "
                 f"to have at least one {pg_type} per OSD.",
             )
 
@@ -812,19 +855,21 @@ def check_report_pool_min_pgnum(result, data) -> None:
 
 
 @add_check
-def check_report_pool_crush_domain_buckets(result, data) -> None:
+def check_report_pool_crush_domain_buckets(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Pool CRUSH Failure Domain Buckets"
 
-    pools = report["osdmap"]["pools"]
+    pools = report.osdmap.pools
     detail = []
     recommend = []
     passfail = "PASS"
     failed_count = 0
-    crush = Crush(report["crushmap"])
+    crush = Crush(report.crushmap)
     for p in pools:
-        rool_id = p["crush_rule"]
+        rool_id = p.crush_rule
         crush_rule = crush.get_rule_by_id(rool_id)
         if not crush_rule:
             # FIXME: do not silently ignore?
@@ -838,19 +883,19 @@ def check_report_pool_crush_domain_buckets(result, data) -> None:
             # FIXME: do not silently ignore?
             continue
         items_num = len(set(crush.get_items_of_type_under(item_type, root_id)))
-        if items_num < p["size"] + 1:
+        if items_num < p.size + 1:
             failed_count += 1
-            if items_num < p["size"]:
+            if items_num < p.size:
                 passfail = "FAIL"
             elif passfail != "FAIL":
                 passfail = "WARN"
             detail.append(
-                f"Pool {p['pool_name']} with size {p['size']} has "
+                f"Pool {p.pool_name} with size {p.size} has "
                 f"only {items_num} {item_type} items.",
             )
             recommend.append(
-                f"You need to have at least {p['size'] + 1} {item_type} items "
-                f"for pool {p['pool_name']} to avoid degraded state in case of "
+                f"You need to have at least {p.size + 1} {item_type} items "
+                f"for pool {p.pool_name} to avoid degraded state in case of "
                 f"a {item_type} failure.",
             )
 
@@ -865,19 +910,21 @@ def check_report_pool_crush_domain_buckets(result, data) -> None:
 
 
 @add_check
-def check_report_pool_zero_weight_buckets(result, data) -> None:
+def check_report_pool_zero_weight_buckets(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Zero weight buckets in CRUSH Tree"
 
-    pools = report["osdmap"]["pools"]
+    pools = report.osdmap.pools
     detail = []
     recommend = []
     passfail = "PASS"
     failed_count = 0
-    crush = Crush(report["crushmap"])
+    crush = Crush(report.crushmap)
     for p in pools:
-        rool_id = p["crush_rule"]
+        rool_id = p.crush_rule
         crush_rule = crush.get_rule_by_id(rool_id)
         if not crush_rule:
             # FIXME: do not silently ignore?
@@ -894,7 +941,7 @@ def check_report_pool_zero_weight_buckets(result, data) -> None:
         if buckets:
             passfail = "WARN"
             detail.append(
-                f"CRUSH tree for pool {p['pool_name']} has zero weight buckets.",
+                f"CRUSH tree for pool {p.pool_name} has zero weight buckets.",
             )
 
     if passfail == "PASS":
@@ -911,19 +958,21 @@ def check_report_pool_zero_weight_buckets(result, data) -> None:
 
 
 @add_check
-def check_report_pool_crush_tree_balanced(result, data) -> None:
+def check_report_pool_crush_tree_balanced(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "CRUSH Tree Balanced"
 
-    pools = report["osdmap"]["pools"]
+    pools = report.osdmap.pools
     detail = []
     recommend = []
     passfail = "PASS"
     failed_count = 0
-    crush = Crush(report["crushmap"])
+    crush = Crush(report.crushmap)
     for p in pools:
-        rool_id = p["crush_rule"]
+        rool_id = p.crush_rule
         crush_rule = crush.get_rule_by_id(rool_id)
         if not crush_rule:
             # FIXME: do not silently ignore?
@@ -949,7 +998,7 @@ def check_report_pool_crush_tree_balanced(result, data) -> None:
             elif passfail != "FAIL":
                 passfail = "WARN"
             detail.append(
-                f"Pool {p['pool_name']} has CRUSH weights deviation {deviation:g}.",
+                f"Pool {p.pool_name} has CRUSH weights deviation {deviation:g}.",
             )
 
     if passfail == "PASS":
@@ -968,57 +1017,59 @@ def check_report_pool_crush_tree_balanced(result, data) -> None:
 
 
 @add_check
-def check_report_pool_avg_object_size(result, data) -> None:
+def check_report_pool_avg_object_size(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Pool Average Object Size"
 
-    pools = report["osdmap"]["pools"]
-    pool_stats = {p["poolid"]: p for p in report["pool_stats"]}
+    pools = report.osdmap.pools
+    pool_stats = {p.poolid: p for p in report.pool_stats}
     detail = []
     recommend = []
     passfail = "PASS"
     for p in pools:
         application = (
-            len(p["application_metadata"])
-            and next(iter(p["application_metadata"].keys()))
+            len(p.application_metadata)
+            and next(iter(p.application_metadata.keys()))
         ) or None
         if application in ("mgr", "mgr_devicehealth"):
             # MGR special pools
             continue
-        stats = pool_stats.get(p["pool"])
+        stats = pool_stats.get(p.pool)
         if not stats:
             continue
-        num_objects = stats["stat_sum"]["num_objects"]
-        num_bytes = stats["stat_sum"]["num_bytes"]
+        num_objects = stats.stat_sum.num_objects
+        num_bytes = stats.stat_sum.num_bytes
         if num_objects < 100000:
             # We care only about pools with a large number of objects
             continue
-        if "num_omap_bytes" not in stats["stat_sum"]:
+        if not hasattr(stats.stat_sum, 'num_omap_bytes'):
             # very old ceph report, can't make any conclusions below
             return
-        if stats["stat_sum"]["num_omap_bytes"] > num_bytes * 0.1:
+        if stats.stat_sum.num_omap_bytes > num_bytes * 0.1:
             # Pool stores omap keys, small data objects are expected
             continue
         avg_obj_size = num_bytes / num_objects
-        if p["type"] == 1:
+        if p.type == 1:
             if avg_obj_size < 4096:
                 passfail = "WARN"
                 detail.append(
-                    f"Average object size for replicated pool {p['pool_name']} "
+                    f"Average object size for replicated pool {p.pool_name} "
                     f"is {avg_obj_size:g} bytes.",
                 )
                 recommend.append(
                     "Using Ceph for storing tiny objects is not optimal. "
                     "Consider changing storage strategy.",
                 )
-        elif p["type"] == 3 and avg_obj_size < p["stripe_width"]:
-            p["erasure_code_profile"]
+        elif p.type == 3 and avg_obj_size < p.stripe_width:
+            p.erasure_code_profile
             passfail = "WARN"
             detail.append(
-                f"Average object size for EC pool {p['pool_name']} "
+                f"Average object size for EC pool {p.pool_name} "
                 f"is {avg_obj_size} bytes, which is fewer than the "
-                f"stripe width {p['stripe_width']} bytes.",
+                f"stripe width {p.stripe_width} bytes.",
             )
             recommend.append(
                 "Use a pool with an erasure code profile that has a "
@@ -1037,26 +1088,28 @@ def check_report_pool_avg_object_size(result, data) -> None:
 
 
 @add_check
-def check_report_pool_space_amplification(result, data) -> None:
+def check_report_pool_space_amplification(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Pool Space Amplification"
 
-    pools = report["osdmap"]["pools"]
-    pool_stats = {p["poolid"]: p for p in report["pool_stats"]}
+    pools = report.osdmap.pools
+    pool_stats = {p.poolid: p for p in report.pool_stats}
     detail = []
     recommend = []
     passfail = "PASS"
     failed_count = 0
     for p in pools:
         application = (
-            len(p["application_metadata"])
-            and next(iter(p["application_metadata"].keys()))
+            len(p.application_metadata)
+            and next(iter(p.application_metadata.keys()))
         ) or None
         if application in ("mgr", "mgr_devicehealth"):
             # MGR special pools
             continue
-        stats = pool_stats.get(p["pool"])
+        stats = pool_stats.get(p.pool)
         if not stats:
             continue
         if "store_stats" not in stats:
@@ -1067,9 +1120,9 @@ def check_report_pool_space_amplification(result, data) -> None:
         if num_objects < 1000 or num_bytes < 10485760:
             # Not enough stored data to make judgement
             continue
-        if p["type"] == 3:
-            profile_name = p["erasure_code_profile"]
-            profile = report["osdmap"]["erasure_code_profiles"].get(profile_name)
+        if p.type == 3:
+            profile_name = p.erasure_code_profile
+            profile = report.osdmap.erasure_code_profiles.get(profile_name)
             if not profile:
                 # FIXME: do not silently ignore?
                 continue
@@ -1077,7 +1130,7 @@ def check_report_pool_space_amplification(result, data) -> None:
             m = int(profile["m"])
         else:
             k = 1
-            m = p["size"] - 1
+            m = p.size - 1
 
         data_stored_ideal = num_bytes * (k + m) / k
         data_stored_real = stats["store_stats"]["allocated"]
@@ -1088,7 +1141,7 @@ def check_report_pool_space_amplification(result, data) -> None:
             elif passfail != "FAIL":
                 passfail = "WARN"
             detail.append(
-                f"Pool {p['pool_name']} has space amplification {amplification:.3}.",
+                f"Pool {p.pool_name} has space amplification {amplification:.3}.",
             )
             failed_count += 1
 
@@ -1107,13 +1160,15 @@ def check_report_pool_space_amplification(result, data) -> None:
 
 
 @add_check
-def check_report_pool_cache_tiering(result, data) -> None:
+def check_report_pool_cache_tiering(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Pools"
     check = "Cache Tiering"
 
-    pools = report["osdmap"]["pools"]
-    pool_names = {p["pool"]: p["pool_name"] for p in pools}
+    pools = report.osdmap.pools
+    pool_names = {p.pool: p.pool_name for p in pools}
     detail = []
     recommend = [
         "Cache tiering has been deprecated in the Reef release "
@@ -1122,25 +1177,25 @@ def check_report_pool_cache_tiering(result, data) -> None:
     ]
 
     for p in pools:
-        if p["tier_of"] > 0:
-            tier_of = pool_names.get(p["tier_of"], p["tier_of"])
-            detail.append(f"Pool {p['pool_name']} is cache tier of pool {tier_of}.")
+        if p.tier_of > 0:
+            tier_of = pool_names.get(p.tier_of, p.tier_of)
+            detail.append(f"Pool {p.pool_name} is cache tier of pool {tier_of}.")
         elif (
-            p["read_tier"] > 0
-            and p["write_tier"] > 0
-            and p["read_tier"] == p["write_tier"]
+            p.read_tier > 0
+            and p.write_tier > 0
+            and p.read_tier == p.write_tier
         ):
-            tier = pool_names.get(p["read_tier"], p["read_tier"])
-            detail.append(f"Pool {p['pool_name']} has cache tier pool {tier}.")
-        elif p["read_tier"] > 0:
-            read_tier = pool_names.get(p["read_tier"], p["read_tier"])
+            tier = pool_names.get(p.read_tier, p.read_tier)
+            detail.append(f"Pool {p.pool_name} has cache tier pool {tier}.")
+        elif p.read_tier > 0:
+            read_tier = pool_names.get(p.read_tier, p.read_tier)
             detail.append(
-                f"Pool {p['pool_name']} has cache read tier pool {read_tier}."
+                f"Pool {p.pool_name} has cache read tier pool {read_tier}."
             )
-        elif p["write_tier"] > 0:
-            write_tier = pool_names.get(p["write_tier"], p["write_tier"])
+        elif p.write_tier > 0:
+            write_tier = pool_names.get(p.write_tier, p.write_tier)
             detail.append(
-                f"Pool {p['pool_name']} has cache write tier pool {write_tier}."
+                f"Pool {p.pool_name} has cache write tier pool {write_tier}."
             )
 
     if not detail:
@@ -1166,18 +1221,20 @@ def check_report_pool_cache_tiering(result, data) -> None:
 
 
 @add_check
-def check_report_pg_upmap(result, data) -> None:
+def check_report_pg_upmap(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Check osdmap pg_upmap list"
     detail = []
     recommend = []
 
-    if report["osdmap"]["pg_upmap"]:
+    if report.osdmap.pg_upmap:
         passfail = "FAIL"
         summary = "osdmap has a non-empty pg_upmap entries"
         detail = [
-            f"osdmap contains {len(report['osdmap']['pg_upmap'])} pg_upmap entries, which is not recommended"
+            f"osdmap contains {len(report.osdmap.pg_upmap)} pg_upmap entries, which is not recommended"
         ]
         recommend = [
             "pg_upmap is not useful outside of very rare advanced scenarios. It is likely this was used by mistake and confused with pg-upmap-items entries."
@@ -1200,8 +1257,10 @@ def check_report_pg_upmap(result, data) -> None:
 
 
 @add_check
-def check_report_journal_rotational(result, data) -> None:
-    osd_metadata = data.ceph_report["osd_metadata"]
+def check_report_journal_rotational(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
+    osd_metadata = data.ceph_report.osd_metadata
     section = "OSD Health"
     check = "Check BlueFS DB/Journal is on Flash"
     passfail = "PASS"
@@ -1211,9 +1270,9 @@ def check_report_journal_rotational(result, data) -> None:
 
     rotational = []
     for osd in osd_metadata:
-        if int(osd.get("journal_rotational", 0)):
+        if int(getattr(osd, "journal_rotational", 0) or 0):
             passfail = "FAIL"
-            rotational.append(f"osd.{osd['id']}")
+            rotational.append(f"osd.{osd.id}")
             failed_count += 1
 
     if passfail == "FAIL":
@@ -1235,9 +1294,11 @@ def check_report_journal_rotational(result, data) -> None:
 
 
 @add_check
-def check_report_bluefs_db_size(result, data) -> None:
+def check_report_bluefs_db_size(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     min_bluefs_db_size = 10737418240  # 10G
-    osd_metadata = data.ceph_report["osd_metadata"]
+    osd_metadata = data.ceph_report.osd_metadata
     section = "OSD Health"
     check = "Check OSD bluefs db size"
     passfail = "PASS"
@@ -1246,15 +1307,15 @@ def check_report_bluefs_db_size(result, data) -> None:
     failed_count = 0
 
     for osd in osd_metadata:
-        bluefs_db_size = int(osd.get("bluefs_db_size", min_bluefs_db_size + 1))
+        bluefs_db_size = int(getattr(osd, "bluefs_db_size", min_bluefs_db_size + 1) or (min_bluefs_db_size + 1))
         if (
-            int(osd.get("bluefs_dedicated_db", 0))
+            int(getattr(osd, "bluefs_dedicated_db", 0) or 0)
             and bluefs_db_size < min_bluefs_db_size
         ):
             passfail = "FAIL"
-            detail.append(f"osd.{osd['id']} bluefs db size {bluefs_db_size}")
+            detail.append(f"osd.{osd.id} bluefs db size {bluefs_db_size}")
             recommend.append(
-                f"Migrate osd.{osd['id']} bluefs db to partition of at least {min_bluefs_db_size} size"
+                f"Migrate osd.{osd.id} bluefs db to partition of at least {min_bluefs_db_size} size"
             )
             failed_count += 1
 
@@ -1271,9 +1332,11 @@ def check_report_bluefs_db_size(result, data) -> None:
 
 
 @add_check
-def check_report_bluefs_wal_size(result, data) -> None:
+def check_report_bluefs_wal_size(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     min_bluefs_wal_size = 1073741824  # 1G
-    osd_metadata = data.ceph_report["osd_metadata"]
+    osd_metadata = data.ceph_report.osd_metadata
     section = "OSD Health"
     check = "Check OSD bluefs wal size"
     passfail = "PASS"
@@ -1282,15 +1345,15 @@ def check_report_bluefs_wal_size(result, data) -> None:
     failed_count = 0
 
     for osd in osd_metadata:
-        bluefs_wal_size = int(osd.get("bluefs_wal_size", min_bluefs_wal_size + 1))
+        bluefs_wal_size = int(getattr(osd, "bluefs_wal_size", min_bluefs_wal_size + 1) or (min_bluefs_wal_size + 1))
         if (
-            int(osd.get("bluefs_dedicated_wal", 0))
+            int(getattr(osd, "bluefs_dedicated_wal", 0) or 0)
             and bluefs_wal_size < min_bluefs_wal_size
         ):
             passfail = "FAIL"
-            detail.append(f"osd.{osd['id']} bluefs wal size {bluefs_wal_size}")
+            detail.append(f"osd.{osd.id} bluefs wal size {bluefs_wal_size}")
             recommend.append(
-                f"Migrate osd.{osd['id']} bluefs wal to partition of at least {min_bluefs_wal_size} size"
+                f"Migrate osd.{osd.id} bluefs wal to partition of at least {min_bluefs_wal_size} size"
             )
             failed_count += 1
 
@@ -1307,8 +1370,10 @@ def check_report_bluefs_wal_size(result, data) -> None:
 
 
 @add_check
-def check_report_bluestore_min_alloc_size(result, data) -> None:
-    osd_metadata = data.ceph_report["osd_metadata"]
+def check_report_bluestore_min_alloc_size(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
+    osd_metadata = data.ceph_report.osd_metadata
     section = "OSD Health"
     check = "OSD bluestore min_alloc_size"
     passfail = "PASS"
@@ -1317,16 +1382,16 @@ def check_report_bluestore_min_alloc_size(result, data) -> None:
     failed_osds = {}
 
     for osd in osd_metadata:
-        try:
-            min_alloc_size = int(osd["bluestore_min_alloc_size"])
-        except KeyError:
+        min_alloc_size_attr = getattr(osd, "bluestore_min_alloc_size", None)
+        if min_alloc_size_attr is None:
             # Old version
             return
+        min_alloc_size = int(min_alloc_size_attr)
         if min_alloc_size != 4096:
             passfail = "FAIL"
             if min_alloc_size not in failed_osds:
                 failed_osds[min_alloc_size] = set()
-            failed_osds[min_alloc_size].add(osd["id"])
+            failed_osds[min_alloc_size].add(osd.id)
 
     if failed_osds:
         passfail == "FAIL"
@@ -1349,11 +1414,13 @@ def check_report_bluestore_min_alloc_size(result, data) -> None:
 
 
 @add_check
-def check_report_host_memory(result, data) -> None:
+def check_report_host_memory(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     MEM_PER_OSD_CRITICAL = 2 * 1024 * 1024 * 1024  # 2G
     MEM_PER_OSD_WARNING = 4 * 1024 * 1024 * 1024  # 4G
 
-    osd_metadata = data.ceph_report["osd_metadata"]
+    osd_metadata = data.ceph_report.osd_metadata
     section = "OSD Health"
     check = "OSD host memory"
     passfail = "PASS"
@@ -1362,17 +1429,16 @@ def check_report_host_memory(result, data) -> None:
     hosts = {}
 
     for osd in osd_metadata:
-        try:
-            host = osd["hostname"]
-        except KeyError:
+        host = getattr(osd, "hostname", None)
+        if host is None:
             # Old version
             return
         if host not in hosts:
-            try:
-                mem_total = int(osd["mem_total_kb"]) * 1024
-            except KeyError:
-                # Old version
+            mem_total_kb = getattr(osd, "mem_total_kb", None)
+            if mem_total_kb is None or mem_total_kb == "":
+                # Old version or missing data
                 return
+            mem_total = int(mem_total_kb) * 1024
             hosts[host] = {
                 "mem_total": mem_total,
                 "osds": [],
@@ -1419,8 +1485,10 @@ def check_report_host_memory(result, data) -> None:
 
 
 @add_check
-def check_report_host_swap(result, data) -> None:
-    osd_metadata = data.ceph_report["osd_metadata"]
+def check_report_host_swap(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
+    osd_metadata = data.ceph_report.osd_metadata
     section = "OSD Health"
     check = "OSD host swap"
     passfail = "PASS"
@@ -1430,20 +1498,19 @@ def check_report_host_swap(result, data) -> None:
     hosts_with_swap = set()
 
     for osd in osd_metadata:
-        try:
-            name = osd["hostname"]
-        except KeyError:
+        name = getattr(osd, "hostname", None)
+        if name is None:
             # Old version
             return
         if name in hosts:
             continue
         hosts.add(name)
 
-        try:
-            swap = int(osd["mem_swap_kb"]) > 0
-        except KeyError:
-            # Old version
+        mem_swap_kb = getattr(osd, "mem_swap_kb", None)
+        if mem_swap_kb is None or mem_swap_kb == "":
+            # Old version or missing data
             return
+        swap = int(mem_swap_kb) > 0
 
         if swap:
             passfail = "WARN"
@@ -1473,14 +1540,16 @@ def check_report_host_swap(result, data) -> None:
 
 
 @add_check
-def check_report_num_osdmaps(result, data) -> None:
+def check_report_num_osdmaps(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Check number of osdmaps stored"
     detail = []
     recommend = []
 
-    num_committed = report["osdmap_last_committed"] - report["osdmap_first_committed"]
+    num_committed = report.osdmap_last_committed - report.osdmap_first_committed
     if num_committed > 1500:
         passfail = "FAIL"
         summary = f"Cluster has too many osdmaps ({num_committed})"
@@ -1511,7 +1580,9 @@ def check_report_num_osdmaps(result, data) -> None:
 
 
 @add_check
-def check_report_crush_tunables_optimal(result, data) -> None:
+def check_report_crush_tunables_optimal(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Check CRUSH Tunables"
@@ -1529,10 +1600,10 @@ def check_report_crush_tunables_optimal(result, data) -> None:
         "straw_calc_version": 1,
     }
 
-    tunables = report["crushmap"]["tunables"]
+    tunables = report.crushmap.tunables
     passfail = "PASS"
 
-    if tunables["optimal_tunables"] and not tunables["legacy_tunables"]:
+    if tunables.optimal_tunables and not tunables.legacy_tunables:
         summary = "CRUSH Tunables are optimal"
         detail = ["CRUSH tunables are optimal, ensuring the ideal data placement."]
         result.add_check_result(section, check, passfail, summary, detail, recommend)
@@ -1541,14 +1612,14 @@ def check_report_crush_tunables_optimal(result, data) -> None:
     for tunable in optimal:
         recommended = None
         if callable(optimal[tunable]):
-            recommended = optimal[tunable](tunables[tunable])
-        elif tunables[tunable] != optimal[tunable]:
+            recommended = optimal[tunable](getattr(tunables, tunable))
+        elif getattr(tunables, tunable) != optimal[tunable]:
             recommended = optimal[tunable]
         if recommended is not None:
             passfail = "WARN"
             summary = "At least one CRUSH tunable is not optimal"
             detail.append(
-                f"CRUSH tunable {tunable} is currently {tunables[tunable]}, not the recommended {recommended}."
+                f"CRUSH tunable {tunable} is currently {getattr(tunables, tunable)}, not the recommended {recommended}."
             )
             recommend.append(
                 f"Set the tunable {tunable} to {recommended}. Note that this may result in significant data movement. Contact support if you are unsure."
@@ -1562,17 +1633,19 @@ def check_report_crush_tunables_optimal(result, data) -> None:
 
 
 @add_check
-def check_report_fsmap_info(result, data) -> None:
+def check_report_fsmap_info(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "CephFS"
     check = "CephFS Info"
     detail = []
 
-    fsmap = report["fsmap"]
-    filesystems = fsmap["filesystems"]
+    fsmap = report.fsmap
+    filesystems = fsmap.filesystems
     summary = f"Found {len(filesystems)} CephFS filesystems"
     for fs in filesystems:
-        mdsmap = fs["mdsmap"]
+        mdsmap = fs.mdsmap
         detail.append(
             f"{mdsmap['fs_name']}: data pools {mdsmap['data_pools']}, meta pool {mdsmap['metadata_pool']}, max_mds {mdsmap['max_mds']}"
         )
@@ -1580,19 +1653,21 @@ def check_report_fsmap_info(result, data) -> None:
 
 
 @add_check
-def check_report_fsmap_multi_mds(result, data) -> None:
+def check_report_fsmap_multi_mds(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "CephFS"
     check = "Multi-MDS Safety"
     detail = []
     recommend = []
-    fsmap = report["fsmap"]
-    filesystems = fsmap["filesystems"]
+    fsmap = report.fsmap
+    filesystems = fsmap.filesystems
     has_cephfs = bool(len(filesystems))
     multimds = False
     passfail = "PASS"
     for fs in filesystems:
-        mdsmap = fs["mdsmap"]
+        mdsmap = fs.mdsmap
         if mdsmap["max_mds"] > 1:
             multimds = True
             passfail = "WARN"
@@ -1616,13 +1691,15 @@ def check_report_fsmap_multi_mds(result, data) -> None:
 
 
 @add_check
-def check_report_osd_cluster_network(result, data) -> None:
+def check_report_osd_cluster_network(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "OSD Health"
     check = "Dedicated Cluster Network"
 
     # Check if there are any OSDs in the osdmap
-    osds = report["osdmap"]["osds"]
+    osds = report.osdmap.osds
     if not osds:
         passfail = "WARN"
         summary = "No OSDs found in cluster"
@@ -1632,8 +1709,8 @@ def check_report_osd_cluster_network(result, data) -> None:
         return
 
     first = osds[0]
-    public_ip = first["public_addr"].split(":")[0]
-    cluster_ip = first["cluster_addr"].split(":")[0]
+    public_ip = first.public_addr.split(":")[0]
+    cluster_ip = first.cluster_addr.split(":")[0]
     if public_ip == cluster_ip:
         passfail = "WARN"
         summary = "Public and Cluster Networks are Shared"
@@ -1655,7 +1732,9 @@ def check_report_osd_cluster_network(result, data) -> None:
 
 
 @add_check
-def check_report_operating_system(result, data) -> None:
+def check_report_operating_system(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
     report = data.ceph_report
     section = "Operating System"
     check = "OS Support"
@@ -1663,7 +1742,7 @@ def check_report_operating_system(result, data) -> None:
     distros = []
     distro_descriptions = []
     distro_versions = []
-    osds = report["osd_metadata"]
+    osds = report.osd_metadata
 
     # Check if using cephadm (container) deployment
     is_container_deployment = False
@@ -1683,14 +1762,14 @@ def check_report_operating_system(result, data) -> None:
         return
 
     for osd in osds:
-        if "distro" not in osd:
+        if not hasattr(osd, "distro"):
             continue
-        if osd["distro"] not in distros:
-            distros.append(osd["distro"])
-        if osd["distro_description"] not in distro_descriptions:
-            distro_descriptions.append(osd["distro_description"])
-        if osd["distro_version"] not in distro_versions:
-            distro_versions.append(osd["distro_version"])
+        if osd.distro not in distros:
+            distros.append(osd.distro)
+        if osd.distro_description not in distro_descriptions:
+            distro_descriptions.append(osd.distro_description)
+        if osd.distro_version not in distro_versions:
+            distro_versions.append(osd.distro_version)
 
     detail = []
     recommend = []
@@ -1733,7 +1812,8 @@ def check_report_operating_system(result, data) -> None:
 # Warning any non-active PGs
 
 
-def update_result(res, data) -> None:
+def update_result(res: AIResult, data: CephData) -> None:
+    assert data.ceph_report is not None, "ceph_report must be present"
     for c in check_functions:
         try:
             c(res, data)

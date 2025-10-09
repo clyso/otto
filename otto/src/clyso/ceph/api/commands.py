@@ -12,6 +12,7 @@ import sys
 from typing import Any
 
 from .schemas import (
+    CephReport,
     MalformedCephDataError,
     OSDDFResponse,
     OSDDumpResponse,
@@ -104,12 +105,12 @@ def ceph_osd_perf_dump(
         ) from e
 
 
-def ceph_report(skip_confirmation: bool = True) -> dict[str, Any]:
+def ceph_report(skip_confirmation: bool = True) -> CephReport:
     try:
         raw_data = _execute_ceph_command(
             "ceph report", skip_confirmation=skip_confirmation
         )
-        return raw_data
+        return CephReport.model_validate(raw_data)
     except Exception as e:
         raise MalformedCephDataError(f"Failed to get cluster report: {e}") from e
 
