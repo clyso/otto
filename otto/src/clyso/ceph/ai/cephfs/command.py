@@ -9,7 +9,7 @@ from typing import Any
 
 from clyso.ceph.ai.cephfs.session_top import CephfsSessionTop
 from clyso.ceph.api.commands import ceph_fs_status
-from clyso.ceph.api.schemas import MalformedCephDataError
+from clyso.ceph.api.schemas import MalformedCephDataError, CephfsMDSMapEntry
 
 
 class CephfsSessionTopCommand:
@@ -78,9 +78,9 @@ class CephfsSessionTopCommand:
         elif self.args.mds and self.args.fs:
             raise ValueError("Either --mds or --fs can be specified, not both")
 
-    def _get_mds_list(self) -> list[dict[str, Any]]:
+    def _get_mds_list(self) -> list[CephfsMDSMapEntry]:
         """Get list of MDS daemons to analyze"""
-        mds_list = []
+        mds_list: list[CephfsMDSMapEntry] = []
 
         if self.args.file:
             for f in self.args.file:
@@ -88,7 +88,7 @@ class CephfsSessionTopCommand:
                     file_path = Path(f)
                     if not file_path.exists():
                         raise FileNotFoundError(f"file not found: {f}")
-                mds_list.append({"file": f})
+                mds_list.append(CephfsMDSMapEntry(file=f))
 
         else:
             fs_status = ceph_fs_status(
@@ -96,14 +96,12 @@ class CephfsSessionTopCommand:
             )
 
             for mds_entry in fs_status.mdsmap:
-                mds_dict = mds_entry.model_dump()
-
                 if self.args.mds:
-                    if mds_dict.get("name") == self.args.mds:
-                        mds_list.append(mds_dict)
+                    if mds_entry.name == self.args.mds:
+                        mds_list.append(mds_entry)
                         break
                     continue
-                if mds_dict.get("state") == "active":
-                    mds_list.append(mds_dict)
+                if mds_entry.state == "active":
+                    mds_list.append(mds_entry)
 
         return mds_list
