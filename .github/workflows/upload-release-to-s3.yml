@@ -1,0 +1,97 @@
+name: Upload Release to S3
+
+on:
+  workflow_run:
+    workflows: [ Release ]
+    types: [completed]
+
+jobs:
+  upload-release-to-s3:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install s3cmd
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y s3cmd
+      
+      - name: Configure s3cmd
+        env:
+          S3_HOST_BASE: ${{ secrets.S3_HOST_BASE }}
+          S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
+          S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+        run: |
+          cat << EOF > ~/.s3cfg
+          [default]
+          access_key = ${S3_ACCESS_KEY}
+          secret_key = ${S3_SECRET_KEY}
+          host_base = ${S3_HOST_BASE}
+          host_bucket = %(bucket)s.${S3_HOST_BASE}
+          use_https = True
+          check_ssl_certificate = True
+          check_ssl_hostname = True
+          signature_v2 = False
+          EOF
+      
+      - name: Test s3cmd
+        run: |
+          s3cmd --version
+          s3cmd ls
+      
+      - name: Download binary artifact from release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+
+          # Download only the otto binary from the release
+          gh release download ${{ github.event.release.tag_name }} \
+            --repo ${{ github.repository }} \
+            --pattern "otto"
+          
+          # Verify the binary was downloaded
+          if [ ! -f "otto" ]; then
+            echo "ERROR: otto binary not found in release assets"
+            exit 1
+          fi
+          
+          echo "Downloaded otto binary:"
+          ls -la otto
+
+      - name: Upload binary to S3 (tagged version)
+        env:
+          S3_BUCKET: ${{ vars.S3_BUCKET_NAME }}
+        run: |
+          TAG_NAME="${{ github.event.release.tag_name }}"
+
+          echo "Uploading ${TAG_NAME} binary to S3"
+          s3cmd put otto s3://${S3_BUCKET}/${TAG_NAME}/otto \
+            --acl-public \
+            --mime-type application/octet-stream
+          
+          echo "Uploaded ${TAG_NAME} otto binary to S3"
+        
+      - name: Upload latest binary to S3
+        env:
+          S3_BUCKET: ${{ vars.S3_BUCKET_NAME }}
+        run: |
+          echo "Uploading latest binary to S3"
+          
+          s3cmd put otto s3://${S3_BUCKET}/latest/otto \
+            --acl-public \
+            --mime-type application/octet-stream
+
+          echo "Uploaded latest otto binary to S3"
+      
+      - name: Verify uploads
+        env:
+          S3_BUCKET: ${{ vars.S3_BUCKET_NAME }}
+        run: |
+          TAG_NAME="${{ github.event.release.tag_name }}"
+          echo "Verifying uploads..."
+          
+          echo "Tagged version (${TAG_NAME}):"
+          s3cmd ls s3://${S3_BUCKET}/${TAG_NAME}/
+          
+          echo "Latest version:"
+          s3cmd ls s3://${S3_BUCKET}/latest/
+          
+          echo "Binary upload verification complete!"
