@@ -8,17 +8,18 @@ from typing import Any
 def parse_ceph_json(json_data: str) -> Any:
     """
     Parse JSON data from Ceph with special handling for non-standard values.
-    
+
     Ceph sometimes outputs non-standard JSON constants like 'inf', '-inf', and 'nan'
     which are not valid JSON. This function handles those cases by converting them
     to valid JSON 'Infinity', '-Infinity', and 'NaN' before parsing.
-    
+
     Args:
         json_data: Raw JSON string from Ceph command output
-        
+
     Returns:
         Parsed Python object (dict, list, etc.)
     """
+
     def parse_json_constants(arg):
         if arg == "Infinity":
             return math.inf

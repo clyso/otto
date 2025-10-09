@@ -368,7 +368,7 @@ def check_report_osdmap(result: AIResult, data: CephData) -> None:
     passfail = "PASS"
 
     # check flags
-    if "flags_set" in osdmap:
+    if osdmap.flags_set:
         flags = [
             "pglog_hardlimit",
             "purged_snapdirs",
@@ -557,9 +557,7 @@ def check_report_capacity_info(result: AIResult, data: CephData) -> None:
     osd_sum = report.osd_sum
     report.pool_stats
 
-    total_pool_size = humanize.naturalsize(
-        pool_sum.stat_sum.num_bytes, binary=True
-    )
+    total_pool_size = humanize.naturalsize(pool_sum.stat_sum.num_bytes, binary=True)
     total_pool_objects = humanize.intword(pool_sum.stat_sum.num_objects)
     detail.append(f"Pools storing {total_pool_size} and {total_pool_objects} objects")
 
@@ -688,9 +686,7 @@ def check_report_pool_size(result: AIResult, data: CephData) -> None:
                 )
             if min_size < 2:
                 passfail = "FAIL"
-                detail.append(
-                    f"Replicated pool {p.pool_name} has min_size {min_size}."
-                )
+                detail.append(f"Replicated pool {p.pool_name} has min_size {min_size}.")
                 recommend.append(
                     f"Increase min_size on pool {p.pool_name} to 2 to minimize the likelihood of data loss."
                 )
@@ -807,8 +803,7 @@ def check_report_pool_min_pgnum(result: AIResult, data: CephData) -> None:
     crush = Crush(report.crushmap)
     for p in pools:
         application = (
-            len(p.application_metadata)
-            and next(iter(p.application_metadata.keys()))
+            len(p.application_metadata) and next(iter(p.application_metadata.keys()))
         ) or None
         if application in ("mgr", "mgr_devicehealth"):
             # MGR special pools
@@ -1031,8 +1026,7 @@ def check_report_pool_avg_object_size(result: AIResult, data: CephData) -> None:
     passfail = "PASS"
     for p in pools:
         application = (
-            len(p.application_metadata)
-            and next(iter(p.application_metadata.keys()))
+            len(p.application_metadata) and next(iter(p.application_metadata.keys()))
         ) or None
         if application in ("mgr", "mgr_devicehealth"):
             # MGR special pools
@@ -1045,7 +1039,7 @@ def check_report_pool_avg_object_size(result: AIResult, data: CephData) -> None:
         if num_objects < 100000:
             # We care only about pools with a large number of objects
             continue
-        if not hasattr(stats.stat_sum, 'num_omap_bytes'):
+        if not hasattr(stats.stat_sum, "num_omap_bytes"):
             # very old ceph report, can't make any conclusions below
             return
         if stats.stat_sum.num_omap_bytes > num_bytes * 0.1:
@@ -1103,8 +1097,7 @@ def check_report_pool_space_amplification(result: AIResult, data: CephData) -> N
     failed_count = 0
     for p in pools:
         application = (
-            len(p.application_metadata)
-            and next(iter(p.application_metadata.keys()))
+            len(p.application_metadata) and next(iter(p.application_metadata.keys()))
         ) or None
         if application in ("mgr", "mgr_devicehealth"):
             # MGR special pools
@@ -1112,11 +1105,11 @@ def check_report_pool_space_amplification(result: AIResult, data: CephData) -> N
         stats = pool_stats.get(p.pool)
         if not stats:
             continue
-        if "store_stats" not in stats:
+        if stats.store_stats is None:
             # Old version
             return
-        num_objects = stats["stat_sum"]["num_objects"]
-        num_bytes = stats["stat_sum"]["num_bytes"]
+        num_objects = stats.stat_sum.num_objects
+        num_bytes = stats.stat_sum.num_bytes
         if num_objects < 1000 or num_bytes < 10485760:
             # Not enough stored data to make judgement
             continue
@@ -1133,7 +1126,7 @@ def check_report_pool_space_amplification(result: AIResult, data: CephData) -> N
             m = p.size - 1
 
         data_stored_ideal = num_bytes * (k + m) / k
-        data_stored_real = stats["store_stats"]["allocated"]
+        data_stored_real = stats.store_stats.allocated
         amplification = data_stored_real / data_stored_ideal
         if amplification > 1.2:
             if amplification > 1.5:
@@ -1180,23 +1173,15 @@ def check_report_pool_cache_tiering(result: AIResult, data: CephData) -> None:
         if p.tier_of > 0:
             tier_of = pool_names.get(p.tier_of, p.tier_of)
             detail.append(f"Pool {p.pool_name} is cache tier of pool {tier_of}.")
-        elif (
-            p.read_tier > 0
-            and p.write_tier > 0
-            and p.read_tier == p.write_tier
-        ):
+        elif p.read_tier > 0 and p.write_tier > 0 and p.read_tier == p.write_tier:
             tier = pool_names.get(p.read_tier, p.read_tier)
             detail.append(f"Pool {p.pool_name} has cache tier pool {tier}.")
         elif p.read_tier > 0:
             read_tier = pool_names.get(p.read_tier, p.read_tier)
-            detail.append(
-                f"Pool {p.pool_name} has cache read tier pool {read_tier}."
-            )
+            detail.append(f"Pool {p.pool_name} has cache read tier pool {read_tier}.")
         elif p.write_tier > 0:
             write_tier = pool_names.get(p.write_tier, p.write_tier)
-            detail.append(
-                f"Pool {p.pool_name} has cache write tier pool {write_tier}."
-            )
+            detail.append(f"Pool {p.pool_name} has cache write tier pool {write_tier}.")
 
     if not detail:
         passfail = "PASS"
@@ -1307,7 +1292,10 @@ def check_report_bluefs_db_size(result: AIResult, data: CephData) -> None:
     failed_count = 0
 
     for osd in osd_metadata:
-        bluefs_db_size = int(getattr(osd, "bluefs_db_size", min_bluefs_db_size + 1) or (min_bluefs_db_size + 1))
+        bluefs_db_size = int(
+            getattr(osd, "bluefs_db_size", min_bluefs_db_size + 1)
+            or (min_bluefs_db_size + 1)
+        )
         if (
             int(getattr(osd, "bluefs_dedicated_db", 0) or 0)
             and bluefs_db_size < min_bluefs_db_size
@@ -1345,7 +1333,10 @@ def check_report_bluefs_wal_size(result: AIResult, data: CephData) -> None:
     failed_count = 0
 
     for osd in osd_metadata:
-        bluefs_wal_size = int(getattr(osd, "bluefs_wal_size", min_bluefs_wal_size + 1) or (min_bluefs_wal_size + 1))
+        bluefs_wal_size = int(
+            getattr(osd, "bluefs_wal_size", min_bluefs_wal_size + 1)
+            or (min_bluefs_wal_size + 1)
+        )
         if (
             int(getattr(osd, "bluefs_dedicated_wal", 0) or 0)
             and bluefs_wal_size < min_bluefs_wal_size
@@ -1747,7 +1738,7 @@ def check_report_operating_system(result: AIResult, data: CephData) -> None:
     # Check if using cephadm (container) deployment
     is_container_deployment = False
     for osd in osds:
-        if "container_image" in osd:
+        if hasattr(osd, "container_image"):
             is_container_deployment = True
             break
 

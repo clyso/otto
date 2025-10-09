@@ -8,10 +8,10 @@ from . import report as aireport
 def generate_result(ceph_data: CephData) -> AIResult:
     """
     Generate AI analysis result from Ceph cluster data.
-    
+
     Args:
         ceph_data: CephData object with populated cluster data
-        
+
     Returns:
         AIResult with analysis sections and recommendations
     """

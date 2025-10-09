@@ -110,7 +110,7 @@ class CephFacts:
 
         osd_metadata = self.ceph_data.ceph_report.osd_metadata
         for osd in osd_metadata:
-            if "container_image" in osd:
+            if hasattr(osd, "container_image"):
                 return "cephadm"
         return "traditional"
 

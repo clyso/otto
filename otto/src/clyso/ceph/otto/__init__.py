@@ -8,7 +8,7 @@ import errno
 import yaml
 
 from clyso.ceph.ai import generate_result
-from clyso.ceph.ai.common import OttoParser, CEPH_FILES
+from clyso.ceph.ai.common import OttoParser
 from clyso.ceph.api.commands import ceph_report, ceph_command
 from clyso.ceph.api.loaders import load_ceph_report, load_config_dump
 from clyso.ceph.ai.data import CephData
@@ -162,25 +162,22 @@ def verbose_result(result):
             print("")
 
 
-def subcommand_checkup(args):
+def subcommand_checkup(args: argparse.Namespace) -> None:
     data = CephData()
-    warnings = []
-    verbose = getattr(args, "verbose", False)
-    skip_confirmation = getattr(args, "yes", True)
-    
-    using_static_report = bool(getattr(args, "ceph_report_json", None))
-    
+    warnings: list[str] = []
+    verbose: bool = getattr(args, "verbose", False)
+    skip_confirmation: bool = getattr(args, "yes", True)
+
+    using_static_report: bool = bool(getattr(args, "ceph_report_json", None))
+
     if args.ceph_report_json:
         try:
             data.ceph_report = load_ceph_report(args.ceph_report_json)
         except Exception as e:
-            print(f"Error: Failed to load ceph report from {args.ceph_report_json}: {e}", file=sys.stderr)
-            sys.exit(1)
-    elif os.path.exists(CEPH_FILES["ceph-report"]):
-        try:
-            data.ceph_report = load_ceph_report(CEPH_FILES["ceph-report"])
-        except Exception as e:
-            print(f"Error: Failed to load ceph report from {CEPH_FILES['ceph-report']}: {e}", file=sys.stderr)
+            print(
+                f"Error: Failed to load ceph report from {args.ceph_report_json}: {e}",
+                file=sys.stderr,
+            )
             sys.exit(1)
     else:
         try:
@@ -188,33 +185,38 @@ def subcommand_checkup(args):
         except Exception as e:
             print(f"Error: Failed to collect ceph report via CLI: {e}", file=sys.stderr)
             sys.exit(1)
-    
+
     config_dump_file = getattr(args, "ceph_config_dump", None)
     if config_dump_file:
         try:
             data.ceph_config_dump = load_config_dump(config_dump_file)
         except Exception as e:
             if verbose:
-                print(f"Warning: Failed to load config dump from {config_dump_file}: {e}", file=sys.stderr)
-            warnings.append("Config dump analysis skipped - unable to load configuration data")
-    elif os.path.exists(CEPH_FILES["config_dump"]):
-        try:
-            data.ceph_config_dump = load_config_dump(CEPH_FILES["config_dump"])
-        except Exception as e:
-            if verbose:
-                print(f"Warning: Failed to load config dump from {CEPH_FILES['config_dump']}: {e}", file=sys.stderr)
-            warnings.append("Config dump analysis skipped - unable to load configuration data")
+                print(
+                    f"Warning: Failed to load config dump from {config_dump_file}: {e}",
+                    file=sys.stderr,
+                )
+            warnings.append(
+                "Config dump analysis skipped - unable to load configuration data"
+            )
     elif not using_static_report:
         try:
-            raw_config = ceph_command("ceph config dump -f json", skip_confirmation=skip_confirmation)
+            raw_config = ceph_command(
+                "ceph config dump -f json", skip_confirmation=skip_confirmation
+            )
             if isinstance(raw_config, list):
                 data.ceph_config_dump = raw_config
             else:
                 warnings.append("Config dump analysis skipped - unexpected format")
         except Exception as e:
             if verbose:
-                print(f"Warning: Failed to collect config dump via CLI: {e}", file=sys.stderr)
-            warnings.append("Config dump analysis skipped - unable to collect configuration data")
+                print(
+                    f"Warning: Failed to collect config dump via CLI: {e}",
+                    file=sys.stderr,
+                )
+            warnings.append(
+                "Config dump analysis skipped - unable to collect configuration data"
+            )
     else:
         warnings.append("Config dump analysis skipped - using static report")
 

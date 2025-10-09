@@ -3,7 +3,13 @@ from clyso.ceph.ai.pg.histogram import histogram, calculate_histogram, DataPoint
 from clyso.ceph.api.schemas import OSDTree, PGDump
 from collections import defaultdict
 from types import SimpleNamespace
+from typing import TypedDict, overload
 import json
+
+
+class PoolPGInfo(TypedDict):
+    osds: dict[int, int]
+    total_pgs: int
 
 
 class PGHistogram:
@@ -33,7 +39,9 @@ class PGHistogram:
                 if osd.type == "osd":
                     osd_id = osd.id
                     reweight = float(osd.reweight) if osd.reweight is not None else 1.0
-                    crush_weight = float(osd.crush_weight) if osd.crush_weight is not None else 0.0
+                    crush_weight = (
+                        float(osd.crush_weight) if osd.crush_weight is not None else 0.0
+                    )
                     osd_weights[osd_id] = dict()
                     osd_weights[osd_id]["crush_weight"] = crush_weight
                     osd_weights[osd_id]["reweight"] = reweight
@@ -43,7 +51,7 @@ class PGHistogram:
     def get_pg_stats(self):
         if not self.data.ceph_pg_dump:
             return defaultdict(int)
-        
+
         ceph_pg_stats = self.data.ceph_pg_dump.pg_map.pg_stats
         osds = defaultdict(int)
         for pg in ceph_pg_stats:
@@ -58,7 +66,15 @@ class PGHistogram:
 
     ## Histogram Json logic for CES UI
 
-    def _get_per_pool_pg_stats(self, pool_id=None):
+    @overload
+    def _get_per_pool_pg_stats(self, pool_id: int) -> tuple[dict[int, int], int]: ...
+
+    @overload
+    def _get_per_pool_pg_stats(self, pool_id: None = None) -> dict[str, PoolPGInfo]: ...
+
+    def _get_per_pool_pg_stats(
+        self, pool_id: int | None = None
+    ) -> tuple[dict[int, int], int] | dict[str, PoolPGInfo]:
         """
         Extract PG counts per OSD grouped by pool from PG dump data.
 
@@ -78,16 +94,16 @@ class PGHistogram:
                 return {}, 0
             else:
                 return {}
-        
+
         ceph_pg_stats = self.data.ceph_pg_dump.pg_map.pg_stats
 
-        pools_data: dict[str, dict] = {}
+        pools_data: dict[str, PoolPGInfo] = {}
 
         for pg in ceph_pg_stats:
             poolid = pg.pgid.split(".")[0]
             if poolid not in pools_data:
                 pools_data[poolid] = {"osds": defaultdict(int), "total_pgs": 0}
-            
+
             pools_data[poolid]["total_pgs"] += 1
 
             for osd in pg.acting:
@@ -150,7 +166,7 @@ class PGHistogram:
             return json.dumps(result, indent=2)
         else:
             pools_data = self._get_per_pool_pg_stats()
-            
+
             result = {"pools": {}}
 
             for pool_id_str, pool_info in pools_data.items():

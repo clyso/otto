@@ -1,13 +1,6 @@
 import sys
 import argparse
 
-CEPH_FILES = {
-    "ceph-report": "cluster_health-report",
-    "config_dump": "ceph_cluster_info-config_dump.json",
-    "osd_tree": "osd_info-tree.json",
-    "pg_dump": "pg_info-dump.json",
-}
-
 
 class OttoParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
