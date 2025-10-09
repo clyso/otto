@@ -5,12 +5,11 @@ This module provides strongly-typed wrapper functions for executing Ceph command
 and parsing their JSON output with proper validation using Pydantic models.
 """
 
-import json
-import math
 import subprocess
 import sys
 from typing import Any
 
+from ._json_utils import parse_ceph_json
 from .schemas import (
     CephReport,
     MalformedCephDataError,
@@ -20,29 +19,6 @@ from .schemas import (
     OSDTree,
     PGDump,
 )
-
-
-def _json_loads(json_data: str) -> Any:
-    """Parse JSON data."""
-
-    def parse_json_constants(arg):
-        if arg == "Infinity":
-            return math.inf
-        elif arg == "-Infinity":
-            return -math.inf
-        elif arg == "NaN":
-            return math.nan
-        return None
-
-    # some ceph data returns non-valid json
-    # Replace " inf," with " Infinity," to avoid json parsing error:
-    # python json module does not support "inf", "-inf", "nan" as valid
-    # json constants
-    json_data = json_data.replace(" inf,", " Infinity,")
-    json_data = json_data.replace(" -inf,", " -Infinity,")
-    json_data = json_data.replace(" nan,", " NaN,")
-
-    return json.loads(json_data, parse_constant=parse_json_constants)
 
 
 def _execute_ceph_command(
@@ -68,7 +44,7 @@ def _execute_ceph_command(
     except subprocess.TimeoutExpired:
         print(f"ERROR: command '{command}' timed out after {timeout} seconds")
         sys.exit(1)
-    return _json_loads(out)
+    return parse_ceph_json(out)
 
 
 def ceph_osd_tree(skip_confirmation: bool = True) -> OSDTree:
