@@ -50,3 +50,9 @@ jobs:
             rpm/*.rpm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  upload_binary_to_s3:
+    uses: ./.github/workflows/upload-release-s3-job.yml
+    with:
+      artifact_name: binary
+      release_tag: ${{ github.ref_name }}
