@@ -13,7 +13,7 @@ from clyso.ceph.api.commands import ceph_report, ceph_command
 from clyso.ceph.api.loaders import load_ceph_report, load_config_dump
 from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.pg import add_command_pg
-from clyso.ceph.otto.upmap import add_command_upmap_remapped
+from clyso.ceph.otto.upmap_remapped import add_command_upmap_remapped
 from clyso.__version__ import __version__
 
 from clyso.ceph.ai.osd.command import OSDPerfCommand
