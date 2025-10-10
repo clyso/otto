@@ -130,7 +130,7 @@ def ceph_command(
 class CephConnection:
     """
     Connection wrapper for Ceph cluster commands.
-    
+
     Supports both rados library (fast, direct) and shell commands (fallback).
     Automatically detects and uses rados if available.
     """
@@ -138,7 +138,7 @@ class CephConnection:
     def __init__(self, conffile: str = "/etc/ceph/ceph.conf"):
         """
         Initialize connection to Ceph cluster.
-        
+
         Args:
             conffile: Path to ceph.conf file
         """
@@ -221,7 +221,7 @@ class CephConnection:
         """Get list of PGs in remapped state."""
         cmd = {"prefix": "pg ls", "states": ["remapped"], "format": "json"}
         output = self._execute_mon_command(cmd)
-        
+
         try:
             data = json.loads(output)
             pg_stats = data.get("pg_stats", [])
@@ -234,7 +234,7 @@ class CephConnection:
     def get_pool_types(self) -> dict[str, str]:
         """
         Get mapping of pool name to pool type (replicated/erasure).
-        
+
         Returns:
             Dict mapping pool name to "replicated" or "erasure"
         """
@@ -244,7 +244,7 @@ class CephConnection:
             cmd = {"prefix": "osd pool ls detail", "format": "plain"}
 
         output = self._execute_mon_command(cmd)
-        
+
         pool_types = {}
         for line in output.split("\n"):
             if "pool" in line:
@@ -253,5 +253,5 @@ class CephConnection:
                     pool_name = parts[1].strip("'")
                     pool_type = parts[3]
                     pool_types[pool_name] = pool_type
-        
+
         return pool_types

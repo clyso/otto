@@ -17,7 +17,7 @@ from clyso.ceph.api.schemas import OSDDFNode, OSDDumpResponse, PGStat
 class UpmapRemappedGenerator:
     """
     Generates upmap commands for remapped PGs.
-    
+
     This tool uses Ceph's pg-upmap-items functionality to quickly modify
     all PGs which are currently remapped to become active+clean.
     """
@@ -27,7 +27,7 @@ class UpmapRemappedGenerator:
     ) -> None:
         """
         Initialize the upmap command generator.
-        
+
         Args:
             connection: Active CephConnection instance
             ignore_backfilling: Skip PGs that are actively backfilling
@@ -41,16 +41,14 @@ class UpmapRemappedGenerator:
     def generate_commands(self) -> list[str]:
         """
         Generate all upmap commands for remapped PGs.
-        
+
         Returns:
             List of shell commands to execute
         """
         commands: list[str] = []
 
         if self.ignore_backfilling:
-            print(
-                "All actively backfilling PGs will be ignored.", file=sys.stderr
-            )
+            print("All actively backfilling PGs will be ignored.", file=sys.stderr)
 
         try:
             self.osds = self.conn.get_osd_list()
@@ -134,10 +132,10 @@ class UpmapRemappedGenerator:
     def _get_crush_weight(self, osd_id: int) -> float:
         """
         Calculate effective crush weight for an OSD.
-        
+
         Args:
             osd_id: OSD ID
-            
+
         Returns:
             Effective crush weight (crush_weight * reweight)
         """
@@ -153,12 +151,12 @@ class UpmapRemappedGenerator:
     ) -> list[tuple[int, int]]:
         """
         Generate upmap item pairs for a PG.
-        
+
         Args:
             up: List of up OSDs
             acting: List of acting OSDs
             replicated: True if replicated pool, False if erasure coded
-            
+
         Returns:
             List of (from_osd, to_osd) tuples
         """
@@ -198,9 +196,7 @@ class UpmapRemappedGenerator:
 
         return mappings
 
-    def _format_upmap_command(
-        self, pgid: str, mappings: list[tuple[int, int]]
-    ) -> str:
+    def _format_upmap_command(self, pgid: str, mappings: list[tuple[int, int]]) -> str:
         """Format upmap command for a PG."""
         if not mappings:
             return ""
@@ -219,7 +215,7 @@ class UpmapRemappedGenerator:
 def run_upmap_remapped(ignore_backfilling: bool = False) -> None:
     """
     Main entry point for upmap-remapped command.
-    
+
     Args:
         ignore_backfilling: Skip PGs that are actively backfilling
     """
