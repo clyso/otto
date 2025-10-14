@@ -465,7 +465,7 @@ def toolkit_help(args):
         tools = list_executable_files(tools_dir)
         for tool in tools:
             print(f"  {tool}")
-        print("\nUse 'otto toolkit <script> -h' for script-specific help")
+        print("\tUse 'otto toolkit <script> -h' for script-specific help")
     except (FileNotFoundError, NotADirectoryError) as e:
         print(f"Error accessing tools directory: {e}", file=sys.stderr)
         exit(e.errno)
