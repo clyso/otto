@@ -17,9 +17,9 @@ Newer Ceph versions may add metrics not yet in our schema and allows parsing to 
 from __future__ import annotations
 
 import pathlib
-from typing import Any
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, RootModel
 
 
 class MalformedCephDataError(Exception):
@@ -1306,6 +1306,405 @@ class OSDPerfDumpResponse(BaseModel):
     @classmethod
     def load(cls, path: pathlib.Path) -> OSDPerfDumpResponse:
         """Load and parse OSD performance dump from file."""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
+class CephfsClient(BaseModel):
+    """Schema for CephFS client information from fs status."""
+
+    clients: int = Field(default=0)
+    fs: str = Field(default="")
+
+
+class CephfsMDSVersion(BaseModel):
+    """Schema for MDS version information from fs status."""
+
+    daemon: list[str] = Field(default_factory=list)
+    version: str = Field(default="")
+
+
+class CephfsMDSMapEntry(BaseModel):
+    """Schema for MDS map entry from fs status."""
+
+    caps: int = Field(default=0)
+    dirs: int = Field(default=0)
+    dns: int = Field(default=0)
+    inos: int = Field(default=0)
+    name: str = Field(default="")
+    rank: int = Field(default=-1)
+    rate: int = Field(default=0)
+    state: str = Field(default="")
+
+    # Optional field for source
+    file: Optional[str] = Field(
+        default=None
+    )  # This field is present for the source logic in cephfs session top command
+
+
+class CephfsPool(BaseModel):
+    """Schema for CephFS pool information from fs status."""
+
+    avail: int = Field(default=0)
+    pool_id: int = Field(default=0, alias="id")
+    name: str = Field(default="")
+    pool_type: str = Field(default="", alias="type")
+    used: int = Field(default=0)
+
+
+class CephfsStatusResponse(BaseModel):
+    """Schema for `ceph fs status --format=json` response."""
+
+    model_config = {"extra": "allow"}
+
+    clients: list[CephfsClient] = Field(default_factory=list)
+    mds_version: list[CephfsMDSVersion] = Field(default_factory=list)
+    mdsmap: list[CephfsMDSMapEntry] = Field(default_factory=list)
+    pools: list[CephfsPool] = Field(default_factory=list)
+
+    @classmethod
+    def loads(cls, raw: str) -> CephfsStatusResponse:
+        """Parse CephFS status from JSON string."""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(f"Failed to parse CephFS status: {e}") from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> CephfsStatusResponse:
+        """Load and parse CephFS status from file."""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
+class MDSAddressVector(BaseModel):
+    """Schema for MDS address vector."""
+
+    type: str = Field(default="")
+    addr: str = Field(default="")
+    nonce: int = Field(default=0)
+
+
+class MDSAddresses(BaseModel):
+    """Schema for MDS addresses."""
+
+    addrvec: list[MDSAddressVector] = Field(default_factory=list)
+
+
+class MDSCompatibility(BaseModel):
+    """Schema for MDS compatibility features."""
+
+    model_config = {"extra": "allow"}
+
+    compat: dict[str, str] = Field(default_factory=dict)
+    ro_compat: dict[str, str] = Field(default_factory=dict)
+    incompat: dict[str, str] = Field(default_factory=dict)
+
+
+class MDSInfo(BaseModel):
+    """Schema for individual MDS daemon information."""
+
+    model_config = {"extra": "allow"}
+
+    gid: int = Field(default=0)
+    name: str = Field(default="")
+    rank: int = Field(default=-1)
+    incarnation: int = Field(default=0)
+    state: str = Field(default="")
+    state_seq: int = Field(default=0)
+    addr: str = Field(default="")
+    addrs: MDSAddresses = Field(default_factory=MDSAddresses)
+    join_fscid: int = Field(default=-1)
+    export_targets: list[int] = Field(default_factory=list)
+    features: int = Field(default=0)
+    flags: int = Field(default=0)
+    compat: MDSCompatibility = Field(default_factory=MDSCompatibility)
+    epoch: int = Field(default=0)  # Only present for standbys
+
+
+class MDSFlagsState(BaseModel):
+    """Schema for MDS flags state."""
+
+    joinable: bool = Field(default=True)
+    allow_snaps: bool = Field(default=True)
+    allow_multimds_snaps: bool = Field(default=True)
+    allow_standby_replay: bool = Field(default=False)
+    refuse_client_session: bool = Field(default=False)
+    refuse_standby_for_another_fs: bool = Field(default=False)
+    balance_automate: bool = Field(default=False)
+
+
+class MDSMap(BaseModel):
+    """Schema for MDS map within a filesystem."""
+
+    model_config = {"extra": "allow"}
+
+    epoch: int = Field(default=0)
+    flags: int = Field(default=0)
+    flags_state: MDSFlagsState = Field(default_factory=MDSFlagsState)
+    ever_allowed_features: int = Field(default=0)
+    explicitly_allowed_features: int = Field(default=0)
+    created: str = Field(default="")
+    modified: str = Field(default="")
+    tableserver: int = Field(default=0)
+    root: int = Field(default=0)
+    session_timeout: int = Field(default=60)
+    session_autoclose: int = Field(default=300)
+    required_client_features: dict[str, Any] = Field(default_factory=dict)
+    max_file_size: int = Field(default=0)
+    max_xattr_size: int = Field(default=0)
+    last_failure: int = Field(default=0)
+    last_failure_osd_epoch: int = Field(default=0)
+    compat: MDSCompatibility = Field(default_factory=MDSCompatibility)
+    max_mds: int = Field(default=1)
+    # "in" is a Python keyword
+    in_ranks: list[int] = Field(default_factory=list, alias="in")
+    up: dict[str, int] = Field(default_factory=dict)
+    failed: list[int] = Field(default_factory=list)
+    damaged: list[int] = Field(default_factory=list)
+    stopped: list[int] = Field(default_factory=list)
+    info: dict[str, MDSInfo] = Field(default_factory=dict)
+    data_pools: list[int] = Field(default_factory=list)
+    metadata_pool: int = Field(default=0)
+    enabled: bool = Field(default=True)
+    fs_name: str = Field(default="")
+    balancer: str = Field(default="")
+    bal_rank_mask: str = Field(default="")
+    standby_count_wanted: int = Field(default=1)
+
+
+class FilesystemInfo(BaseModel):
+    """Schema for filesystem information from mds stat."""
+
+    mdsmap: MDSMap = Field(default_factory=MDSMap)
+    filesystem_id: int = Field(default=0, alias="id")
+
+
+class FSMapCompatibility(BaseModel):
+    """Schema for fsmap compatibility."""
+
+    compat: dict[str, str] = Field(default_factory=dict)
+    ro_compat: dict[str, str] = Field(default_factory=dict)
+    incompat: dict[str, str] = Field(default_factory=dict)
+
+
+class FSMapFeatureFlags(BaseModel):
+    """Schema for fsmap feature flags."""
+
+    enable_multiple: bool = Field(default=False)
+    ever_enabled_multiple: bool = Field(default=False)
+
+
+class FSMap(BaseModel):
+    """Schema for the fsmap section of mds stat."""
+
+    model_config = {"extra": "allow"}
+
+    epoch: int = Field(default=0)
+    default_fscid: int = Field(default=0)
+    compat: FSMapCompatibility = Field(default_factory=FSMapCompatibility)
+    feature_flags: FSMapFeatureFlags = Field(default_factory=FSMapFeatureFlags)
+    standbys: list[MDSInfo] = Field(default_factory=list)
+    filesystems: list[FilesystemInfo] = Field(default_factory=list)
+
+
+class CephfsMDSStatResponse(BaseModel):
+    """Schema for `ceph mds stat --format=json` response."""
+
+    model_config = {"extra": "allow"}
+
+    fsmap: FSMap = Field(default_factory=FSMap)
+    mdsmap_first_committed: int = Field(default=0)
+    mdsmap_last_committed: int = Field(default=0)
+
+    @property
+    def standbys(self) -> list[MDSInfo]:
+        """Get standby MDS daemons."""
+        return self.fsmap.standbys
+
+    @property
+    def filesystems(self) -> list[FilesystemInfo]:
+        """Get all filesystems."""
+        return self.fsmap.filesystems
+
+    @classmethod
+    def loads(cls, raw: str) -> CephfsMDSStatResponse:
+        """Parse MDS stat from JSON string."""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(f"Failed to parse MDS stat: {e}") from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> CephfsMDSStatResponse:
+        """Load and parse MDS stat from file."""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
+class CephfsSessionEntityName(BaseModel):
+    """Schema for CephFS session entity name."""
+
+    entity_type: str = Field(default="client", alias="type")
+    num: int = Field(default=0)
+
+
+class CephfsSessionEntityAddr(BaseModel):
+    """Schema for CephFS session entity address."""
+
+    addr_type: str = Field(default="v1", alias="type")
+    addr: str = Field(default="")
+    nonce: int = Field(default=0)
+
+
+class CephfsSessionEntity(BaseModel):
+    """Schema for CephFS session entity."""
+
+    name: CephfsSessionEntityName = Field(default_factory=CephfsSessionEntityName)
+    addr: CephfsSessionEntityAddr = Field(default_factory=CephfsSessionEntityAddr)
+
+
+class CephfsSessionMetricValue(BaseModel):
+    """Schema for CephFS session metric with value and halflife."""
+
+    value: float = Field(default=0.0)
+    halflife: float = Field(default=0.0)
+
+
+class CephfsSessionClientFeatures(BaseModel):
+    """Schema for CephFS session client features."""
+
+    feature_bits: str = Field(default="0x0")
+
+
+class CephfsSessionMetricFlags(BaseModel):
+    """Schema for CephFS session metric flags."""
+
+    feature_bits: str = Field(default="0x0")
+
+
+class CephfsSessionMetricSpec(BaseModel):
+    """Schema for CephFS session metric specification."""
+
+    metric_flags: CephfsSessionMetricFlags = Field(
+        default_factory=CephfsSessionMetricFlags
+    )
+
+
+class CephfsSessionClientMetadata(BaseModel):
+    """Schema for CephFS session client metadata."""
+
+    model_config = {"extra": "allow"}
+
+    client_features: CephfsSessionClientFeatures = Field(
+        default_factory=CephfsSessionClientFeatures
+    )
+    metric_spec: CephfsSessionMetricSpec = Field(
+        default_factory=CephfsSessionMetricSpec
+    )
+    entity_id: str = Field(default="")
+    hostname: str = Field(default="")
+    kernel_version: str = Field(default="")
+    root: str = Field(default="")
+
+
+class CephfsSessionCompletedRequest(BaseModel):
+    """Schema for CephFS session completed request."""
+
+    tid: int = Field(default=0)
+    created_ino: str = Field(default="")
+
+
+class CephfsSessionPreallocIno(BaseModel):
+    """Schema for CephFS session preallocated inode range."""
+
+    start: str = Field(default="")
+    length: int = Field(default=0)
+
+
+class CephfsSession(BaseModel):
+    """Schema for individual CephFS session."""
+
+    model_config = {"extra": "allow"}
+
+    session_id: int = Field(default=0, alias="id")
+    entity: CephfsSessionEntity = Field(default_factory=CephfsSessionEntity)
+    state: str = Field(default="")
+    num_leases: int = Field(default=0)
+    num_caps: int = Field(default=0)
+    request_load_avg: float = Field(default=0.0)
+    uptime: float = Field(default=0.0)
+    requests_in_flight: int = Field(default=0)
+    num_completed_requests: int = Field(default=0)
+    num_completed_flushes: int = Field(default=0)
+    reconnecting: bool = Field(default=False)
+    recall_caps: CephfsSessionMetricValue = Field(
+        default_factory=CephfsSessionMetricValue
+    )
+    release_caps: CephfsSessionMetricValue = Field(
+        default_factory=CephfsSessionMetricValue
+    )
+    recall_caps_throttle: CephfsSessionMetricValue = Field(
+        default_factory=CephfsSessionMetricValue
+    )
+    recall_caps_throttle2o: CephfsSessionMetricValue = Field(
+        default_factory=CephfsSessionMetricValue
+    )
+    session_cache_liveness: CephfsSessionMetricValue = Field(
+        default_factory=CephfsSessionMetricValue
+    )
+    cap_acquisition: CephfsSessionMetricValue = Field(
+        default_factory=CephfsSessionMetricValue
+    )
+    last_trim_completed_requests_tid: int = Field(default=0)
+    last_trim_completed_flushes_tid: int = Field(default=0)
+    delegated_inos: list[int] = Field(default_factory=list)
+    inst: str = Field(default="")
+    completed_requests: list[CephfsSessionCompletedRequest] = Field(
+        default_factory=list
+    )
+    prealloc_inos: list[CephfsSessionPreallocIno] = Field(default_factory=list)
+    client_metadata: CephfsSessionClientMetadata = Field(
+        default_factory=CephfsSessionClientMetadata
+    )
+
+
+class CephfsSessionListResponse(RootModel[list[CephfsSession]]):
+    """Schema for `ceph tell mds.X session ls` response."""
+
+    def __iter__(self):
+        return iter(self.root)
+
+    def __len__(self):
+        return len(self.root)
+
+    def __getitem__(self, item):
+        return self.root[item]
+
+    @property
+    def sessions(self) -> list[CephfsSession]:
+        """Get the sessions list for compatibility."""
+        return self.root
+
+    @classmethod
+    def loads(cls, raw: str) -> CephfsSessionListResponse:
+        """Parse CephFS session list from JSON string."""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(
+                f"Failed to parse CephFS session list: {e}"
+            ) from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> CephfsSessionListResponse:
+        """Load and parse CephFS session list from file."""
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(f"File not found: {path}")
         raw = path.read_text()
