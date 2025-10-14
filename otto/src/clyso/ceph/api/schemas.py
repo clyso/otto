@@ -7,12 +7,14 @@ Pydantic schemas for Ceph JSON API responses.
 This module provides typed interfaces for Ceph command JSON outputs,
 enabling better type checking and IntelliSense support with validation.
 
+This schema handles different ceph versions
 
-All fields in this module use Field(default=...) for consistent default value handling
-to ensure backward and forward compatibility across Ceph versions:
+Older Ceph versions may not have newer metrics/fields so we put | None
+- field: Type | None = None
 
-Older Ceph versions may not have newer metrics/fields
 Newer Ceph versions may add metrics not yet in our schema and allows parsing to succeed even when fields are missing
+so we add this option
+model_config = {"extra": "allow"}
 """
 # Basedpyright Any type warnings are suppressed for this file
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportExplicitAny=false
@@ -154,7 +156,7 @@ class PGStatsSum(BaseModel):
     """Schema for PG stats summary."""
 
     stat_sum: PGStatSum
-    store_stats: PGStoreStats
+    store_stats: PGStoreStats | None = None
     log_size: int = Field(default=0)
     ondisk_log_size: int = Field(default=0)
     up: int = Field(default=0)
@@ -166,7 +168,7 @@ class PGStatsDelta(BaseModel):
     """Schema for PG stats delta."""
 
     stat_sum: PGStatSum
-    store_stats: PGStoreStats
+    store_stats: PGStoreStats | None = None
     log_size: int = Field(default=0)
     ondisk_log_size: int = Field(default=0)
     up: int = Field(default=0)
@@ -256,8 +258,8 @@ class OSDStat(BaseModel):
     snap_trim_queue_len: int = Field(default=0)
     num_snap_trimming: int = Field(default=0)
     num_shards_repaired: int = Field(default=0)
-    op_queue_age_hist: OpQueueAgeHist
-    perf_stat: PerfStat
+    op_queue_age_hist: OpQueueAgeHist | None = None
+    perf_stat: PerfStat | None = None
     alerts: list[Any] = Field(default_factory=list)
     network_ping_times: list[Any] = Field(default_factory=list)
 
@@ -282,8 +284,8 @@ class OSDStatsSum(BaseModel):
     snap_trim_queue_len: int = Field(default=0)
     num_snap_trimming: int = Field(default=0)
     num_shards_repaired: int = Field(default=0)
-    op_queue_age_hist: OpQueueAgeHist
-    perf_stat: PerfStat
+    op_queue_age_hist: OpQueueAgeHist | None = None
+    perf_stat: PerfStat | None = None
     alerts: list[Any] = Field(default_factory=list)
     network_ping_times: list[Any] = Field(default_factory=list)
 
@@ -446,7 +448,7 @@ class PoolConfig(BaseModel):
     pg_placement_num_target: int = Field(default=0)
     pg_num_target: int = Field(default=0)
     pg_num_pending: int = Field(default=0)
-    last_pg_merge_meta: LastPGMergeMeta
+    last_pg_merge_meta: LastPGMergeMeta | None = None
     last_change: str = Field(default="")
     last_force_op_resend: str = Field(default="")
     last_force_op_resend_prenautilus: str = Field(default="")
@@ -1503,7 +1505,7 @@ class FSMapFeatureFlags(BaseModel):
 
 
 class FSMap(BaseModel):
-    """Schema for the fsmap section of mds stat."""
+    """Schema for the fsmap section of mds stat (detailed MDS map)."""
 
     model_config = {"extra": "allow"}
 
@@ -1714,9 +1716,315 @@ class CephfsSessionListResponse(RootModel[list[CephfsSession]]):
         return cls.loads(raw)
 
 
+class HealthCheckSummary(BaseModel):
+    """Schema for health check summary."""
+
+    model_config = {"extra": "allow"}
+
+    message: str = Field(default="")
+    count: int = Field(default=0)
+
+
+class HealthCheckDetail(BaseModel):
+    """Schema for health check detail."""
+
+    model_config = {"extra": "allow"}
+
+    message: str = Field(default="")
+
+
+class HealthCheck(BaseModel):
+    """Schema for individual health check."""
+
+    model_config = {"extra": "allow"}
+
+    severity: str = Field(default="")
+    summary: HealthCheckSummary = Field(default_factory=HealthCheckSummary)
+    detail: list[HealthCheckDetail] = Field(default_factory=list)
+    muted: bool = Field(default=False)
+
+
+class Health(BaseModel):
+    """Schema for cluster health status."""
+
+    model_config = {"extra": "allow"}
+
+    status: str = Field(default="")
+    checks: dict[str, HealthCheck] = Field(default_factory=dict)
+    mutes: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class MonMapFeatures(BaseModel):
+    """Schema for monitor map features."""
+
+    model_config = {"extra": "allow"}
+
+    persistent: list[str] = Field(default_factory=list)
+    optional: list[str] = Field(default_factory=list)
+
+
+class MonInfo(BaseModel):
+    """Schema for monitor information."""
+
+    model_config = {"extra": "allow"}
+
+    rank: int = Field(default=0)
+    name: str = Field(default="")
+    public_addrs: dict[str, Any] = Field(default_factory=dict)
+    public_addr: str = Field(default="")
+    addr: str = Field(default="")
+    priority: int = Field(default=0)
+    weight: int = Field(default=0)
+    crush_location: str = Field(default="")
+
+
+class MonMap(BaseModel):
+    """Schema for monitor map."""
+
+    model_config = {"extra": "allow"}
+
+    epoch: int = Field(default=0)
+    fsid: str = Field(default="")
+    modified: str = Field(default="")
+    created: str = Field(default="")
+    min_mon_release: int = Field(default=0)
+    min_mon_release_name: str = Field(default="")
+    election_strategy: int = Field(default=0)
+    stretch_mode: bool = Field(default=False)
+    tiebreaker_mon: str = Field(default="")
+    disallowed_leaders: str = Field(default="", alias="disallowed_leaders: ")
+    features: MonMapFeatures = Field(default_factory=MonMapFeatures)
+    mons: list[MonInfo] = Field(default_factory=list)
+
+
+class OSDInfo(BaseModel):
+    """Schema for OSD information in osdmap."""
+
+    model_config = {"extra": "allow"}
+
+    osd: int = Field(default=0)
+    uuid: str = Field(default="")
+    up: int = Field(default=0)
+    in_field: int = Field(default=0, alias="in")
+    weight: float = Field(default=0.0)
+    primary_affinity: float = Field(default=1.0)
+    last_clean_begin: int = Field(default=0)
+    last_clean_end: int = Field(default=0)
+    up_from: int = Field(default=0)
+    up_thru: int = Field(default=0)
+    down_at: int = Field(default=0)
+    lost_at: int = Field(default=0)
+    public_addrs: dict[str, Any] = Field(default_factory=dict)
+    cluster_addrs: dict[str, Any] = Field(default_factory=dict)
+    heartbeat_back_addrs: dict[str, Any] = Field(default_factory=dict)
+    heartbeat_front_addrs: dict[str, Any] = Field(default_factory=dict)
+    public_addr: str = Field(default="")
+    cluster_addr: str = Field(default="")
+    heartbeat_back_addr: str = Field(default="")
+    heartbeat_front_addr: str = Field(default="")
+    state: list[str] = Field(default_factory=list)
+
+
+class OSDMap(BaseModel):
+    """Schema for OSD map."""
+
+    model_config = {"extra": "allow"}
+
+    epoch: int = Field(default=0)
+    fsid: str = Field(default="")
+    created: str = Field(default="")
+    modified: str = Field(default="")
+    flags: str = Field(default="")
+    flags_num: int = Field(default=0)
+    flags_set: list[str] = Field(default_factory=list)
+    crush_version: int = Field(default=0)
+    full_ratio: float = Field(default=0.0)
+    backfillfull_ratio: float = Field(default=0.0)
+    nearfull_ratio: float = Field(default=0.0)
+    min_compat_client: str = Field(default="")
+    require_min_compat_client: str = Field(default="")
+    require_osd_release: str = Field(default="")
+    pools: list[PoolConfig] = Field(default_factory=list)
+    osds: list[OSDInfo] = Field(default_factory=list)
+    pg_upmap: list[Any] = Field(default_factory=list)
+    pg_upmap_items: list[Any] = Field(default_factory=list)
+    pg_temp: list[Any] = Field(default_factory=list)
+    primary_temp: list[Any] = Field(default_factory=list)
+    blacklist: dict[str, Any] = Field(default_factory=dict)
+    erasure_code_profiles: dict[str, Any] = Field(default_factory=dict)
+
+
+class CrushTunables(BaseModel):
+    """Schema for CRUSH tunables."""
+
+    choose_local_tries: int = Field(default=0)
+    choose_local_fallback_tries: int = Field(default=0)
+    choose_total_tries: int = Field(default=0)
+    chooseleaf_descend_once: int = Field(default=0)
+    chooseleaf_vary_r: int = Field(default=0)
+    chooseleaf_stable: int = Field(default=0)
+    straw_calc_version: int = Field(default=0)
+    allowed_bucket_algs: int = Field(default=0)
+    profile: str = Field(default="")
+    optimal_tunables: int = Field(default=0)
+    legacy_tunables: int = Field(default=0)
+    minimum_required_version: str = Field(default="")
+    require_feature_tunables: int = Field(default=0)
+    require_feature_tunables2: int = Field(default=0)
+    has_v2_rules: int = Field(default=0)
+    require_feature_tunables3: int = Field(default=0)
+    has_v3_rules: int = Field(default=0)
+    has_v4_buckets: int = Field(default=0)
+    require_feature_tunables5: int = Field(default=0)
+    has_v5_rules: int = Field(default=0)
+
+
+class CrushMap(BaseModel):
+    """Schema for CRUSH map."""
+
+    model_config = {"extra": "allow"}
+
+    devices: list[dict[str, Any]] = Field(default_factory=list)
+    types: list[dict[str, Any]] = Field(default_factory=list)
+    buckets: list[dict[str, Any]] = Field(default_factory=list)
+    rules: list[dict[str, Any]] = Field(default_factory=list)
+    tunables: CrushTunables = Field(default_factory=CrushTunables)
+    choose_args: dict[str, Any] = Field(default_factory=dict)
+
+
+class OSDMetadata(BaseModel):
+    """Schema for OSD metadata."""
+
+    model_config = {"extra": "allow"}
+
+    id: int = Field(default=0)
+    arch: str = Field(default="")
+    back_addr: str = Field(default="")
+    back_iface: str = Field(default="")
+    bluefs: str = Field(default="")
+    bluefs_db_access_mode: str = Field(default="")
+    bluefs_db_block_size: str = Field(default="")
+    bluefs_db_dev: str = Field(default="")
+    bluefs_db_dev_node: str = Field(default="")
+    bluefs_db_driver: str = Field(default="")
+    bluefs_db_model: str = Field(default="")
+    bluefs_db_partition_path: str = Field(default="")
+    bluefs_db_rotational: str = Field(default="")
+    bluefs_db_serial: str = Field(default="")
+    bluefs_db_size: str = Field(default="")
+    bluefs_db_type: str = Field(default="")
+    bluefs_dedicated_db: str = Field(default="")
+    bluefs_dedicated_wal: str = Field(default="")
+    bluefs_single_shared_device: str = Field(default="")
+    bluestore_bdev_access_mode: str = Field(default="")
+    bluestore_bdev_block_size: str = Field(default="")
+    bluestore_bdev_dev: str = Field(default="")
+    bluestore_bdev_dev_node: str = Field(default="")
+    bluestore_bdev_driver: str = Field(default="")
+    bluestore_bdev_model: str = Field(default="")
+    bluestore_bdev_partition_path: str = Field(default="")
+    bluestore_bdev_rotational: str = Field(default="")
+    bluestore_bdev_serial: str = Field(default="")
+    bluestore_bdev_size: str = Field(default="")
+    bluestore_bdev_type: str = Field(default="")
+    ceph_release: str = Field(default="")
+    ceph_version: str = Field(default="")
+    ceph_version_short: str = Field(default="")
+    cpu: str = Field(default="")
+    default_device_class: str = Field(default="")
+    devices: str = Field(default="")
+    distro: str = Field(default="")
+    distro_description: str = Field(default="")
+    distro_version: str = Field(default="")
+    front_addr: str = Field(default="")
+    front_iface: str = Field(default="")
+    hb_back_addr: str = Field(default="")
+    hb_front_addr: str = Field(default="")
+    hostname: str = Field(default="")
+    journal_rotational: str = Field(default="")
+    kernel_description: str = Field(default="")
+    kernel_version: str = Field(default="")
+    mem_swap_kb: str = Field(default="")
+    mem_total_kb: str = Field(default="")
+    objectstore: str = Field(default="")
+    os: str = Field(default="")
+    osd_data: str = Field(default="")
+    osd_objectstore: str = Field(default="")
+    rotational: str = Field(default="")
+
+
+class CephReport(BaseModel):
+    """Schema for Ceph cluster diagnostic report."""
+
+    model_config = {"extra": "allow"}
+
+    cluster_fingerprint: str = Field(default="")
+    version: str = Field(default="")
+    commit: str = Field(default="")
+    timestamp: str = Field(default="")
+    tag: str = Field(default="")
+    health: Health = Field(default_factory=Health)
+    monmap: MonMap = Field(default_factory=MonMap)
+    monmap_first_committed: int = Field(default=0)
+    monmap_last_committed: int = Field(default=0)
+    osdmap: OSDMap = Field(default_factory=OSDMap)
+    osdmap_first_committed: int = Field(default=0)
+    osdmap_last_committed: int = Field(default=0)
+    osdmap_clean_epochs: dict[str, Any] = Field(default_factory=dict)
+    crushmap: CrushMap = Field(default_factory=CrushMap)
+    fsmap: FSMap = Field(default_factory=FSMap)
+    mdsmap_first_committed: int = Field(default=0)
+    mdsmap_last_committed: int = Field(default=0)
+    osd_metadata: list[OSDMetadata] = Field(default_factory=list)
+    osd_stats: list[OSDStat] = Field(default_factory=list)
+    osd_sum: OSDStatsSum = Field(default_factory=OSDStatsSum)
+    osd_sum_by_class: dict[str, OSDStatsSum] = Field(default_factory=dict)
+    pool_stats: list[PoolStat] = Field(default_factory=list)
+    pool_sum: PGStatsSum = Field(default_factory=PGStatsSum)
+    num_osd: int = Field(default=0)
+    num_pg: int = Field(default=0)
+    num_pg_active: int = Field(default=0)
+    num_pg_unknown: int = Field(default=0)
+    num_pg_by_state: list[dict[str, Any]] = Field(default_factory=list)
+    num_pg_by_osd: list[dict[str, Any]] = Field(default_factory=list)
+    purged_snaps: list[Any] = Field(default_factory=list)
+    quorum: list[int] = Field(default_factory=list)
+    paxos: dict[str, Any] = Field(default_factory=dict)
+    servicemap: dict[str, Any] = Field(default_factory=dict)
+    auth: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def loads(cls, raw: str) -> CephReport:
+        """Parse Ceph report from JSON string."""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(f"Failed to parse Ceph report: {e}") from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> CephReport:
+        """Load and parse Ceph report from file."""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
 # to resolve forward references
 _ = OSDTree.model_rebuild()
 _ = PGDump.model_rebuild()
 _ = OSDDFResponse.model_rebuild()
 _ = OSDDumpResponse.model_rebuild()
 _ = OSDPerfDumpResponse.model_rebuild()
+_ = CephReport.model_rebuild()
+
+
+# to resolve forward references
+_ = OSDTree.model_rebuild()
+_ = PGDump.model_rebuild()
+_ = OSDDFResponse.model_rebuild()
+_ = OSDDumpResponse.model_rebuild()
+_ = OSDPerfDumpResponse.model_rebuild()
+_ = CephfsStatusResponse.model_rebuild()
+_ = CephfsMDSStatResponse.model_rebuild()
+_ = CephReport.model_rebuild()

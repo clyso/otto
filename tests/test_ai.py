@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 
 import clyso.ceph.ai as ai_module
+from clyso.ceph.ai.data import CephData
+from clyso.ceph.api.schemas import CephReport
 
 
 class TestClassResult(unittest.TestCase):
@@ -72,7 +74,9 @@ class TestClysoCephAI(unittest.TestCase):
         self.report_json = json.loads(_report.read_text())
 
     def test_check_report(self) -> None:
-        result = ai_module.generate_result(report_json=self.report_json)
+        data = CephData()
+        data.ceph_report = CephReport.model_validate(self.report_json)
+        result = ai_module.generate_result(ceph_data=data)
         out = json.loads(result.dump())
 
         # Write the new JSON output to a temp file
@@ -245,7 +249,9 @@ class TestClysoCephAI(unittest.TestCase):
         _report = test_path / report_file
         report_json = json.loads(_report.read_text())
 
-        result = ai_module.generate_result(report_json=report_json)
+        data = CephData()
+        data.ceph_report = CephReport.model_validate(report_json)
+        result = ai_module.generate_result(ceph_data=data)
         result_json = json.loads(result.dump())
 
         version_section = next(

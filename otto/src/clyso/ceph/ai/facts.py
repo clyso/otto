@@ -73,20 +73,18 @@ class CephFacts:
 
     def _extract_from_report(self) -> None:
         """Extract facts from ceph report"""
-        report: Any = self.ceph_data.ceph_report
+        report = self.ceph_data.ceph_report
 
-        self.version = to_version(report.get("version", "unknown"))
+        self.version = to_version(report.version)
         self.major_version = to_major(self.version)
         self.release_name = to_release(self.major_version)
 
-        osdmap: dict[str, Any] = report.get("osdmap", {})
-        self.num_osds = builtins.len(osdmap.get("osds", []))
-        self.num_pools = builtins.len(osdmap.get("pools", []))
+        self.num_osds = builtins.len(report.osdmap.osds)
+        self.num_pools = builtins.len(report.osdmap.pools)
 
-        monmap: dict[str, Any] = report.get("monmap", {})
-        self.num_mons = builtins.len(monmap.get("mons", []))
+        self.num_mons = builtins.len(report.monmap.mons)
 
-        self.cluster_id = monmap.get("fsid", "unknown")
+        self.cluster_id = report.monmap.fsid
 
         self.deployment_type = self._detect_deployment_type()
 
@@ -113,11 +111,9 @@ class CephFacts:
         ):
             return "unknown"
 
-        osd_metadata: list[dict[str, Any]] = self.ceph_data.ceph_report.get(
-            "osd_metadata", []
-        )
+        osd_metadata = self.ceph_data.ceph_report.osd_metadata
         for osd in osd_metadata:
-            if "container_image" in osd:
+            if hasattr(osd, "container_image"):
                 return "cephadm"
         return "traditional"
 
@@ -129,12 +125,11 @@ class CephFacts:
         ):
             return False
 
-        osdmap: dict[str, Any] = self.ceph_data.ceph_report.get("osdmap", {})
-        osds: list[dict[str, Any]] = osdmap.get("osds", [])
+        osds = self.ceph_data.ceph_report.osdmap.osds
         if not osds:
             return False
 
-        first_osd: dict[str, Any] = osds[0]
+        first_osd = osds[0]
         public_ip: str = first_osd.get("public_addr", "").split(":")[0]
         cluster_ip: str = first_osd.get("cluster_addr", "").split(":")[0]
         return public_ip != cluster_ip

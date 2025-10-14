@@ -1,7 +1,7 @@
 # Copyright (C) 2025 Clyso
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Desciption: Crush class to get crush settings.
+from clyso.ceph.api.schemas import CrushMap
 
 
 class Crush(object):
@@ -9,14 +9,14 @@ class Crush(object):
     Crush class to get crush settings.
     """
 
-    def __init__(self, crushmap):
+    def __init__(self, crushmap: CrushMap):
         self.crushmap = crushmap
 
     def get_rule_by_id(self, rule_id):
         """
         Get crush rule by rule id.
         """
-        for rule in self.crushmap["rules"]:
+        for rule in self.crushmap.rules:
             if rule["rule_id"] == rule_id:
                 return rule
         return None
@@ -25,7 +25,7 @@ class Crush(object):
         """
         Get crush rule by rule id.
         """
-        for rule in self.crushmap["rules"]:
+        for rule in self.crushmap.rules:
             if rule["rule_name"] == rule_name:
                 return rule
         return None
@@ -54,7 +54,7 @@ class Crush(object):
         for step in rule["steps"]:
             if step["op"] == "take":
                 root_name = step["item_name"]
-                for item in self.crushmap["buckets"]:
+                for item in self.crushmap.buckets:
                     if item["name"] == root_name:
                         return item["id"]
         return None
@@ -64,7 +64,7 @@ class Crush(object):
         Get osds under root.
         """
         osds = []
-        for item in self.crushmap["buckets"]:
+        for item in self.crushmap.buckets:
             if item["id"] != root_id:
                 continue
             for item in item["items"]:
@@ -79,7 +79,7 @@ class Crush(object):
         Get items of specified type under root.
         """
         items = []
-        for item in self.crushmap["buckets"]:
+        for item in self.crushmap.buckets:
             if item["id"] != root_id:
                 continue
             if item["type_name"] == item_type:
@@ -100,7 +100,7 @@ class Crush(object):
         Get zero weight buckets under root.
         """
         items = []
-        for item in self.crushmap["buckets"]:
+        for item in self.crushmap.buckets:
             if item["id"] != root_id:
                 continue
             if item["weight"] == 0:
@@ -117,7 +117,7 @@ class Crush(object):
         """
         Get bucket weight.
         """
-        for item in self.crushmap["buckets"]:
+        for item in self.crushmap.buckets:
             if item_id < 0 and item["id"] == item_id:
                 return item["weight"]
             for item in item["items"]:
