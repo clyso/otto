@@ -1,18 +1,24 @@
 from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.pg.histogram import histogram, calculate_histogram, DataPoint, median
+from clyso.ceph.api.schemas import OSDTree, PGDump
 from collections import defaultdict
 from types import SimpleNamespace
+from typing import TypedDict, overload
 import json
+
+
+class PoolPGInfo(TypedDict):
+    osds: dict[int, int]
+    total_pgs: int
 
 
 class PGHistogram:
     def __init__(self, osd_tree: dict, pg_dump: dict, flags):
         self.data = CephData()
-        self.data.add_ceph_osd_tree(osd_tree)
-        self.data.add_ceph_pg_dump(pg_dump)
+        self.data.ceph_osd_tree = OSDTree.model_validate(osd_tree)
+        self.data.ceph_pg_dump = PGDump.model_validate(pg_dump)
         self.flags = flags
 
-        # interface
         self.osd_weights = self.get_weights()
         self.osds = self.get_pg_stats()
 
@@ -28,32 +34,31 @@ class PGHistogram:
 
     def get_weights(self):
         osd_weights = dict()
-        # https://github.com/cernceph/ceph-scripts/blob/master/tools/ceph-pg-histogram
-        for osd in self.data.ceph_osd_tree["nodes"]:
-            if osd["type"] == "osd":
-                osd_id = osd["id"]
-                reweight = float(osd["reweight"])
-                crush_weight = float(osd["crush_weight"])
-                osd_weights[osd_id] = dict()
-                osd_weights[osd_id]["crush_weight"] = crush_weight
-                osd_weights[osd_id]["reweight"] = reweight
+        if self.data.ceph_osd_tree:
+            for osd in self.data.ceph_osd_tree.nodes:
+                if osd.type == "osd":
+                    osd_id = osd.id
+                    reweight = float(osd.reweight) if osd.reweight is not None else 1.0
+                    crush_weight = (
+                        float(osd.crush_weight) if osd.crush_weight is not None else 0.0
+                    )
+                    osd_weights[osd_id] = dict()
+                    osd_weights[osd_id]["crush_weight"] = crush_weight
+                    osd_weights[osd_id]["reweight"] = reweight
 
-        # print(osd_weights)
         return osd_weights
 
     def get_pg_stats(self):
-        pg_data = (
-            self.data.ceph_pg_dump["pg_map"]
-            if "pg_map" in self.data.ceph_pg_dump
-            else self.data.ceph_pg_dump
-        )
-        ceph_pg_stats = pg_data["pg_stats"]
+        if not self.data.ceph_pg_dump:
+            return defaultdict(int)
+
+        ceph_pg_stats = self.data.ceph_pg_dump.pg_map.pg_stats
         osds = defaultdict(int)
         for pg in ceph_pg_stats:
-            poolid = pg["pgid"].split(".")[0]
+            poolid = pg.pgid.split(".")[0]
             if self.flags.pools and poolid not in self.flags.pools:
                 continue
-            for osd in pg["acting"]:
+            for osd in pg.acting:
                 if osd >= 0 and osd < 1000000:
                     osds[osd] += 1
 
@@ -61,7 +66,15 @@ class PGHistogram:
 
     ## Histogram Json logic for CES UI
 
-    def _get_per_pool_pg_stats(self, pool_id=None):
+    @overload
+    def _get_per_pool_pg_stats(self, pool_id: int) -> tuple[dict[int, int], int]: ...
+
+    @overload
+    def _get_per_pool_pg_stats(self, pool_id: None = None) -> dict[str, PoolPGInfo]: ...
+
+    def _get_per_pool_pg_stats(
+        self, pool_id: int | None = None
+    ) -> tuple[dict[int, int], int] | dict[str, PoolPGInfo]:
         """
         Extract PG counts per OSD grouped by pool from PG dump data.
 
@@ -76,27 +89,33 @@ class PGHistogram:
             If pool_id: (osds_dict, total_pgs) for single pool
             If None: pools_data dict with all pools
         """
-        pg_data = (
-            self.data.ceph_pg_dump["pg_map"]
-            if "pg_map" in self.data.ceph_pg_dump
-            else self.data.ceph_pg_dump
-        )
-        ceph_pg_stats = pg_data["pg_stats"]
+        if not self.data.ceph_pg_dump:
+            if pool_id is not None:
+                return {}, 0
+            else:
+                return {}
 
-        # Always collect all data first (single pass through PGs)
-        pools_data = defaultdict(lambda: {"osds": defaultdict(int), "total_pgs": 0})
+        ceph_pg_stats = self.data.ceph_pg_dump.pg_map.pg_stats
+
+        pools_data: dict[str, PoolPGInfo] = {}
 
         for pg in ceph_pg_stats:
-            poolid = pg["pgid"].split(".")[0]
+            poolid = pg.pgid.split(".")[0]
+            if poolid not in pools_data:
+                pools_data[poolid] = {"osds": defaultdict(int), "total_pgs": 0}
+
             pools_data[poolid]["total_pgs"] += 1
 
-            for osd in pg["acting"]:
+            for osd in pg.acting:
                 if osd >= 0 and osd < 1000000:
                     pools_data[poolid]["osds"][osd] += 1
 
         if pool_id is not None:
             pool_str = str(pool_id)
-            return pools_data[pool_str]["osds"], pools_data[pool_str]["total_pgs"]
+            if pool_str in pools_data:
+                return pools_data[pool_str]["osds"], pools_data[pool_str]["total_pgs"]
+            else:
+                return {}, 0
         else:
             return pools_data
 
@@ -139,7 +158,6 @@ class PGHistogram:
             All pools: {"pools": {"37": {summary: {...}, "bins": [...], "totalPGs": int}, "42": {summary: {...}, "bins": [...], "totalPGs": int}}}
         """
         if pool_id is not None:
-            # Single pool case
             osds_dict, total_pgs = self._get_per_pool_pg_stats(pool_id)
             pool_data = self._generate_histogram_dict(
                 osds_dict, total_pgs, normalize, bins
@@ -147,17 +165,15 @@ class PGHistogram:
             result = {"pools": {str(pool_id): pool_data}}
             return json.dumps(result, indent=2)
         else:
-            # All pools case
             pools_data = self._get_per_pool_pg_stats()
 
             result = {"pools": {}}
 
-            # Create individual pool summaries
-            for pool_id, pool_data in pools_data.items():
+            for pool_id_str, pool_info in pools_data.items():
                 pool_data_dict = self._generate_histogram_dict(
-                    pool_data["osds"], pool_data["total_pgs"], normalize, bins
+                    pool_info["osds"], pool_info["total_pgs"], normalize, bins
                 )
-                result["pools"][pool_id] = pool_data_dict
+                result["pools"][pool_id_str] = pool_data_dict
 
             return json.dumps(result, indent=2)
 

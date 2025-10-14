@@ -8,12 +8,9 @@ import errno
 import yaml
 
 from clyso.ceph.ai import generate_result
-from clyso.ceph.ai.common import (
-    OttoParser,
-    load_ceph_report_file,
-    CEPH_FILES,
-)
+from clyso.ceph.ai.common import OttoParser
 from clyso.ceph.api.commands import ceph_report, ceph_command
+from clyso.ceph.api.loaders import load_ceph_report, load_config_dump
 from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.pg import add_command_pg
 from clyso.ceph.otto.upmap import add_command_upmap_remapped
@@ -23,100 +20,6 @@ from clyso.ceph.ai.cephfs import add_command_cephfs
 from clyso.ceph.ai.osd.command import OSDPerfCommand
 
 CONFIG_FILE = "otto.yaml"
-
-
-def collect(args=None):
-    skip_confirmation = getattr(args, "yes", True) if args else True
-    return ceph_report(skip_confirmation=skip_confirmation)
-
-
-def collect_data_source(
-    explicit_file,
-    file_patterns,
-    cli_command,
-    data_source_name,
-    verbose=False,
-    args=None,
-):
-    """
-    1. Check if file is explicitly provided via CLI argument
-    2. Check if file exists in current directory (using file patterns)
-    3. Fall back to running ceph CLI command
-    """
-    skip_confirmation = getattr(args, "yes", True) if args else True
-    if explicit_file:
-        try:
-            file_path = Path(explicit_file)
-            return json.loads(file_path.read_text(encoding="utf-8"))
-        except Exception as e:
-            if verbose:
-                print(
-                    f"Warning: Failed to read {data_source_name} from {explicit_file}: {e}",
-                    file=sys.stderr,
-                )
-            return None
-
-    for pattern in file_patterns:
-        if os.path.exists(pattern):
-            try:
-                with open(pattern, "r") as file:
-                    return json.load(file)
-            except Exception as e:
-                if verbose:
-                    print(
-                        f"Warning: Failed to read {data_source_name} from {pattern}: {e}",
-                        file=sys.stderr,
-                    )
-                continue
-
-    if cli_command:
-        return ceph_command(cli_command, skip_confirmation=skip_confirmation)
-
-    return None
-
-
-def collect_all_data(args):
-    """
-    Returns a populated CephData object and a list of warnings.
-    """
-    data = CephData()
-    warnings = []
-    verbose = getattr(args, "verbose", False)
-
-    """Load Ceph report from specified file or default location."""
-    using_static_report = bool(args.ceph_report_json)
-
-    if using_static_report:
-        report = load_ceph_report_file(args.ceph_report_json)
-        data.add_ceph_report(report)
-    elif os.path.exists(CEPH_FILES["ceph-report"]):
-        report = load_ceph_report_file(CEPH_FILES["ceph-report"])
-        data.add_ceph_report(report)
-    else:
-        try:
-            report = collect(args)
-            data.add_ceph_report(report)
-        except Exception as e:
-            print(f"Error: Failed to collect ceph report via CLI: {e}", file=sys.stderr)
-            sys.exit(1)
-
-    # Collect Config Dump - avoid CLI commands when using static report
-    config_dump = collect_data_source(
-        getattr(args, "ceph_config_dump", None),
-        [CEPH_FILES["config_dump"]],
-        None if using_static_report else "ceph config dump -f json",
-        "config dump",
-        verbose,
-        args,
-    )
-    if config_dump:
-        data.add_ceph_config_dump(config_dump)
-    else:
-        warnings.append(
-            "Config dump analysis skipped - unable to collect configuration data"
-        )
-
-    return data, warnings
 
 
 def render_progress_bar(data):
@@ -260,11 +163,64 @@ def verbose_result(result):
             print("")
 
 
-def subcommand_checkup(args):
-    # CephData creation
-    data, warnings = collect_all_data(args)
+def subcommand_checkup(args: argparse.Namespace) -> None:
+    data = CephData()
+    warnings: list[str] = []
+    verbose: bool = getattr(args, "verbose", False)
+    skip_confirmation: bool = getattr(args, "yes", True)
 
-    # Show warnings for both verbose and summary modes
+    using_static_report: bool = bool(getattr(args, "ceph_report_json", None))
+
+    if args.ceph_report_json:
+        try:
+            data.ceph_report = load_ceph_report(args.ceph_report_json)
+        except Exception as e:
+            print(
+                f"Error: Failed to load ceph report from {args.ceph_report_json}: {e}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    else:
+        try:
+            data.ceph_report = ceph_report(skip_confirmation=skip_confirmation)
+        except Exception as e:
+            print(f"Error: Failed to collect ceph report via CLI: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    config_dump_file = getattr(args, "ceph_config_dump", None)
+    if config_dump_file:
+        try:
+            data.ceph_config_dump = load_config_dump(config_dump_file)
+        except Exception as e:
+            if verbose:
+                print(
+                    f"Warning: Failed to load config dump from {config_dump_file}: {e}",
+                    file=sys.stderr,
+                )
+            warnings.append(
+                "Config dump analysis skipped - unable to load configuration data"
+            )
+    elif not using_static_report:
+        try:
+            raw_config = ceph_command(
+                "ceph config dump -f json", skip_confirmation=skip_confirmation
+            )
+            if isinstance(raw_config, list):
+                data.ceph_config_dump = raw_config
+            else:
+                warnings.append("Config dump analysis skipped - unexpected format")
+        except Exception as e:
+            if verbose:
+                print(
+                    f"Warning: Failed to collect config dump via CLI: {e}",
+                    file=sys.stderr,
+                )
+            warnings.append(
+                "Config dump analysis skipped - unable to collect configuration data"
+            )
+    else:
+        warnings.append("Config dump analysis skipped - using static report")
+
     if args.verbose or args.summary:
         for warning in warnings:
             print(f"Warning: {warning}")
