@@ -185,13 +185,11 @@ def display_results(
     osd_metrics: list[OSDMetric], analysis: OnodeDistributionAnalysis
 ) -> None:
     """Display formatted results of OSD performance analysis"""
-    print("
-" + "=" * 60)
+    print("\n" + "=" * 60)
     print("OSD ONODE CACHE PERFORMANCE ANALYSIS")
     print("=" * 60)
 
-    print(f"
-Total OSDs analyzed: {analysis.total_osds}")
+    print(f"\nTotal OSDs analyzed: {analysis.total_osds}")
     print(f"Mean hit rate: {analysis.mean_hitrate:.3f}")
     print(f"Median hit rate: {analysis.median_hitrate:.3f}")
     print(f"Hit rate range: {analysis.min_hitrate:.3f} - {analysis.max_hitrate:.3f}")
@@ -199,8 +197,7 @@ Total OSDs analyzed: {analysis.total_osds}")
     if analysis.stdev_hitrate is not None:
         print(f"Standard deviation: {analysis.stdev_hitrate:.3f}")
 
-    print("
-Detailed OSD Metrics:")
+    print("\nDetailed OSD Metrics:")
     print(
         f"{'OSD':<6} {'Host':<15} {'Class':<10} {'Hits':<12} {'Misses':<12} {'Hit Rate':<10}"
     )
@@ -226,5 +223,4 @@ class OSDPerfFormatter:
         display_results(osd_metrics, analysis)
 
         if failed_osds:
-            print(f"
-Failed OSDs: {sorted(failed_osds)}")
+            print(f"\nFailed OSDs: {sorted(failed_osds)}")

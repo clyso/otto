@@ -44,13 +44,11 @@ def compact_result(result):
     json_data = json.loads(result)
 
     # Print a "progress bar"
-    print(f"Running tests: {render_progress_bar(json_data)}
-")
+    print(f"Running tests: {render_progress_bar(json_data)}")
 
     # Print the summary
     print(
-        f"Overall score: {json_data['summary']['score']:g} out of {json_data['summary']['max_score']} ({json_data['summary']['grade']})
-"
+        f"Overall score: {json_data['summary']['score']:g} out of {json_data['summary']['max_score']} ({json_data['summary']['grade']})"
     )
 
     # Loop over the sections
@@ -64,8 +62,7 @@ def compact_result(result):
                 warned = True
 
     if warned:
-        print("
-Use --verbose or --summary for details and recommendations")
+        print("Use --verbose or --summary for details and recommendations")
 
 
 def compact_result_summary(result):
@@ -74,8 +71,7 @@ def compact_result_summary(result):
 
     # Print the summary
     print(
-        f"Overall score: {json_data['summary']['score']:g} out of {json_data['summary']['max_score']} ({json_data['summary']['grade']})
-"
+        f"Overall score: {json_data['summary']['score']:g} out of {json_data['summary']['max_score']} ({json_data['summary']['grade']})"
     )
 
     # Loop over the sections
@@ -129,8 +125,7 @@ def verbose_result(result):
 
     # Print the summary
     print(
-        f"Overall score: {json_data['summary']['score']:g} out of {json_data['summary']['max_score']} ({json_data['summary']['grade']})
-"
+        f"Overall score: {json_data['summary']['score']:g} out of {json_data['summary']['max_score']} ({json_data['summary']['grade']})"
     )
 
     # Loop over the sections
@@ -496,8 +491,7 @@ def run_ceph_command(args):
                 print("Command execution cancelled by user.")
                 return
         except (KeyboardInterrupt, EOFError):
-            print("
-Operation cancelled by user.")
+            print("Operation cancelled by user.")
             return
 
     try:
