@@ -56,8 +56,7 @@ def check_config_osd_op_queue(
             "While mclock is the new default in recent Ceph versions, it has not demonstrated sufficient performance stability for production workloads."
         )
         recommend.append(
-            "Configure osd_op_queue to use 'wpq' (Weighted Priority Queue) for better reliability and performance stability. ceph config set osd osd_op_queue wpq
-"
+            "Configure osd_op_queue to use 'wpq' (Weighted Priority Queue) for better reliability and performance stability. ceph config set osd osd_op_queue wpq"
         )
         result.add_check_result(section, check, "WARN", summary, detail, recommend)
     elif osd_op_queue == "wpq":

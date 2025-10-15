@@ -22,8 +22,7 @@ class SmokeTestOttoCLI(unittest.TestCase):
             _, stderr_output = process.communicate()
 
             assert not stderr_output, (
-                f"Otto produced stderr output for infile {report}:
-"
+                f"Otto produced stderr output for infile {report}:\n"
                 + f"{stderr_output.decode()}"
             )
             print(f"tests/reports/{report} OK")
@@ -64,8 +63,7 @@ class SmokeTestOttoCLI(unittest.TestCase):
             stdout, stderr_output = process.communicate()
 
             assert not stderr_output, (
-                f"Otto produced stderr output for infile {pg_dump} and {osd_tree}:
-"
+                f"Otto produced stderr output for infile {pg_dump} and {osd_tree}:\n"
                 + f"{stderr_output.decode()}"
             )
             print(f"tests/pg_dump/{pg_dump} and tests/osd_tree/{osd_tree} OK")
@@ -74,8 +72,7 @@ class SmokeTestOttoCLI(unittest.TestCase):
             expected_output_first_line = expected_output.splitlines()[0]
 
             assert stdout_first_line == expected_output_first_line, (
-                f"Unexpected output for infile {pg_dump} and {osd_tree}:
-"
+                f"Unexpected output for infile {pg_dump} and {osd_tree}:\n"
                 + f"{stdout.decode()}"
             )
 
@@ -96,15 +93,13 @@ class SmokeTestOttoCLI(unittest.TestCase):
                 self.assertIn(
                     "Available scripts:",
                     stdout.decode(),
-                    f"Unexpected custom help format for {cmd}:
-{stdout}",
+                    f"Unexpected custom help format for {cmd}:\n{stdout}",
                 )
             else:
                 self.assertIn(
                     f"usage: otto {cmd if cmd else ''}",
                     stdout.decode(),
-                    f"Unexpected usage line for {cmd}:
-{stdout}",
+                    f"Unexpected usage line for {cmd}:\n{stdout}",
                 )
 
 
