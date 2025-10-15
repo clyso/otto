@@ -42,6 +42,7 @@ jobs:
           check_ssl_hostname = True
           signature_v2 = False
           EOF
+          cat ~/.s3cfg
       
       - name: Test s3cmd
         run: |
