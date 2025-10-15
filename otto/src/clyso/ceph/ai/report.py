@@ -1812,6 +1812,5 @@ def update_result(res: AIResult, data: CephData) -> None:
         try:
             c(res, data)
         except Exception:
-            print(f"An exception occurred in check function {c}!
-", file=sys.stderr)
+            print(f"An exception occurred in check function {c}!\n", file=sys.stderr)
             print(traceback.format_exc(), file=sys.stderr)

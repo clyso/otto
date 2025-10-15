@@ -20,13 +20,9 @@ class TestClassResult(unittest.TestCase):
         expected = (
             '{"summary": {"score": 0, "grade": "-", "max_score": 0}, '
             + '"sections": [{"id": "Foo", "score": 0, "max_score": 0, "summary": "", '
-            + '"info": [], "checks": [], "grade": "-"}]}'.replace("
-", "")
+            + '"info": [], "checks": [], "grade": "-"}]}'.replace("", "")
         )
-        self.assertTrue(res == expected, f"
-{res}
-not equal to expected
-{expected}")
+        self.assertTrue(res == expected, f"{res}not equal to expected{expected}")
 
     def test_result_section_twice(self) -> None:
         from clyso.ceph.ai.result import AIResult
@@ -58,13 +54,9 @@ not equal to expected
             + '"sections": [{"id": "Health", "score": 1.0, "max_score": 1, '
             + '"summary": "", "info": [], "checks": [{"id": "CEPH_HEALTH", '
             + '"result": "PASS", "summary": "HEALTH_OK", "detail": "HEALTH_OK", '
-            + '"recommend": []}], "grade": "A+"}]}'.replace("
-", "")
+            + '"recommend": []}], "grade": "A+"}]}'.replace("", "")
         )
-        self.assertTrue(res == expected, f"
-{res}
-not equal to expected
-{expected}")
+        self.assertTrue(res == expected, f"{res}not equal to expected{expected}")
 
 
 class TestClysoCephAI(unittest.TestCase):
@@ -207,10 +199,8 @@ class TestClysoCephAI(unittest.TestCase):
             print(
                 "Otto output with new changes saved to tests/temp_otto.json. "
                 + "Replace otto.json to pass the tests if you are sure of the new "
-                + "otto changes
-"
-                + "cp tests/temp_otto.json tests/otto.json
-",
+                + "otto changes"
+                + "cp tests/temp_otto.json tests/otto.json",
             )
             self.fail(f"{len(failures)} checks failed. See above for details.")
         else:

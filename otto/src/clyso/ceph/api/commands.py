@@ -37,8 +37,7 @@ def _execute_ceph_command(
                 print("Command execution cancelled by user.")
                 sys.exit(1)
         except (KeyboardInterrupt, EOFError):
-            print("
-Operation cancelled by user.")
+            print("\nOperation cancelled by user.")
             sys.exit(1)
 
     try:
