@@ -47,6 +47,7 @@ jobs:
         run: |
           s3cmd --version
           s3cmd ls
+          cat ~/.s3cfg
       
       - name: Download binary artifact
         uses: actions/download-artifact@v4
