@@ -50,9 +50,20 @@ class OSDPerfCommand:
         try:
             if self.args.osd_id:
                 print(f"Analyzing OSD {self.args.osd_id}...")
+                try:
+                    topology = OSDTopology()
+                    osd_metadata = topology.osd_metadata.get(self.args.osd_id, {})
+                except Exception as e:
+                    print(f"Warning: Could not get topology info: {e}")
+                    osd_metadata = {}
                 self.osd_metrics = self.perf_class.collect_single_osd_metrics(
                     self.args.osd_id, skip_confirmation=skip_confirmation
                 )
+                # Apply metadata to the metrics for single OSD
+                for metric in self.osd_metrics:
+                    metric.osd_id = self.args.osd_id
+                    metric.host = osd_metadata.get("hostname", "unknown")
+                    metric.device_class = osd_metadata.get("device_class", "unknown")
                 self.failed_osds = []
 
             elif self.args.file:
