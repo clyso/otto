@@ -557,7 +557,7 @@ class OSDDumpResponse(CephBaseModel):
     min_compat_client: str = Field(default="")
     require_osd_release: str = Field(default="")
     allow_crimson: bool = Field(default=False)
-    pools: list[PoolConfig]
+    pools: list[PoolConfig] = Field(default_factory=list)
     osds: list[dict[str, Any]] = Field(default_factory=list)
     pg_upmap: list[Any] = Field(default_factory=list)
     pg_upmap_items: list[Any] = Field(default_factory=list)
@@ -1867,13 +1867,68 @@ class CrushTunables(CephBaseModel):
     has_v5_rules: int = Field(default=0)
 
 
-class CrushMap(CephBaseModel):
-    """Schema for CRUSH map."""
+class CrushDevice(CephBaseModel):
+    """Schema for CRUSH device entry."""
 
-    devices: list[dict[str, Any]] = Field(default_factory=list)
-    types: list[dict[str, Any]] = Field(default_factory=list)
-    buckets: list[dict[str, Any]] = Field(default_factory=list)
-    rules: list[dict[str, Any]] = Field(default_factory=list)
+    device_id: int = Field(default=0, alias="id")
+    name: str = Field(default="")
+    device_class: str = Field(default="", alias="class")
+
+
+class CrushType(CephBaseModel):
+    """Schema for CRUSH type entry."""
+
+    type_id: int = Field(default=0)
+    name: str = Field(default="")
+
+
+class CrushBucketItem(CephBaseModel):
+    """Schema for item within a CRUSH bucket."""
+
+    item_id: int = Field(default=0, alias="id")
+    weight: int = Field(default=0)
+    pos: int = Field(default=0)
+
+
+class CrushBucket(CephBaseModel):
+    """Schema for CRUSH bucket (host, rack, root, etc.)."""
+
+    bucket_id: int = Field(default=0, alias="id")
+    name: str = Field(default="")
+    type_id: int = Field(default=0)
+    type_name: str = Field(default="")
+    weight: int = Field(default=0)
+    alg: str = Field(default="straw2")
+    hash_function: str = Field(default="rjenkins1", alias="hash")
+    items: list[CrushBucketItem] = Field(default_factory=list)
+
+
+class CrushRuleStep(CephBaseModel):
+    """Schema for a step in a CRUSH rule."""
+
+    op: str = Field(default="")
+    item: int | None = Field(default=None)
+    item_name: str | None = Field(default=None)
+    num: int | None = Field(default=None)
+    rule_type: str | None = Field(default=None, alias="type")
+
+
+class CrushRule(CephBaseModel):
+    """Schema for CRUSH rule."""
+
+    rule_id: int = Field(default=0)
+    rule_name: str = Field(default="")
+    rule_type: int = Field(default=1, alias="type")
+    steps: list[CrushRuleStep] = Field(default_factory=list)
+
+
+class CrushMap(CephBaseModel):
+    """Schema for CRUSH map response from `ceph osd crush dump`."""
+
+    devices: list[CrushDevice] = Field(default_factory=list)
+    types: list[CrushType] = Field(default_factory=list)
+    buckets: list[CrushBucket] = Field(default_factory=list)
+    rules: list[CrushRule] = Field(default_factory=list)
     tunables: CrushTunables = Field(default_factory=CrushTunables)
     choose_args: dict[str, Any] = Field(default_factory=dict)
 
@@ -1992,6 +2047,454 @@ class CephReport(CephBaseModel):
         return cls.loads(raw)
 
 
+## RGW Zonegroup Schemas
+class RGWZonegroupZoneEntry(CephBaseModel):
+    """Schema for zone group zone entry."""
+
+    zone_id: str = Field(default="", alias="id")
+    name: str = Field(default="")
+    endpoints: list[str] = Field(default_factory=list)
+    log_meta: bool = Field(default=False)
+    log_data: bool = Field(default=False)
+    bucket_index_max_shards: int = Field(default=0)
+    read_only: bool = Field(default=False)
+    tier_type: str = Field(default="")
+    sync_from_all: bool = Field(default=True)
+    sync_from: list[str] = Field(default_factory=list)
+    redirect_zone: str = Field(default="")
+    supported_features: list[str] = Field(default_factory=list)
+
+
+class RGWZonegroupPlacementTarget(CephBaseModel):
+    """Schema for placement target in zonegroup."""
+
+    name: str = Field(default="")
+    tags: list[str] = Field(default_factory=list)
+    storage_classes: list[str] = Field(default_factory=list)
+
+
+class RGWZonegroupSyncPolicy(CephBaseModel):
+    """Schema for sync policy in zonegroup."""
+
+    groups: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class RGWZonegroupResponse(CephBaseModel):
+    """Schema for `radosgw-admin zonegroup get --zonegroup-id <zonegroup_id> --format=json` response."""
+
+    zonegroup_id: str = Field(default="", alias="id")
+    name: str = Field(default="")
+    api_name: str = Field(default="")
+    is_master: bool = Field(default=False)
+    endpoints: list[str] = Field(default_factory=list)
+    hostnames: list[str] = Field(default_factory=list)
+    hostnames_s3website: list[str] = Field(default_factory=list)
+    master_zone: str = Field(default="")
+    zones: list[RGWZonegroupZoneEntry] = Field(default_factory=list)
+    placement_targets: list[RGWZonegroupPlacementTarget] = Field(default_factory=list)
+    default_placement: str = Field(default="")
+    realm_id: str = Field(default="")
+    sync_policy: RGWZonegroupSyncPolicy = Field(default_factory=RGWZonegroupSyncPolicy)
+    enabled_features: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def loads(cls, raw: str) -> RGWZonegroupResponse:
+        """Parse RGW zonegroup from JSON string."""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(f"Failed to parse RGW zonegroup: {e}") from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> RGWZonegroupResponse:
+        """Load and parse RGW zonegroup from file."""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
+## RGW Zone Schemas
+
+
+class RGWZoneSystemKey(CephBaseModel):
+    """Schema for RGW zone system key."""
+
+    access_key: str = Field(default="")
+    secret_key: str = Field(default="")
+
+
+class RGWZonePlacementPoolStorageClass(CephBaseModel):
+    """Schema for RGW storage class entry in placement pool."""
+
+    data_pool: str = Field(default="")
+
+
+class RGWZonePlacementPoolVal(CephBaseModel):
+    """Schema for RGW zone placement pool value."""
+
+    index_pool: str = Field(default="")
+    storage_classes: dict[str, RGWZonePlacementPoolStorageClass] = Field(
+        default_factory=dict
+    )
+    data_extra_pool: str | None = Field(default=None)
+    index_type: int = Field(default=0)
+    inline_data: bool = Field(default=False)
+
+
+class RGWZonePlacementPool(CephBaseModel):
+    """Schema for RGW zone placement pool entry."""
+
+    key: str = Field(default="")
+    val: RGWZonePlacementPoolVal = Field(default_factory=RGWZonePlacementPoolVal)
+
+
+class RGWZoneResponse(CephBaseModel):
+    """Schema for `radosgw-admin zone get --zone-id <zone_id> --format=json` response."""
+
+    zone_id: str = Field(default="")
+    name: str = Field(default="")
+    domain_root: str = Field(default="")
+    control_pool: str = Field(default="")
+    gc_pool: str = Field(default="")
+    lc_pool: str = Field(default="")
+    log_pool: str = Field(default="")
+    intent_log_pool: str = Field(default="")
+    usage_log_pool: str = Field(default="")
+    roles_pool: str = Field(default="")
+    reshard_pool: str = Field(default="")
+    user_keys_pool: str = Field(default="")
+    user_email_pool: str = Field(default="")
+    user_swift_pool: str = Field(default="")
+    user_uid_pool: str = Field(default="")
+    otp_pool: str = Field(default="")
+    system_key: RGWZoneSystemKey = Field(default_factory=RGWZoneSystemKey)
+    placement_pools: list[RGWZonePlacementPool] = Field(default_factory=list)
+    realm_id: str = Field(default="")
+    notif_pool: str | None = Field(default=None)
+
+    @classmethod
+    def loads(cls, raw: str) -> RGWZoneResponse:
+        """Parse RGW zone from JSON string."""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(f"Failed to parse RGW zone: {e}") from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> RGWZoneResponse:
+        """Load and parse RGW zone from file."""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
+## RGW Bucket Schemas
+
+
+class RGWBucketListResponse(RootModel[list[str]]):
+    """Schema for `radosgw-admin bucket list --format=json` response."""
+
+    def __iter__(self):
+        return iter(self.root)
+
+    def __len__(self):
+        return len(self.root)
+
+    @classmethod
+    def loads(cls, raw: str) -> RGWBucketListResponse:
+        """Parse RGW bucket list from JSON string."""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(f"Failed to parse RGW bucket list: {e}") from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> RGWBucketListResponse:
+        """Load and parse RGW bucket list from file."""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
+class RGWBucketObjectVersion(CephBaseModel):
+    """Schema for RGW bucket object version."""
+
+    pool: int = Field(default=0)
+    epoch: int = Field(default=0)
+
+
+class RGWBucketObjectMetadata(CephBaseModel):
+    """Schema for RGW bucket object metadata."""
+
+    category: int = Field(default=0)
+    size: int = Field(default=0)
+    mtime: str = Field(default="")
+    etag: str = Field(default="")
+    storage_class: str = Field(default="")
+    owner: str = Field(default="")
+    owner_display_name: str = Field(default="")
+    content_type: str = Field(default="")
+    accounted_size: int = Field(default=0)
+    user_data: str = Field(default="")
+    appendable: bool = Field(default=False)
+
+
+class RGWBucketObject(CephBaseModel):
+    """Schema for RGW bucket object entry."""
+
+    name: str = Field(default="")
+    instance: str = Field(default="")
+    ver: RGWBucketObjectVersion = Field(default_factory=RGWBucketObjectVersion)
+    locator: str = Field(default="")
+    exists: bool = Field(default=False)
+    meta: RGWBucketObjectMetadata = Field(default_factory=RGWBucketObjectMetadata)
+    tag: str = Field(default="")
+    flags: int = Field(default=0)
+    pending_map: list[Any] = Field(default_factory=list)
+    versioned_epoch: int = Field(default=0)
+
+
+class RGWBucketObjectListResponse(RootModel[list[RGWBucketObject]]):
+    """Schema for `radosgw-admin bucket list --bucket <bucket>` response."""
+
+    def __iter__(self):
+        return iter(self.root)
+
+    def __len__(self):
+        return len(self.root)
+
+    def __getitem__(self, item):
+        return self.root[item]
+
+    @classmethod
+    def loads(cls, raw: str) -> RGWBucketObjectListResponse:
+        """Parse RGW bucket object list from JSON string."""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(
+                f"Failed to parse RGW bucket object list: {e}"
+            ) from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> RGWBucketObjectListResponse:
+        """Load and parse RGW bucket object list from file."""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
+## RGW Bucket Stats Schemas
+
+
+class RGWBucketExplicitPlacement(CephBaseModel):
+    """Schema for explicit placement in bucket stats."""
+
+    data_pool: str = Field(default="")
+    data_extra_pool: str = Field(default="")
+    index_pool: str = Field(default="")
+
+
+class RGWBucketUsageStats(CephBaseModel):
+    """Schema for usage statistics per category."""
+
+    size: int = Field(default=0)
+    size_actual: int = Field(default=0)
+    size_utilized: int = Field(default=0)
+    size_kb: int = Field(default=0)
+    size_kb_actual: int = Field(default=0)
+    size_kb_utilized: int = Field(default=0)
+    num_objects: int = Field(default=0)
+
+
+class RGWBucketQuota(CephBaseModel):
+    """Schema for bucket quota settings."""
+
+    enabled: bool = Field(default=False)
+    check_on_raw: bool = Field(default=False)
+    max_size: int = Field(default=-1)
+    max_size_kb: int = Field(default=0)
+    max_objects: int = Field(default=-1)
+
+
+class RGWBucketStatsEntry(CephBaseModel):
+    """Schema for individual bucket statistics entry."""
+
+    bucket: str = Field(default="")
+    num_shards: int = Field(default=0)
+    tenant: str = Field(default="")
+    versioning: str = Field(default="")
+    zonegroup: str = Field(default="")
+    placement_rule: str = Field(default="")
+    explicit_placement: RGWBucketExplicitPlacement = Field(
+        default_factory=RGWBucketExplicitPlacement
+    )
+    bucket_id: str = Field(default="", alias="id")
+    marker: str = Field(default="")
+    index_type: str = Field(default="")
+    versioned: bool = Field(default=False)
+    versioning_enabled: bool = Field(default=False)
+    object_lock_enabled: bool = Field(default=False)
+    mfa_enabled: bool = Field(default=False)
+    owner: str = Field(default="")
+    ver: str = Field(default="")
+    master_ver: str = Field(default="")
+    mtime: str = Field(default="")
+    creation_time: str = Field(default="")
+    max_marker: str = Field(default="")
+    usage: dict[str, RGWBucketUsageStats] = Field(default_factory=dict)
+    bucket_quota: RGWBucketQuota = Field(default_factory=RGWBucketQuota)
+
+
+class RGWBucketStatsResponse(RootModel[list[RGWBucketStatsEntry]]):
+    """Schema for `radosgw-admin bucket stats --uid <user>` response."""
+
+    def __iter__(self):
+        return iter(self.root)
+
+    def __len__(self):
+        return len(self.root)
+
+    def __getitem__(self, item):
+        return self.root[item]
+
+    @classmethod
+    def loads(cls, raw: str) -> RGWBucketStatsResponse:
+        """Parse RGW bucket stats from JSON string."""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(
+                f"Failed to parse RGW bucket stats: {e}"
+            ) from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> RGWBucketStatsResponse:
+        """Load and parse RGW bucket stats from file."""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
+## RGW Quota Schemas
+
+
+class RGWQuotaSettings(CephBaseModel):
+    """Schema for RGW quota settings (bucket or user)."""
+
+    enabled: bool = Field(default=False)
+    check_on_raw: bool = Field(default=False)
+    max_size: int = Field(default=-1)
+    max_size_kb: int = Field(default=0)
+    max_objects: int = Field(default=-1)
+
+
+class RGWGlobalQuotaResponse(CephBaseModel):
+    """Schema for `radosgw-admin global quota get` response."""
+
+    bucket_quota: RGWQuotaSettings = Field(alias="bucket quota")
+    user_quota: RGWQuotaSettings = Field(alias="user quota")
+
+    @classmethod
+    def loads(cls, raw: str) -> RGWGlobalQuotaResponse:
+        """Parse RGW global quota from JSON string."""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(
+                f"Failed to parse RGW global quota: {e}"
+            ) from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> RGWGlobalQuotaResponse:
+        """Load and parse RGW global quota from file."""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
+class RGWUserListResponse(RootModel[list[str]]):
+    """Schema for `radosgw-admin user list` response."""
+
+    def __iter__(self):
+        return iter(self.root)
+
+    def __len__(self):
+        return len(self.root)
+
+    def __getitem__(self, item):
+        return self.root[item]
+
+    @classmethod
+    def loads(cls, raw: str) -> RGWUserListResponse:
+        """Parse RGW user list from JSON string."""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(f"Failed to parse RGW user list: {e}") from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> RGWUserListResponse:
+        """Load and parse RGW user list from file."""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
+class RGWUserKey(CephBaseModel):
+    """Schema for RGW user key."""
+
+    user: str = Field(default="")
+    access_key: str = Field(default="")
+    secret_key: str = Field(default="")
+
+
+class RGWUserInfoResponse(CephBaseModel):
+    """Schema for `radosgw-admin user info` response."""
+
+    user_id: str = Field(default="")
+    display_name: str = Field(default="")
+    email: str = Field(default="")
+    suspended: int = Field(default=0)
+    max_buckets: int = Field(default=1000)
+    subusers: list[Any] = Field(default_factory=list)
+    keys: list[RGWUserKey] = Field(default_factory=list)
+    swift_keys: list[Any] = Field(default_factory=list)
+    caps: list[Any] = Field(default_factory=list)
+    op_mask: str = Field(default="")
+    default_placement: str = Field(default="")
+    default_storage_class: str = Field(default="")
+    placement_tags: list[str] = Field(default_factory=list)
+    bucket_quota: RGWQuotaSettings = Field(default_factory=RGWQuotaSettings)
+    user_quota: RGWQuotaSettings = Field(default_factory=RGWQuotaSettings)
+    temp_url_keys: list[Any] = Field(default_factory=list)
+    user_type: str = Field(default="rgw", alias="type")
+    mfa_ids: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def loads(cls, raw: str) -> RGWUserInfoResponse:
+        """Parse RGW user info from JSON string."""
+        try:
+            return cls.model_validate_json(raw)
+        except Exception as e:
+            raise MalformedCephDataError(f"Failed to parse RGW user info: {e}") from e
+
+    @classmethod
+    def load(cls, path: pathlib.Path) -> RGWUserInfoResponse:
+        """Load and parse RGW user info from file."""
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        raw = path.read_text()
+        return cls.loads(raw)
+
+
 # to resolve forward references
 _ = OSDTree.model_rebuild()
 _ = PGDump.model_rebuild()
@@ -1999,6 +2502,9 @@ _ = OSDDFResponse.model_rebuild()
 _ = OSDDumpResponse.model_rebuild()
 _ = OSDPerfDumpResponse.model_rebuild()
 _ = CephReport.model_rebuild()
+_ = RGWZoneResponse.model_rebuild()
+_ = RGWBucketListResponse.model_rebuild()
+_ = RGWBucketObjectListResponse.model_rebuild()
 
 
 # to resolve forward references
@@ -2010,3 +2516,6 @@ _ = OSDPerfDumpResponse.model_rebuild()
 _ = CephfsStatusResponse.model_rebuild()
 _ = CephfsMDSStatResponse.model_rebuild()
 _ = CephReport.model_rebuild()
+_ = RGWZoneResponse.model_rebuild()
+_ = RGWBucketListResponse.model_rebuild()
+_ = RGWBucketObjectListResponse.model_rebuild()

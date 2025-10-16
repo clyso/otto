@@ -19,7 +19,7 @@ from clyso.ceph.ai.pg import add_command_pg
 from clyso.ceph.otto.upmap import add_command_upmap_remapped
 from clyso.__version__ import __version__
 from clyso.ceph.ai.cephfs import add_command_cephfs
-
+from clyso.ceph.ai.rgw import add_command_rgw
 from clyso.ceph.ai.osd.command import OSDPerfCommand
 
 CONFIG_FILE = "otto.yaml"
@@ -568,6 +568,9 @@ def main():
 
     # Create the parser for the "cephfs" related commands
     add_command_cephfs(subparsers)
+
+    # Create the parser for the "rgw" related commands
+    add_command_rgw(subparsers)
 
     # Create the parser for the "upmap" command
     add_command_upmap_remapped(subparsers)
