@@ -1,6 +1,6 @@
-# Otto
+# otto
 
-Otto is a CLI tool for analyzing and managing Ceph clusters.
+otto is a CLI tool for analyzing and managing Ceph clusters.
 You can think of Otto as your personal Dr. Octopus for Ceph.
 
 ## Installation
@@ -8,11 +8,17 @@ You can think of Otto as your personal Dr. Octopus for Ceph.
 Download the latest binary:
 
 ```bash
-curl -O https://get.copilot.clyso.com/otto
+curl -O  https://s3.clyso.com/otto/latest/otto
 chmod +x otto
 ```
 
 Binary releases are also available at https://github.com/clyso/otto/releases
+
+Releases are also available per tag:
+
+```bash
+curl -O  https://s3.clyso.com/otto/<RELEASE_TAG>/otto
+```
 
 For more information on how this gets built see the [Development Guide - Binary Compatability](docs/dev.md#binary)
 
