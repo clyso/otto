@@ -101,9 +101,13 @@ def ceph_command(command: str, timeout: int = 30) -> dict[str, Any]:
         ) from e
 
 
-def ceph_fs_status(fs_name: str = "") -> CephfsStatusResponse:
+def ceph_fs_status(fs_name: str | None = None) -> CephfsStatusResponse:
     try:
-        command = f"ceph fs status {fs_name} --format=json".strip()
+        if fs_name:
+            command = f"ceph fs status {fs_name} --format=json".strip()
+        else:
+            command = "ceph fs status --format=json".strip()
+
         raw_data = _execute_ceph_command(command)
         return CephfsStatusResponse.model_validate(raw_data)
     except Exception as e:
