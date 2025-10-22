@@ -27,19 +27,7 @@ from .schemas import (
 )
 
 
-def _execute_ceph_command(
-    command: str, timeout: int = 30, skip_confirmation: bool = True
-) -> Any:
-    if not skip_confirmation:
-        try:
-            response = input(f"+ {command} [y/n]: ").strip().lower()
-            if response not in ("y", "yes"):
-                print("Command execution cancelled by user.")
-                sys.exit(1)
-        except (KeyboardInterrupt, EOFError):
-            print("\nOperation cancelled by user.")
-            sys.exit(1)
-
+def _execute_ceph_command(command: str, timeout: int = 30) -> Any:
     try:
         out = subprocess.check_output(
             command.split(), stderr=subprocess.DEVNULL, timeout=timeout
@@ -53,33 +41,25 @@ def _execute_ceph_command(
     return parse_ceph_json(out)
 
 
-def ceph_osd_tree(skip_confirmation: bool = True) -> OSDTree:
+def ceph_osd_tree() -> OSDTree:
     try:
-        raw_data = _execute_ceph_command(
-            "ceph osd tree --format=json", skip_confirmation=skip_confirmation
-        )
+        raw_data = _execute_ceph_command("ceph osd tree --format=json")
         return OSDTree.model_validate(raw_data)
     except Exception as e:
         raise MalformedCephDataError(f"Failed to get OSD tree: {e}") from e
 
 
-def ceph_pg_dump(skip_confirmation: bool = True) -> PGDump:
+def ceph_pg_dump() -> PGDump:
     try:
-        raw_data = _execute_ceph_command(
-            "ceph pg dump --format=json", skip_confirmation=skip_confirmation
-        )
+        raw_data = _execute_ceph_command("ceph pg dump --format=json")
         return PGDump.model_validate(raw_data)
     except Exception as e:
         raise MalformedCephDataError(f"Failed to get PG dump: {e}") from e
 
 
-def ceph_osd_perf_dump(
-    osd_id: int, skip_confirmation: bool = True
-) -> OSDPerfDumpResponse:
+def ceph_osd_perf_dump(osd_id: int) -> OSDPerfDumpResponse:
     try:
-        raw_data = _execute_ceph_command(
-            f"ceph tell osd.{osd_id} perf dump", skip_confirmation=skip_confirmation
-        )
+        raw_data = _execute_ceph_command(f"ceph tell osd.{osd_id} perf dump")
         return OSDPerfDumpResponse(**raw_data)
     except Exception as e:
         raise MalformedCephDataError(
@@ -87,43 +67,33 @@ def ceph_osd_perf_dump(
         ) from e
 
 
-def ceph_report(skip_confirmation: bool = True) -> CephReport:
+def ceph_report() -> CephReport:
     try:
-        raw_data = _execute_ceph_command(
-            "ceph report", skip_confirmation=skip_confirmation
-        )
+        raw_data = _execute_ceph_command("ceph report")
         return CephReport.model_validate(raw_data)
     except Exception as e:
         raise MalformedCephDataError(f"Failed to get cluster report: {e}") from e
 
 
-def ceph_osd_df(skip_confirmation: bool = True) -> OSDDFResponse:
+def ceph_osd_df() -> OSDDFResponse:
     try:
-        raw_data = _execute_ceph_command(
-            "ceph osd df --format=json", skip_confirmation=skip_confirmation
-        )
+        raw_data = _execute_ceph_command("ceph osd df --format=json")
         return OSDDFResponse.model_validate(raw_data)
     except Exception as e:
         raise MalformedCephDataError(f"Failed to get OSD DF: {e}") from e
 
 
-def ceph_osd_dump(skip_confirmation: bool = True) -> OSDDumpResponse:
+def ceph_osd_dump() -> OSDDumpResponse:
     try:
-        raw_data = _execute_ceph_command(
-            "ceph osd dump --format=json", skip_confirmation=skip_confirmation
-        )
+        raw_data = _execute_ceph_command("ceph osd dump --format=json")
         return OSDDumpResponse.model_validate(raw_data)
     except Exception as e:
         raise MalformedCephDataError(f"Failed to get OSD dump: {e}") from e
 
 
-def ceph_command(
-    command: str, timeout: int = 30, skip_confirmation: bool = True
-) -> dict[str, Any]:
+def ceph_command(command: str, timeout: int = 30) -> dict[str, Any]:
     try:
-        raw_data = _execute_ceph_command(
-            command, timeout=timeout, skip_confirmation=skip_confirmation
-        )
+        raw_data = _execute_ceph_command(command, timeout=timeout)
         return raw_data
     except Exception as e:
         raise MalformedCephDataError(
@@ -131,38 +101,30 @@ def ceph_command(
         ) from e
 
 
-def ceph_fs_status(
-    fs_name: str = "", skip_confirmation: bool = True
-) -> CephfsStatusResponse:
+def ceph_fs_status(fs_name: str = "") -> CephfsStatusResponse:
     try:
         command = f"ceph fs status {fs_name} --format=json".strip()
-        raw_data = _execute_ceph_command(command, skip_confirmation=skip_confirmation)
+        raw_data = _execute_ceph_command(command)
         return CephfsStatusResponse.model_validate(raw_data)
     except Exception as e:
         raise MalformedCephDataError(f"Failed to get CephFS status: {e}") from e
 
 
-def ceph_mds_stat(
-    mds_name: str = "", skip_confirmation: bool = True
-) -> CephfsMDSStatResponse:
+def ceph_mds_stat(mds_name: str = "") -> CephfsMDSStatResponse:
     try:
         command = f"ceph mds stat {mds_name} --format=json".strip()
-        raw_data = _execute_ceph_command(command, skip_confirmation=skip_confirmation)
+        raw_data = _execute_ceph_command(command)
         return CephfsMDSStatResponse.model_validate(raw_data)
     except Exception as e:
         raise MalformedCephDataError(f"Failed to get MDS stat: {e}") from e
 
 
-def ceph_mds_session_ls(
-    mds_name: str = "", skip_confirmation: bool = True
-) -> CephfsSessionListResponse:
+def ceph_mds_session_ls(mds_name: str = "") -> CephfsSessionListResponse:
     """Get CephFS session list from MDS daemon."""
     try:
         raw_data = _execute_ceph_command(
-            f"ceph tell mds.{mds_name} session ls --format=json",
-            skip_confirmation=skip_confirmation,
+            f"ceph tell mds.{mds_name} session ls --format=json"
         )
-        # The response is a list, so we need to wrap it
         return CephfsSessionListResponse.model_validate(raw_data)
     except Exception as e:
         raise MalformedCephDataError(f"Failed to get MDS session list: {e}") from e

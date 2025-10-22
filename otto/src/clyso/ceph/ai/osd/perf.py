@@ -69,8 +69,8 @@ class OSDPerf:
         return cls(perf_dump)
 
     @classmethod
-    def from_subprocess(cls, osd_id: int, skip_confirmation: bool = True) -> OSDPerf:
-        perf_dump = ceph_osd_perf_dump(osd_id, skip_confirmation)
+    def from_subprocess(cls, osd_id: int) -> OSDPerf:
+        perf_dump = ceph_osd_perf_dump(osd_id)
         return cls(perf_dump)
 
     @classmethod
@@ -111,11 +111,9 @@ class OSDPerf:
         return [self.get_onode_metrics()]
 
     @classmethod
-    def collect_single_osd_metrics(
-        cls, osd_id: int, skip_confirmation: bool = True
-    ) -> list[OSDMetric]:
+    def collect_single_osd_metrics(cls, osd_id: int) -> list[OSDMetric]:
         """Collect metrics from a single OSD"""
-        perf_instance = cls.from_subprocess(osd_id, skip_confirmation)
+        perf_instance = cls.from_subprocess(osd_id)
         return perf_instance.process()
 
     @classmethod
@@ -129,7 +127,6 @@ class OSDPerf:
         cls,
         osd_ids: list[int],
         osd_metadata: dict[int, dict[str, str]],
-        skip_confirmation: bool = True,
     ) -> tuple[list[OSDMetric], list[int]]:
         """Collect performance metrics from multiple OSDs"""
         osd_metrics: list[OSDMetric] = []
@@ -137,9 +134,8 @@ class OSDPerf:
 
         for osd_id in osd_ids:
             try:
-                metrics = cls.collect_single_osd_metrics(osd_id, skip_confirmation)
+                metrics = cls.collect_single_osd_metrics(osd_id)
                 for metric in metrics:
-                    # Update with metadata if available
                     if osd_id in osd_metadata:
                         metadata = osd_metadata[osd_id]
                         metric.osd_id = osd_id
