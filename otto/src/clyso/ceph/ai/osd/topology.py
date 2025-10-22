@@ -55,7 +55,7 @@ class OSDTopology:
                     device_class_to_osds[device_class].append(osd_id)
 
                     osd_metadata[osd_id] = {
-                        "host": host_name,
+                        "hostname": host_name,
                         "device_class": device_class,
                     }
 

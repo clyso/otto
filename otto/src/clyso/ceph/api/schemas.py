@@ -1257,7 +1257,7 @@ class OSDPerfDumpResponse(BaseModel):
 
     objecter: ObjecterMetrics = Field(default_factory=ObjecterMetrics)
     osd: OSDMetrics = Field(default_factory=OSDMetrics)
-    osd_slow_ops: OSDSlowOps = Field(alias="osd-slow-ops")
+    osd_slow_ops: Optional[OSDSlowOps] = Field(alias="trackedop")
 
     recoverystate_perf: RecoveryStatePerf = Field(default_factory=RecoveryStatePerf)
 
