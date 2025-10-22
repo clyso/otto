@@ -83,9 +83,7 @@ class CephfsSessionTop:
     def _load_from_mds(self, mds_name: str) -> list[CephfsSession]:
         """Load sessions from MDS daemon via ceph command"""
         try:
-            session_response = ceph_mds_session_ls(
-                mds_name, skip_confirmation=getattr(self.args, "yes", True)
-            )
+            session_response = ceph_mds_session_ls(mds_name)
             return list(session_response)
         except MalformedCephDataError as e:
             raise RuntimeError(f"Failed to get sessions from mds.{mds_name}: {e}")

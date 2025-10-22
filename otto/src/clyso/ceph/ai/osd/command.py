@@ -45,8 +45,6 @@ class OSDPerfCommand:
 
     def _collect_data(self) -> bool:
         """Collect OSD performance data based on command arguments"""
-        skip_confirmation = getattr(self.args, "yes", True)
-
         try:
             if self.args.osd_id:
                 print(f"Analyzing OSD {self.args.osd_id}...")
@@ -57,9 +55,8 @@ class OSDPerfCommand:
                     print(f"Warning: Could not get topology info: {e}")
                     osd_metadata = {}
                 self.osd_metrics = self.perf_class.collect_single_osd_metrics(
-                    self.args.osd_id, skip_confirmation=skip_confirmation
+                    self.args.osd_id
                 )
-                # Apply metadata to the metrics for single OSD
                 for metric in self.osd_metrics:
                     metric.osd_id = self.args.osd_id
                     metric.host = osd_metadata.get("hostname", "unknown")
@@ -72,9 +69,7 @@ class OSDPerfCommand:
 
             else:
                 print("across cluster...")
-                self.osd_metrics, self.failed_osds = self._collect_from_cluster(
-                    skip_confirmation
-                )
+                self.osd_metrics, self.failed_osds = self._collect_from_cluster()
 
             return len(self.osd_metrics) > 0
 
@@ -97,9 +92,7 @@ class OSDPerfCommand:
             )
             return []
 
-    def _collect_from_cluster(
-        self, skip_confirmation: bool
-    ) -> tuple[list[dict[str, Any]], list[int]]:
+    def _collect_from_cluster(self) -> tuple[list[dict[str, Any]], list[int]]:
         """Collect data from cluster sampling"""
 
         try:
@@ -124,7 +117,7 @@ class OSDPerfCommand:
 
         print("Collecting onode performance metrics...")
         return self.perf_class.collect_osd_performance_metrics(
-            sampled_osds, osd_metadata, skip_confirmation=skip_confirmation
+            sampled_osds, osd_metadata
         )
 
     # use this function to extend the osd perf metrics

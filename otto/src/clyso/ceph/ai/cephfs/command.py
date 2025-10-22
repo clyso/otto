@@ -91,9 +91,7 @@ class CephfsSessionTopCommand:
                 mds_list.append(CephfsMDSMapEntry(file=f))
 
         else:
-            fs_status = ceph_fs_status(
-                fs_name=self.args.fs, skip_confirmation=getattr(self.args, "yes", True)
-            )
+            fs_status = ceph_fs_status(fs_name=self.args.fs)
 
             for mds_entry in fs_status.mdsmap:
                 if self.args.mds:

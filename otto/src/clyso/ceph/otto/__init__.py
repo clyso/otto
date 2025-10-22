@@ -170,7 +170,6 @@ def subcommand_checkup(args: argparse.Namespace) -> None:
     data = CephData()
     warnings: list[str] = []
     verbose: bool = getattr(args, "verbose", False)
-    skip_confirmation: bool = getattr(args, "yes", True)
 
     using_static_report: bool = bool(getattr(args, "ceph_report_json", None))
 
@@ -185,7 +184,7 @@ def subcommand_checkup(args: argparse.Namespace) -> None:
             sys.exit(1)
     else:
         try:
-            data.ceph_report = ceph_report(skip_confirmation=skip_confirmation)
+            data.ceph_report = ceph_report()
         except Exception as e:
             print(f"Error: Failed to collect ceph report via CLI: {e}", file=sys.stderr)
             sys.exit(1)
@@ -205,9 +204,7 @@ def subcommand_checkup(args: argparse.Namespace) -> None:
             )
     elif not using_static_report:
         try:
-            raw_config = ceph_command(
-                "ceph config dump -f json", skip_confirmation=skip_confirmation
-            )
+            raw_config = ceph_command("ceph config dump -f json")
             if isinstance(raw_config, list):
                 data.ceph_config_dump = raw_config
             else:
@@ -479,20 +476,8 @@ def planner_replacement(args):
 
 
 def run_ceph_command(args):
-    skip_confirmation = getattr(args, "yes", True)
     command = ["ceph"]
     command.extend(args)
-    cmd_str = " ".join(command)
-
-    if not skip_confirmation:
-        try:
-            response = input(f"+ {cmd_str} [y/n]: ").strip().lower()
-            if response not in ("y", "yes"):
-                print("Command execution cancelled by user.")
-                return
-        except (KeyboardInterrupt, EOFError):
-            print("Operation cancelled by user.")
-            return
 
     try:
         output = subprocess.check_output(command)
@@ -505,14 +490,6 @@ def run_ceph_command(args):
 def main():
     # Create the top-level parser
     parser = OttoParser(prog="otto", description="Otto: Your Expert Ceph Assistant.")
-
-    parser.add_argument(
-        "--yes",
-        "-y",
-        action="store_true",
-        default=True,
-        help="Automatically confirm all interactive prompts",
-    )
 
     subparsers = parser.add_subparsers(
         title="subcommands",
