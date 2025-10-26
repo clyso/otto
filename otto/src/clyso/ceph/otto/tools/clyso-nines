@@ -1,0 +1,634 @@
+#!/usr/bin/env python3
+
+#   clyso-nines - A tool to estimate data loss risk in Ceph clusters
+#
+#   Copyright (C) 2025 Dan van der Ster <dan.vanderster@clyso.com>
+#
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU Affero General Public License as
+#   published by the Free Software Foundation, either version 3 of the
+#   License, or (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU Affero General Public License for more details.
+#
+#   You should have received a copy of the GNU Affero General Public License
+#   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import argparse
+from collections import defaultdict
+import math
+import random
+import time
+import shlex
+
+# ---------------------------- Utilities ----------------------------
+
+def reconstruct_command_line(parser, args):
+    command_parts = [parser.prog, args.command]
+
+    for arg in vars(args):
+        if arg == 'command' or arg == 'func':
+            continue
+        value = getattr(args, arg)
+        if isinstance(value, bool):
+            if value:
+                command_parts.append(f"--{arg.replace('_', '-')}")
+        elif value is not None:
+            command_parts.append(f"--{arg.replace('_', '-')}")
+            command_parts.append(shlex.quote(str(value)))
+    return ' '.join(command_parts)
+
+def round_to_nearest_power_of_two(n):
+    if n <= 0:
+        raise ValueError("Input must be a positive number.")
+    lower = 2 ** math.floor(math.log2(n))
+    upper = 2 ** math.ceil(math.log2(n))
+    return lower if (n - lower) < (upper - n) else upper
+
+def count_nines(value, max_digits=20):
+    # Round to given precision
+    rounded = round(value, max_digits)
+    s = f"{rounded:.{max_digits}f}"
+
+    if not s.startswith("0."):
+        return f"{max_digits} nines (1.0)"  # Treat 1.0 as "max nines"
+
+    decimal_part = s.split('.')[1]
+    count = 0
+    for c in decimal_part:
+        if c == '9':
+            count += 1
+        else:
+            break
+    return f"{count}-nines" if count > 0 else "0-nines (0.0)"
+
+def comb(n, k):
+    """Return C(n, k) with math.comb-like semantics."""
+    if not (isinstance(n, int) and isinstance(k, int)):
+        raise TypeError("n and k must be integers")
+    if n < 0 or k < 0 or k > n:
+        raise ValueError("n must be >= 0 and 0 <= k <= n")
+    k = min(k, n - k)  # symmetry
+    c = 1
+    for i in range(1, k + 1):
+        c = c * (n - i + 1) // i
+    return c
+
+def mttdl(N, k, afr, fudge, recovery_time_sec):
+    T_year = 31_536_000  # seconds in a year
+    p = afr * recovery_time_sec / T_year
+    prob_k_failures = fudge*comb(N, k) * (p ** k)
+    mttdl_seconds = recovery_time_sec / prob_k_failures
+    return mttdl_seconds
+
+def prob_exact_k_failures(n, p, k):
+    return comb(n, k) * (p ** k) * ((1 - p) ** (n - k))
+
+def prob_k_or_more_failures(n, p, k):
+    return sum(comb(n, i) * (p ** i) * ((1 - p) ** (n - i)) for i in range(k, n + 1))
+
+def expected_max_osd_load(n_osds, n_pgs):
+    if n_pgs == 0 or n_osds == 0:
+        return float('inf')
+    if n_pgs < n_osds:
+        # Sparse case: use log-ratio approximation
+        return math.ceil(math.log(n_osds) / math.log(n_osds / n_pgs))
+    else:
+        # Dense case: average load + deviation
+        avg = n_pgs / n_osds
+        deviation = math.sqrt(2 * avg * math.log(n_osds))
+        return math.ceil(avg + deviation)
+
+def format_bytes(val):
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    thresholds = [1, 1024, 1024**2, 1024**3, 1024**4, 1024**5]
+
+    for i in reversed(range(1, len(units))):
+        if val >= thresholds[i]:
+            return f"~{val / thresholds[i]:.1f}{units[i]}"
+    return f"~{round(val)}B"
+
+def format_int(val):
+    units = ["", "K", "M", "B"]
+    thresholds = [1, 1000, 1000**2, 1000**3]
+
+    for i in reversed(range(1, len(units))):
+        if val >= thresholds[i]:
+            return f"~{val / thresholds[i]:.1f}{units[i]}"
+    return f"~{round(val)}"
+
+def format_time(seconds):
+    units = ["s", "min", "hr", "days", "years", "thousand years", "million years", "billion years"]
+    thresholds = [1, 60, 3600, 86400, 86400*365, 86400*365*1000, 86400*365*10**6, 86400*365*10**9]
+
+    for i in reversed(range(1, len(units))):
+        if seconds >= thresholds[i]:
+            return f"{round(seconds / thresholds[i], 1)} {units[i]}"
+    return f"{round(seconds)} s"
+
+def simple_crush(osd_ids, number_of_domains, size, num_pgs):
+    if size > number_of_domains:
+        raise ValueError("Replication size cannot be greater than the number of failure domains.")
+
+    # Group OSDs into failure domains evenly
+    domains = defaultdict(list)
+    for i, osd in enumerate(osd_ids):
+        domain = i % number_of_domains
+        domains[domain].append(osd)
+
+    domain_ids = list(domains.keys())
+
+    pgs = []
+    for _ in range(num_pgs):
+        # Randomly choose failure domains for this PG
+        chosen_domains = random.sample(domain_ids, size)
+        pg_osds = []
+        for domain in chosen_domains:
+            # Pick a random OSD from the selected domain
+            pg_osds.append(random.choice(domains[domain]))
+        pgs.append(tuple(pg_osds))
+
+    return pgs
+
+def confidence_interval(successes, trials, confidence=0.95):
+    if trials == 0:
+        return (0, 0)
+    p_hat = successes / trials
+    z = 1.96  # For 95% confidence
+    margin_of_error = z * ((p_hat * (1 - p_hat)) / trials) ** 0.5
+    return (max(0, p_hat - margin_of_error), min(1, p_hat + margin_of_error))
+
+
+def effective_recovery_rate(object_size_bytes,
+                            recovery_bw=50*1024*1024,  # 50 MB/s
+                            osd_recovery_sleep=0.1,
+                            objects_per_chunk=30):
+    """
+    Calculate Ceph effective recovery throughput considering chunking and sleep.
+
+    object_size_bytes: size of one object in bytes
+    recovery_bw_MBps: raw recovery bandwidth (MB/s)
+    osd_recovery_sleep: sleep time after each chunk (seconds)
+    objects_per_chunk: number of objects recovered per batch (default 30)
+    """
+    chunk_size_bytes = (object_size_bytes * objects_per_chunk)
+
+    # Time to recover chunk at given bandwidth (seconds)
+    transfer_time = chunk_size_bytes / recovery_bw
+
+    # Add recovery sleep per chunk
+    total_time = transfer_time + osd_recovery_sleep
+
+    # Effective throughput (Bps)
+    return chunk_size_bytes / total_time
+
+
+# ---------------------------- Simulate Subcommand ----------------------------
+def simulate(args):
+
+    # Set random seed for reproducibility
+    random.seed(args.seed)
+
+    raw_to_stored_factor = 0
+    profile = ""
+    # Derive PG size and min_size
+    if args.k is not None and args.m is not None:
+        pg_size = args.k + args.m
+        min_size = args.k
+        raw_to_stored_factor = args.k / (args.k + args.m)
+        profile = f"{args.k}+{args.m} erasure"
+        num_failures = args.m + 1
+    elif args.size is not None:
+        pg_size = args.size
+        min_size = 1
+        raw_to_stored_factor = 1 / (args.size)
+        profile = f"{args.size}x replicated"
+        num_failures = args.size
+    else:
+        raise ValueError("Specify either --size or both --k and --m.")
+
+    num_simulations = args.simulations
+    if num_simulations < 100:
+        raise ValueError("Number of simulations must be at least 100 for meaningful results.")
+    if num_simulations % 50 != 0:
+        raise ValueError("Number of simulations must be a multiple of 50 for progress display.")
+
+    print(f"---------------------------")
+    print()
+
+    if not hasattr(args, 'pgs'):
+        # simulating a randomized pool
+
+        num_domains = args.num_domains
+        pgs_per_osd = args.pgs_per_osd
+        num_osds = args.num_osds
+
+        failure_domain = args.failure_domain
+
+        if num_osds % args.num_domains != 0:
+            raise ValueError("Number of OSDs must be divisible by number of domains.")
+        osds_per_domain = int(num_osds / args.num_domains)
+
+        num_pgs = round_to_nearest_power_of_two((num_osds * pgs_per_osd) / pg_size)
+        osds = list(range(1, num_osds + 1))
+        pgs = simple_crush(osds,num_domains,pg_size,num_pgs) # [tuple(random.sample(osds, pg_size)) for _ in range(num_pgs)]
+
+        # Print simulation summary
+        print(f"Simulating a {profile} pool with {num_osds} OSDs and {num_domains} {failure_domain}s ({osds_per_domain} OSDs per {failure_domain})")
+        print(f"    PGs: {num_pgs} total, averaging {num_pgs * pg_size / num_osds:.3g} per OSD")
+#        print(f"    Total data: {format_bytes(total_bytes)} raw, {format_bytes(raw_to_stored_factor*total_bytes)} stored")
+
+#        print(f"    Data per {failure_domain}: {format_bytes(osds_per_domain*bytes_per_osd)} raw, {format_bytes(raw_to_stored_factor*osds_per_domain*bytes_per_osd)} stored")
+    else:
+        # simulating failures on a given pool
+        pgs = args.pgs
+        osds = args.osds
+        num_pgs = len(pgs)
+        num_osds = len(osds)
+        pgs_per_osd = num_pgs * pg_size / num_osds
+        
+        # Print analyze summary
+        print(f"Analyzing a {profile} pool with {num_osds} OSDs and {num_pgs} PGs")
+        print(f"    PGs: {num_pgs} total, ~{num_pgs * pg_size / num_osds:.3g} per OSD")
+
+    # Re-derive the stored bytes/objects per PG from tb_per_osd
+    bytes_per_osd = args.tb_per_osd * 1024**4
+    total_bytes = num_osds * bytes_per_osd
+    bytes_per_pg = total_bytes / num_pgs * raw_to_stored_factor
+    try:
+        objects_per_pg = bytes_per_pg / args.object_size
+    except ZeroDivisionError:
+        objects_per_pg = 0
+    if args.k is not None:
+        bytes_per_pg /= args.k
+
+    print(f"    Data per PG: {format_bytes(bytes_per_pg)}, {format_int(objects_per_pg)} objects")
+    print(f"    Example PG: {pgs[0]}\n")
+
+    print(f"---------------------------")
+    print()
+
+    # simulate the major incidents
+    print(f"Monte Carlo Sim: n={num_simulations} {num_failures}x failures")
+    threshold = pg_size - min_size
+    num_batches = 50
+    batch_size = num_simulations // num_batches
+    simulations_with_loss = 0
+    total_pg_losses = 0
+    print()
+    print(f"    |{'-' * num_batches}|")
+    print(f"    |", end="", flush=True)
+    simulations_done = 0
+    sim_runtime = 10 # seconds
+    start_time = time.time()
+    for batch in range(num_batches):
+        batch_good = True
+        for _ in range(int(num_simulations/num_batches)):
+            simulations_done += 1
+            failed_osds = set(random.sample(osds, num_failures))
+            dead_pgs = sum(
+                1 for pg in pgs if sum(1 for osd in pg if osd in failed_osds) > threshold
+            )
+            total_pg_losses += dead_pgs
+            if dead_pgs > 0:
+                simulations_with_loss += 1
+                batch_good = False
+        if batch_good:
+            print(".",end="",flush=True)
+        else:
+            print("x",end="",flush=True)
+        # Exit early if taking too long
+        elapsed = time.time() - start_time
+        if elapsed > sim_runtime:
+            print(" taking too long, exiting early. ",end="",flush=True)
+            num_simulations = simulations_done
+            break
+
+    print(f"|")
+    print(f"    |{'-' * num_batches}|")
+    print()
+
+    print(f"    Theoretical loss rate calculation:")
+    if args.k is not None:
+        print(f"        OSD failure combinations: C({num_osds}, {num_failures}) = {comb(num_osds, num_failures)} ")
+        print(f"        OSD to PG failure ratio: C({pg_size}, {num_failures}) = {comb(pg_size, num_failures)}")
+        print(f"        Loss rate: {num_pgs} PGs * {comb(pg_size, num_failures)} / {comb(num_osds, num_failures)} combinations")
+        loss_rate = num_pgs / comb(num_osds, num_failures) * comb(pg_size, num_failures)
+    else:
+        print(f"        OSD failure combinations: C({num_osds}, {num_failures}) = {comb(num_osds, num_failures)}")
+        print(f"        OSD to PG failure ratio: C({pg_size}, {num_failures}) = {comb(pg_size, num_failures)}")
+        print(f"        Loss rate: {num_pgs} PGs / {comb(num_osds, num_failures)} combinations")
+        loss_rate = num_pgs / comb(num_osds, num_failures)
+    loss_rate = min(1.0, loss_rate)
+    print(f"    Theoretical Incidents with ≥1 PG lost: {loss_rate*num_simulations:.4g}/{num_simulations} ({loss_rate * 100:.3g}%)")
+    if simulations_with_loss > 0:
+        loss_rate = simulations_with_loss / num_simulations
+        print(f"    Observed Incidents with ≥1 PG lost: {simulations_with_loss}/{num_simulations} ({100 * loss_rate:.3f}%)")
+    else:
+        print(f"    Observed Incidents with ≥1 PG lost: 0/{num_simulations} (0%)")
+        print("    Warning: No data loss observed in simulations, using theoretical estimate.")
+        total_pg_losses = simulations_with_loss = loss_rate * num_simulations  # use theoretical estimate
+
+    confidence = confidence_interval(simulations_with_loss, num_simulations)
+    print(f"        95% Confidence Interval: {confidence[0] * 100:.3g}% - {confidence[1] * 100:.3g}%")
+    
+    pgs_lost_per_event = total_pg_losses / num_simulations
+    pct_data_loss = total_pg_losses / (num_simulations * num_pgs)
+    print(f"    Expected Data Loss Per Incident: {pgs_lost_per_event:.3g} PGs, {format_bytes(pgs_lost_per_event*bytes_per_pg)} ({pct_data_loss * 100:.3g}%)")
+
+    # Try to compute a meaningful MTTDL and Nines Durability Number
+    print("")
+    print("---------------------------")
+    print("")
+
+    print(f"Estimating the probability of {num_failures}x failures")
+    afr = args.afr
+    if pg_size > 1:
+        print(f"    Estimated per-drive AFR: {afr}")
+
+        # recovery rate is a function of object size, recovery bandwidth, and OSD recovery sleep
+        recovery_rate = effective_recovery_rate(args.object_size,
+                                                args.recovery_rate*1024*1024,
+                                                args.osd_recovery_sleep,
+                                                objects_per_chunk=30)
+
+        print(f"    Estimated per-OSD recovery rate: {format_bytes(recovery_rate)}ps ({format_int(recovery_rate/args.object_size)} objects/s)")
+
+        recovery_time_per_pg = bytes_per_pg / recovery_rate
+        print(f"    Expected PG recovery time ({format_bytes(bytes_per_pg)}/{format_bytes(recovery_rate)}ps): {format_time(recovery_time_per_pg)}")
+
+        # Estimate max OSD load during recovery when things are critical
+        # e.g. for 3x repl: how long to recover 2 OSDs failed.
+        # e.g. for 6+3 EC: how long to recover 3 OSDs failed.
+        if args.k is not None:
+            critical_osds = args.m
+        else:
+            critical_osds = args.size - 1
+        num_osds_left = num_osds - num_failures + 1
+        # How many PGs need to be recovered 
+        max_osd_load = expected_max_osd_load(num_osds_left, critical_osds*pgs_per_osd)
+
+        print(f"    Expected most loaded OSD when recovering {format_int((num_failures-1)*pgs_per_osd)} PGs to {num_osds-num_failures+1} OSDs = {max_osd_load} PGs")
+
+        recovery_time = max(max_osd_load * recovery_time_per_pg, 60) # minimum 1 minutes per PG
+        print(f"    Expected critical period ({max_osd_load} PGs * {format_time(recovery_time_per_pg)}) = {format_time(recovery_time)}")
+
+        critical_windows_per_year = 31536000 / recovery_time
+        print(f"    Expected critical periods annually (1yr / {format_time(recovery_time)}) = {critical_windows_per_year:.1f}")
+
+        failure_prob_per_disk = recovery_time / 31536000 * afr
+        print(f"    Expected per-OSD critical period failure rate = {failure_prob_per_disk:.2g} (1 in {format_int(1/failure_prob_per_disk)})")
+
+        print(f"    Failure correlation factor = {args.fudge}")
+        
+        failure_prob = args.fudge * prob_k_or_more_failures(num_osds, failure_prob_per_disk, num_failures)
+        print(f"    Probability of {num_failures}+ failures in any critical period ({format_time(recovery_time)}) = 1 in {format_int(1/failure_prob)}")
+
+        expected_annual_events = critical_windows_per_year * failure_prob
+        print(f"    Expected annual {num_failures}+ failure events: {expected_annual_events:.3g} (1 every {format_time(31536000/expected_annual_events)})")
+        mtt_multi_failure = mttdl(num_osds, num_failures, afr, args.fudge, recovery_time)
+        print(f"    Alternate calculation (mean time to {num_failures}+ concurrent failures) = {format_time(mtt_multi_failure)}")
+    else: # size == 1 (no redundancy)
+        print("    No redundancy configured, data loss is certain on any failure.")
+        expected_annual_events = num_osds * afr
+        mtt_multi_failure = 31536000 / expected_annual_events
+        print(f"    Expected annual failure events: {expected_annual_events:.3g} (1 every {format_time(31536000/expected_annual_events)})")
+
+
+
+    print("---------------------------")
+    print("")
+
+    min_loss_rate = confidence[0]
+    max_loss_rate = confidence[1]
+
+    print(f"Final MTTDL/Durability Estimates:")
+    print("")
+    print(f"    Mean time to {num_failures}x failure: {format_time(mtt_multi_failure)}")
+    try:
+        print(f"    Probability that {num_failures}x failure causes data loss (95% CI): {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}% (1 in {format_int(1/max_loss_rate)} to 1 in {format_int(1/min_loss_rate)})")
+    except ZeroDivisionError:
+        print(f"    Probability that {num_failures}x failure causes data loss (95% CI): {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}% (1 in {format_int(1/max_loss_rate)} to ∞)")
+    print("")
+    print(f"Combining the above to estimate annual data loss:")
+
+    # Compute MTTDL
+    expected_losses_per_year = expected_annual_events * loss_rate
+    min_expected_losses_per_year = expected_annual_events * min_loss_rate
+    max_expected_losses_per_year = expected_annual_events * max_loss_rate
+    mttdl_sec = 31536000/expected_losses_per_year
+    min_mttdl_sec = 31536000/max_expected_losses_per_year
+    try:
+        max_mttdl_sec = 31536000/min_expected_losses_per_year
+        print(f"    Mean Time To Data Loss (MTTDL): {format_time(mttdl_sec)}")
+        print(f"        (95% CI: {format_time(min_mttdl_sec)} - {format_time(max_mttdl_sec)})")
+    except ZeroDivisionError:
+        print(f"    Mean Time To Data Loss (MTTDL): {format_time(mttdl_sec)}")
+        print(f"        (95% CI: {format_time(min_mttdl_sec)} - ∞)")
+
+    # Compute Nines Durability Number
+    expected_pgs_lost_per_year = expected_losses_per_year * pgs_lost_per_event
+    min_expected_pgs_lost_per_year = min_expected_losses_per_year * pgs_lost_per_event
+    max_expected_pgs_lost_per_year = max_expected_losses_per_year * pgs_lost_per_event
+    expected_durability = 1 - (expected_pgs_lost_per_year / num_pgs)
+    min_expected_durability = 1 - (max_expected_pgs_lost_per_year / num_pgs)
+    max_expected_durability = 1 - (min_expected_pgs_lost_per_year / num_pgs)
+    print(f"    Durability: {count_nines(expected_durability)}")
+    print(f"        (95% CI: {count_nines(min_expected_durability)} to {count_nines(max_expected_durability)})")
+
+    expected_bytes_lost_per_year = expected_pgs_lost_per_year * bytes_per_pg
+    min_expected_bytes_lost_per_year = min_expected_pgs_lost_per_year * bytes_per_pg
+    max_expected_bytes_lost_per_year = max_expected_pgs_lost_per_year * bytes_per_pg
+
+    print(f"    Expected annual data loss: {format_bytes(expected_bytes_lost_per_year)}")
+    print(f"        (95% CI: {format_bytes(min_expected_bytes_lost_per_year)} - {format_bytes(max_expected_bytes_lost_per_year)})")
+
+    return (format_time(mttdl_sec), count_nines(expected_durability))
+
+
+# ---------------------------- Analyze Subcommand ----------------------------
+
+def analyze_pool(args, pool, pg_dump):
+    print(f"Analyzing pool '{pool['pool_name']}' (id {pool['pool_id']}, size {pool['size']}) ")
+    if 'erasure_code_profile' in pool and pool['erasure_code_profile']:
+        print(f"    Type: erasure-coded ({pool['erasure_code_profile']})")
+        # For simplicity, assume standard k+m profile naming
+        try:
+            k, m = map(int, pool['erasure_code_profile'].split('+'))
+            args.k = k
+            args.m = m
+            args.size = None
+        except:
+            print("    Warning: Unable to parse erasure code profile. Please specify --k and --m manually.")
+            return
+    else:
+        print(f"    Type: replicated")
+        args.size = pool['size']
+        args.k = None
+        args.m = None
+
+    args.pg_num = pool['pg_num']
+
+    pg_stats = pg_dump['pg_map']['pg_stats']
+    pgs = [pg['acting'] for pg in pg_stats if pg['pgid'].startswith(f"{pool['pool_id']}.")]
+    assert len(pgs) == args.pg_num, "PG count mismatch!"
+    args.pgs = pgs
+
+    osds = set()
+    for pg in pg_stats:
+        osds.update(pg['acting'])
+        osds.update(pg['up'])
+
+    args.osds = list(osds)
+    args.num_osds = pg_dump['pg_map']['osd_stats_sum']['num_osds']
+    assert args.num_osds == len(osds), "OSD count mismatch!"
+
+    print(f"    Number of PGs: {args.pg_num}")
+    print(f"    Number of OSDs: {len(osds)}")
+
+    # Derive tb_per_osd from pool size and pg stat_sum num_bytes
+    bytes_stored = sum(pg['stat_sum']['num_bytes'] for pg in pg_stats if pg['pgid'].startswith(f"{pool['pool_id']}."))
+    objects_stored = sum(pg['stat_sum']['num_objects'] for pg in pg_stats if pg['pgid'].startswith(f"{pool['pool_id']}."))
+    raw_to_stored_factor = 0
+    if args.k is not None and args.m is not None:
+        raw_to_stored_factor = (args.k) / (args.k + args.m)
+    else:
+        raw_to_stored_factor = 1 / (args.size)
+    bytes_raw = bytes_stored / raw_to_stored_factor
+    objects_raw = objects_stored / raw_to_stored_factor
+    args.tb_per_osd = bytes_raw / len(osds) / (1024**4)
+    args.object_size = bytes_raw / objects_raw if objects_raw > 0 else 4*1024*1024  # default to 4MB
+
+    print(f"    Total stored data: {format_bytes(bytes_stored)} ({format_int(objects_stored)} objects)")
+    print(f"    Total raw data: {format_bytes(bytes_raw)} ({format_int(objects_raw)} objects)")
+    print(f"    Data per OSD: {format_bytes(args.tb_per_osd * 1024**4)} ({format_int(objects_raw / len(osds))} objects)")
+    print(f"    Average object size: {format_bytes(args.object_size)}")
+    print("")
+    [mttdl, nines] = simulate(args)
+
+    print(f"AAA {pool['pool_name']}: {mttdl} MTTDL, {nines} Durability")
+
+def analyze(args):
+    import subprocess
+    import json
+
+    # Set random seed for reproducibility
+    random.seed(args.seed)
+
+    cluster = args.cluster
+    pool_name = args.pool
+
+    # fetch pool list
+    try:
+        ceph_cmd = ['ceph', f'--cluster={cluster}', 'osd', 'pool', 'ls', 'detail', '--format=json']
+        pool_json = subprocess.check_output(ceph_cmd)
+        pool_data = json.loads(pool_json)
+    except Exception as e:
+        pool_data = None
+
+    # Try using local copy of ceph-osd-pool-ls-detail.json
+    if pool_data is None:
+        try:
+            with open('ceph-osd-pool-ls-detail.json', 'r') as f:
+                pool_data = json.load(f)
+            print("Using local ceph-osd-pool-ls-detail.json file.")
+        except Exception as e2:
+            print(f"Error loading local pool data: {e2}")
+            return
+
+    # fetch ceph pg dump
+    try:
+        ceph_cmd = ['ceph', f'--cluster={cluster}', 'pg', 'dump', '--format=json']
+        pg_dump_json = subprocess.check_output(ceph_cmd)
+        pg_dump_data = json.loads(pg_dump_json)
+    except Exception as e:
+        pg_dump_data = None
+
+    # Try using local copy of ceph-pg-dump.json
+    if pg_dump_data is None:
+        try:
+            with open('ceph-pg-dump.json', 'r') as f:
+                pg_dump_data = json.load(f)
+            print("Using local ceph-pg-dump.json file.")
+            print("")
+            print("========================================")
+            print("")
+        except Exception as e2:
+            print(f"Error loading local PG dump data: {e2}")
+            return
+
+    found = False
+    for p in pool_data:
+        if p['pool_name'] == pool_name or not pool_name:
+            analyze_pool(args, p, pg_dump_data)
+            found = True
+            print("")
+            print("========================================")
+            print("")
+
+    if not found:
+        print(f"Pool '{pool_name}' not found in cluster '{cluster}'.")
+
+    return
+
+
+# ---------------------------- Main CLI ----------------------------
+def main():
+    parser = argparse.ArgumentParser(
+            prog='clyso-nines',
+            description='Clyso Nines - Data Loss Risk Estimator for Ceph Clusters'
+    )
+    parser.add_argument('--version', action='version', version='clyso-nines 0.1')
+
+    subparsers = parser.add_subparsers(dest='command')
+
+    sim = subparsers.add_parser('simulate', help='Calculate durability of a randomized pool')
+    sim.add_argument('--verbose', action='store_true', help='enable verbose output')
+    sim.add_argument('--num-osds', type=int, default=100, help="number of OSDs in the Cluster (default: 100)")
+    sim.add_argument('--failure-domain', type=str, default="host", help="Type of failure domain (host/rack/...) (default: host)")
+    sim.add_argument('--num-domains', type=int, default=10, help="number of failure domains (default: 10)")
+    sim.add_argument('--tb-per-osd', type=int, default=10, help="raw data per OSD in TB (default: 10)")
+    sim.add_argument('--object-size', type=int, default=4*1024*1024, help="average object size in bytes (default: 4MB)")
+    sim.add_argument('--pgs-per-osd', type=int, default=100, help="target PGs per OSD (default: 100)")
+    sim.add_argument('--size', type=int, default=3, help="simulate a replicated pool with SIZE replicas (default: 3)")
+    sim.add_argument('--k', type=int, help="simulate an erasure coded pool with K data shards")
+    sim.add_argument('--m', type=int, help="simulate an erasure coded pool with M parity shards")
+    sim.add_argument('--simulations', type=int, default=1000, help="number of incidents to simulate (default: 1000)")
+    sim.add_argument('--seed', type=int, default=int(time.time()), help='random seed (default: current time)')
+    sim.add_argument('--fudge', type=int, default=100, help='correlation "fudge" factor (default: 100)')
+    sim.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
+    sim.add_argument('--recovery-rate', type=float, default=50, help='Recovery rate per OSD (default: 50MBps)')
+    sim.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
+    sim.set_defaults(func=simulate)
+
+    an = subparsers.add_parser('analyze', help='Calculate durability of the local pools')
+    an.add_argument('--verbose', action='store_true', help='enable verbose output')
+    an.add_argument('--cluster', type=str, default='ceph', help='Ceph cluster name (default: ceph)')
+    an.add_argument('--pool', type=str, help='analyze only the given pool (default: all pools)')
+    an.add_argument('--simulations', type=int, default=1000, help="number of incidents to simulate (default: 1000)")
+    an.add_argument('--seed', type=int, default=int(time.time()), help='random seed (default: current time)')
+    an.add_argument('--fudge', type=int, default=100, help='correlation "fudge" factor (default: 100)')
+    an.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
+    an.add_argument('--recovery-rate', type=int, default=50, help='Per-OSD data recovery rate (default: 50MBps)')
+    an.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
+    an.set_defaults(func=analyze)
+
+    args = parser.parse_args()
+    if not args.command:
+        parser.print_help()
+    else:
+        # Reconstruct command
+        cmdline = reconstruct_command_line(parser, args)
+        # Print header
+        print(f"Clyso Nines - Data Loss Risk Estimator for Ceph Clusters")
+        print("---------------------------------------------------------")
+        print(f"Command line: {cmdline}")
+        print("---------------------------------------------------------")
+        print()
+        args.func(args)
+
+if __name__ == "__main__":
+    main()
