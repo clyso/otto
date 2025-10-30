@@ -223,7 +223,7 @@ class PGStat(BaseModel):
     scrub_schedule: str = Field(default="")
     scrub_duration: float = Field(default=0.0)
     objects_trimmed: int = Field(default=0)
-    snaptrim_duration: int = Field(default=0)
+    snaptrim_duration: float = Field(default=0)
     stat_sum: PGStatSum
     up: list[int]
     acting: list[int]
