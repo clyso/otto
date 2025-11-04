@@ -23,6 +23,10 @@ import math
 import random
 import time
 import shlex
+import itertools
+
+# hide cursor
+print('\033[?25l', end="")
 
 VERBOSE = False
 
@@ -251,7 +255,11 @@ def simulate(args):
 
         num_pgs = round_to_nearest_power_of_two((num_osds * pgs_per_osd) / pg_size)
         osds = list(range(1, num_osds + 1))
-        pgs = simple_crush(osds,num_domains,pg_size,num_pgs) # [tuple(random.sample(osds, pg_size)) for _ in range(num_pgs)]
+        vprint(f"Generating {num_pgs} PGs with size {pg_size} over {num_osds} OSDs...")
+        if not args.skip_monte_carlo:
+            pgs = simple_crush(osds,num_domains,pg_size,num_pgs) # [tuple(random.sample(osds, pg_size)) for _ in range(num_pgs)]
+        else:
+            pgs = [tuple(random.sample(osds, pg_size)) for _ in range(num_pgs)]
 
         # Print simulation summary
         print(f"Simulating a {profile} pool with {num_osds} OSDs and {num_domains} {failure_domain}s ({osds_per_domain} OSDs per {failure_domain})")
@@ -298,14 +306,22 @@ def simulate(args):
     simulations_with_loss = 0
     total_pg_losses = 0
     vprint()
-    vprint(f"    |{'-' * num_batches}|")
-    vprint(f"    |", end="", flush=True)
+    if not args.skip_monte_carlo:
+        vprint(f"    ╭{'─' * num_batches}╮")
+        vprint(f"    │", end="", flush=True)
+        num_simulations = 1000000000
     simulations_done = 0
-    sim_runtime = 10 # seconds
+    sim_runtime = args.max_mc_runtime
     start_time = time.time()
+    frames = ["⣾", "⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽"]
+    spinner = itertools.cycle(frames)
+    spin_time = start_time
     for batch in range(num_batches):
         batch_good = True
         for _ in range(int(num_simulations/num_batches)):
+            if spin_time + 0.1 < time.time():
+                print(next(spinner), end="\b", flush=True)
+                spin_time = time.time()
             simulations_done += 1
             failed_osds = set()
             if args.domains_down > 0:
@@ -324,19 +340,20 @@ def simulate(args):
                 simulations_with_loss += 1
                 batch_good = False
         if batch_good:
-            vprint(".",end="",flush=True)
+            vprint("⣿",end="",flush=True)
         else:
-            vprint("x",end="",flush=True)
+            vprint("⣀",end="",flush=True)
         # Exit early if taking too long
         elapsed = time.time() - start_time
         if elapsed > sim_runtime:
-            vprint(" taking too long, exiting early. ",end="",flush=True)
+            vprint(" timeout, exiting early. ",end="",flush=True)
             num_simulations = simulations_done
             break
 
-    vprint(f"|")
-    vprint(f"    |{'-' * num_batches}|")
-    vprint()
+    if not args.skip_monte_carlo:
+        vprint(f"│")
+        vprint(f"    ╰{'─' * num_batches}╯")
+        vprint()
 
     vprint(f"    Theoretical loss rate calculation:")
     if args.k is not None:
@@ -348,15 +365,19 @@ def simulate(args):
         vprint(f"        OSD failure combinations: C({num_osds}, {num_failures}) = {comb(num_osds, num_failures)}")
         vprint(f"        OSD to PG failure ratio: C({pg_size}, {num_failures}) = {comb(pg_size, num_failures)}")
         vprint(f"        Loss rate: {num_pgs} PGs / {comb(num_osds, num_failures)} combinations")
+        assert num_failures == pg_size, "For replicated pools, num_failures should equal pg_size"
         loss_rate = num_pgs / comb(num_osds, num_failures)
     loss_rate = min(1.0, loss_rate)
     vprint(f"    Theoretical Incidents with ≥1 PG lost: {loss_rate*num_simulations:.4g}/{num_simulations} ({loss_rate * 100:.3g}%)")
-    if simulations_with_loss > 0 or not args.skip_monte_carlo:
+    if simulations_with_loss > 0:
         loss_rate = simulations_with_loss / num_simulations
         vprint(f"    Observed Incidents with ≥1 PG lost: {simulations_with_loss}/{num_simulations} ({100 * loss_rate:.3f}%)")
+    elif args.skip_monte_carlo:
+        vprint(f"    Skipped Monte Carlo simulation as per user request. Using theoretical estimate.")
+        total_pg_losses = simulations_with_loss = loss_rate * num_simulations  # use theoretical estimate
     else:
-        vprint(f"    Observed Incidents with ≥1 PG lost: 0/{num_simulations} (0%)")
-        vprint("    Warning: No data loss observed in simulations, using theoretical estimate.")
+#        vprint(f"    Observed Incidents with ≥1 PG lost: 0/{num_simulations} (0%)")
+        vprint("      !! No data loss observed in simulations, using theoretical estimate.")
         total_pg_losses = simulations_with_loss = loss_rate * num_simulations  # use theoretical estimate
 
     confidence = confidence_interval(simulations_with_loss, num_simulations)
@@ -445,8 +466,14 @@ def simulate(args):
         vprint(f"    Probability that {num_failures}x failures causes data loss: {loss_rate*100:.3g}% (1 in {format_int(1/loss_rate)})")
         vprint(f"       95% CI: {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}% (1 in {format_int(1/max_loss_rate)} to 1 in {format_int(1/min_loss_rate)})")
     except ZeroDivisionError:
-        vprint(f"    Probability that {num_failures}x failures causes data loss: {loss_rate*100:.3g}% (1 in {format_int(1/loss_rate)})")
-        vprint(f"        95% CI: {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}% (1 in {format_int(1/max_loss_rate)} to ∞)")
+        try:
+            vprint(f"    Probability that {num_failures}x failures causes data loss: {loss_rate*100:.3g}% (1 in {format_int(1/loss_rate)})")
+        except ZeroDivisionError:
+            vprint(f"    Probability that {num_failures}x failures causes data loss: 0%")
+        try:
+            vprint(f"        95% CI: {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}% (1 in {format_int(1/max_loss_rate)} to ∞)")
+        except ZeroDivisionError:
+            vprint(f"        95% CI: {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}%")
     vprint("")
     vprint(f"Combining the above to estimate annual data loss:")
 
@@ -454,8 +481,14 @@ def simulate(args):
     expected_losses_per_year = expected_annual_events * loss_rate
     min_expected_losses_per_year = expected_annual_events * min_loss_rate
     max_expected_losses_per_year = expected_annual_events * max_loss_rate
-    mttdl_sec = 31536000/expected_losses_per_year
-    min_mttdl_sec = 31536000/max_expected_losses_per_year
+    try:
+        mttdl_sec = 31536000/expected_losses_per_year
+    except ZeroDivisionError:
+        mttdl_sec = float('inf')
+    try:
+        min_mttdl_sec = 31536000/max_expected_losses_per_year
+    except ZeroDivisionError:
+        min_mttdl_sec = float('inf')
     try:
         max_mttdl_sec = 31536000/min_expected_losses_per_year
         print(f"    MTTDL: {format_time(mttdl_sec)}")
@@ -660,6 +693,7 @@ def main():
     sim.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
     sim.add_argument('--domains-down', type=int, default=0, help='number of failure domains to take down in simulation (default: 0)')
     sim.add_argument('--skip-monte-carlo', action='store_true', help='Skip the Monte Carlo sims and use theoretical estimates instead')
+    sim.add_argument('--max-mc-runtime', type=int, default=30, help='Maximum simulation runtime in seconds (default: 30s)')
     sim.set_defaults(func=simulate)
 
     an = subparsers.add_parser('analyze', help='Calculate durability of the local pools')
@@ -673,6 +707,7 @@ def main():
     an.add_argument('--recovery-rate', type=int, default=50, help='Per-OSD data recovery rate (default: 50MBps)')
     an.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
     an.add_argument('--skip-monte-carlo', action='store_true', help='Skip the Monte Carlo sims and use theoretical estimates instead')
+    an.add_argument('--max-mc-runtime', type=int, default=30, help='Maximum Monte Carlo simulation runtime in seconds per pool (default: 30s)')
     an.set_defaults(func=analyze)
 
     args = parser.parse_args()
