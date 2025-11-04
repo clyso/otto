@@ -55,6 +55,9 @@ def round_to_nearest_power_of_two(n):
     return lower if (n - lower) < (upper - n) else upper
 
 def count_nines(value, max_digits=20):
+    if value < 0 or value > 1:
+        raise ValueError(f"Value {value} must be between 0 and 1")
+
     # Round to given precision
     rounded = round(value, max_digits)
     s = f"{rounded:.{max_digits}f}"
@@ -94,7 +97,10 @@ def prob_exact_k_failures(n, p, k):
     return comb(n, k) * (p ** k) * ((1 - p) ** (n - k))
 
 def prob_k_or_more_failures(n, p, k):
-    return sum(comb(n, i) * (p ** i) * ((1 - p) ** (n - i)) for i in range(k, n + 1))
+    cumulative = 0
+    for i in range(k): # 0, 1, 2, ..., k-1
+        cumulative += prob_exact_k_failures(n, p, i)
+    return 1 - cumulative
 
 def expected_max_osd_load(n_osds, n_pgs):
     if n_pgs == 0 or n_osds == 0:
@@ -216,6 +222,11 @@ def simulate(args):
     else:
         raise ValueError("Specify either --size or both --k and --m.")
 
+    if args.domains_down > 0:
+        num_failures -= args.domains_down
+
+    num_failures = max(0, num_failures)
+
     num_simulations = args.simulations
     if num_simulations < 100:
         raise ValueError("Number of simulations must be at least 100 for meaningful results.")
@@ -281,6 +292,9 @@ def simulate(args):
     threshold = pg_size - min_size
     num_batches = 50
     batch_size = num_simulations // num_batches
+    if args.skip_monte_carlo:
+        vprint("    Skipping Monte Carlo simulation as per user request.")
+        num_batches = 0
     simulations_with_loss = 0
     total_pg_losses = 0
     vprint()
@@ -293,7 +307,15 @@ def simulate(args):
         batch_good = True
         for _ in range(int(num_simulations/num_batches)):
             simulations_done += 1
-            failed_osds = set(random.sample(osds, num_failures))
+            failed_osds = set()
+            if args.domains_down > 0:
+                # pre-fail args.domains_down * osds_per_domain OSDs
+                failed_osds = set([osds[i] for i in range(args.domains_down * osds_per_domain)])
+
+            failed_osds.update(random.sample(list(set(osds) - failed_osds), num_failures))
+
+            assert len(failed_osds) == num_failures + args.domains_down * (osds_per_domain), f"Failed OSD count mismatch! {len(failed_osds)} != {num_failures + args.domains_down * osds_per_domain}"
+
             dead_pgs = sum(
                 1 for pg in pgs if sum(1 for osd in pg if osd in failed_osds) > threshold
             )
@@ -329,7 +351,7 @@ def simulate(args):
         loss_rate = num_pgs / comb(num_osds, num_failures)
     loss_rate = min(1.0, loss_rate)
     vprint(f"    Theoretical Incidents with ≥1 PG lost: {loss_rate*num_simulations:.4g}/{num_simulations} ({loss_rate * 100:.3g}%)")
-    if simulations_with_loss > 0:
+    if simulations_with_loss > 0 or not args.skip_monte_carlo:
         loss_rate = simulations_with_loss / num_simulations
         vprint(f"    Observed Incidents with ≥1 PG lost: {simulations_with_loss}/{num_simulations} ({100 * loss_rate:.3f}%)")
     else:
@@ -446,9 +468,9 @@ def simulate(args):
     expected_pgs_lost_per_year = expected_losses_per_year * pgs_lost_per_event
     min_expected_pgs_lost_per_year = min_expected_losses_per_year * pgs_lost_per_event
     max_expected_pgs_lost_per_year = max_expected_losses_per_year * pgs_lost_per_event
-    expected_durability = 1 - (expected_pgs_lost_per_year / num_pgs)
-    min_expected_durability = 1 - (max_expected_pgs_lost_per_year / num_pgs)
-    max_expected_durability = 1 - (min_expected_pgs_lost_per_year / num_pgs)
+    expected_durability = max(0, 1 - (expected_pgs_lost_per_year / num_pgs))
+    min_expected_durability = max(0, 1 - (max_expected_pgs_lost_per_year / num_pgs))
+    max_expected_durability = max(0, 1 - (min_expected_pgs_lost_per_year / num_pgs))
     print(f"    Durability: {count_nines(expected_durability)}")
     vprint(f"    (95% CI: {count_nines(min_expected_durability)} to {count_nines(max_expected_durability)})")
 
@@ -636,6 +658,8 @@ def main():
     sim.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
     sim.add_argument('--recovery-rate', type=float, default=50, help='Recovery rate per OSD (default: 50MBps)')
     sim.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
+    sim.add_argument('--domains-down', type=int, default=0, help='number of failure domains to take down in simulation (default: 0)')
+    sim.add_argument('--skip-monte-carlo', action='store_true', help='Skip the Monte Carlo sims and use theoretical estimates instead')
     sim.set_defaults(func=simulate)
 
     an = subparsers.add_parser('analyze', help='Calculate durability of the local pools')
@@ -648,6 +672,7 @@ def main():
     an.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
     an.add_argument('--recovery-rate', type=int, default=50, help='Per-OSD data recovery rate (default: 50MBps)')
     an.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
+    an.add_argument('--skip-monte-carlo', action='store_true', help='Skip the Monte Carlo sims and use theoretical estimates instead')
     an.set_defaults(func=analyze)
 
     args = parser.parse_args()
