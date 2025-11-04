@@ -295,6 +295,64 @@ def simulate(args):
     vprint(f"---------------------------")
     vprint()
 
+    vprint(f"Theoretical loss rate calculation:")
+    H = num_domains # num hosts
+    f = num_failures # normally m+1
+    n = osds_per_domain # osds per host
+    r = pg_size  # normally k + m
+    N = num_osds  # total osds
+
+    vprint("    PG loss rate calculation:")
+    vprint(f"      H (failure domains): {H}")
+    vprint(f"      f (failures to cause data loss): {f}")
+    vprint(f"      n (OSDs per failure domain): {n}")
+    vprint(f"      r (PG size): {r}")
+    vprint(f"      N (total OSDs): {N}")
+    vprint(f"      Number of PGs: {num_pgs}")
+
+    # Assume we have f concurrent failures. They will cause data loss if:
+    # - they land on f different failure domains
+    # - per-PG probability that those domains are hit
+    # - at least one PG is lost
+
+    # 1. Eligibility: Do the f failures land on f different domains?
+    elig = comb(H, f) * (n ** f) / comb(N, f)
+    vprint("    1. Eligibility (Do the f failures land on f different domains): C(H, f) * n^f / C(N, f)")
+    vprint(f"       C({H}, {f}) * {n}^{f} / C({N}, {f}) = {comb(H, f)} * {n**f} / {comb(N, f)} = {elig:.3g}")
+
+    # 2. Per-PG hit probability
+    #    PG picks r domains uniformly: probability it includes those f failed domains is
+    p_hosts_in_pg = comb(H - f, r - f) / comb(H, r)
+    vprint("    2. Per-PG hit probability: C(H - f, r - f) / C(H, r)")
+    vprint(f"       C({H} - {f}, {r} - {f}) / C({H}, {r}) = {comb(H - f, r - f)} / {comb(H, r)} = {p_hosts_in_pg:.3g}")
+
+    # 3. Within those f domains, PG must pick the failed OSD in each: 
+    p_osds_match = (1 / n) ** f
+    vprint("    3. PG picks failed OSDs within those domains: (1 / n)^f")
+    vprint(f"       (1 / {n})^{f} = {p_osds_match:.3g}")
+
+    # 4. Combine to get per-PG loss probability
+    p_pg_loss = p_hosts_in_pg * p_osds_match
+    vprint("    4. Per-PG loss probability: #2 * #3")
+    vprint(f"       {p_pg_loss:.3g}")
+
+    # 5. Probability that at least one PG is lost
+    p_at_least_one_lost = 1 - (1 - p_pg_loss) ** num_pgs
+    vprint("    5. Probability that at least one PG is lost: 1 - (1 - #4)^num_pgs")
+    vprint(f"    1 - (1 - {p_pg_loss:.3g})^{num_pgs} = {p_at_least_one_lost:.3g}")
+
+    loss_rate = elig * p_at_least_one_lost
+    vprint("    6. Overall data loss probability: #1 * #5")
+
+    assert 0 <= loss_rate <= 1, "Calculated loss rate is out of bounds!"
+
+    vprint()
+    vprint(f"    Finally, P. ≥1 PG lost: {loss_rate * 100:.3g}%")
+
+    vprint()
+    vprint(f"---------------------------")
+    vprint()
+
     # simulate the major incidents
     vprint(f"Monte Carlo Sim: n={num_simulations} {num_failures}x failures")
     threshold = pg_size - min_size
@@ -309,6 +367,7 @@ def simulate(args):
     if not args.skip_monte_carlo:
         vprint(f"    ╭{'─' * num_batches}╮")
         vprint(f"    │", end="", flush=True)
+    else:
         num_simulations = 1000000000
     simulations_done = 0
     sim_runtime = args.max_mc_runtime
@@ -320,7 +379,7 @@ def simulate(args):
         batch_good = True
         for _ in range(int(num_simulations/num_batches)):
             if spin_time + 0.1 < time.time():
-                print(next(spinner), end="\b", flush=True)
+                vprint(next(spinner), end="\b", flush=True)
                 spin_time = time.time()
             simulations_done += 1
             failed_osds = set()
@@ -355,20 +414,6 @@ def simulate(args):
         vprint(f"    ╰{'─' * num_batches}╯")
         vprint()
 
-    vprint(f"    Theoretical loss rate calculation:")
-    if args.k is not None:
-        vprint(f"        OSD failure combinations: C({num_osds}, {num_failures}) = {comb(num_osds, num_failures)} ")
-        vprint(f"        OSD to PG failure ratio: C({pg_size}, {num_failures}) = {comb(pg_size, num_failures)}")
-        vprint(f"        Loss rate: {num_pgs} PGs * {comb(pg_size, num_failures)} / {comb(num_osds, num_failures)} combinations")
-        loss_rate = num_pgs / comb(num_osds, num_failures) * comb(pg_size, num_failures)
-    else:
-        vprint(f"        OSD failure combinations: C({num_osds}, {num_failures}) = {comb(num_osds, num_failures)}")
-        vprint(f"        OSD to PG failure ratio: C({pg_size}, {num_failures}) = {comb(pg_size, num_failures)}")
-        vprint(f"        Loss rate: {num_pgs} PGs / {comb(num_osds, num_failures)} combinations")
-        assert num_failures == pg_size, "For replicated pools, num_failures should equal pg_size"
-        loss_rate = num_pgs / comb(num_osds, num_failures)
-    loss_rate = min(1.0, loss_rate)
-    vprint(f"    Theoretical Incidents with ≥1 PG lost: {loss_rate*num_simulations:.4g}/{num_simulations} ({loss_rate * 100:.3g}%)")
     if simulations_with_loss > 0:
         loss_rate = simulations_with_loss / num_simulations
         vprint(f"    Observed Incidents with ≥1 PG lost: {simulations_with_loss}/{num_simulations} ({100 * loss_rate:.3f}%)")
@@ -460,20 +505,15 @@ def simulate(args):
     min_loss_rate = confidence[0]
     max_loss_rate = confidence[1]
 
+    inv_loss_rate = 1/loss_rate if loss_rate > 0 else float('inf')
+    inv_min_loss_rate = 1/min_loss_rate if min_loss_rate > 0 else float('inf')
+    inv_max_loss_rate = 1/max_loss_rate if max_loss_rate > 0 else float('inf')
+
     vprint(f"MTTDL/Durability Estimates:")
     vprint(f"    Mean time to {num_failures}x failure: {format_time(mtt_multi_failure)}")
-    try:
-        vprint(f"    Probability that {num_failures}x failures causes data loss: {loss_rate*100:.3g}% (1 in {format_int(1/loss_rate)})")
-        vprint(f"       95% CI: {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}% (1 in {format_int(1/max_loss_rate)} to 1 in {format_int(1/min_loss_rate)})")
-    except ZeroDivisionError:
-        try:
-            vprint(f"    Probability that {num_failures}x failures causes data loss: {loss_rate*100:.3g}% (1 in {format_int(1/loss_rate)})")
-        except ZeroDivisionError:
-            vprint(f"    Probability that {num_failures}x failures causes data loss: 0%")
-        try:
-            vprint(f"        95% CI: {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}% (1 in {format_int(1/max_loss_rate)} to ∞)")
-        except ZeroDivisionError:
-            vprint(f"        95% CI: {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}%")
+    vprint(f"    Probability that {num_failures}x failures causes data loss: {loss_rate*100:.3g}% (1 in {format_int(inv_loss_rate)})")
+    vprint(f"       95% CI: {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}% (1 in {format_int(inv_max_loss_rate)} to 1 in {format_int(inv_min_loss_rate)})")
+
     vprint("")
     vprint(f"Combining the above to estimate annual data loss:")
 
