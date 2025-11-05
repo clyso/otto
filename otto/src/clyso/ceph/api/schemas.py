@@ -7,14 +7,14 @@ Pydantic schemas for Ceph JSON API responses.
 This module provides typed interfaces for Ceph command JSON outputs,
 enabling better type checking and IntelliSense support with validation.
 
-This schema handles different ceph versions
+This schema handles different ceph versions:
 
-Older Ceph versions may not have newer metrics/fields so we put | None
-- field: Type | None = None
+Older Ceph versions may not have newer metrics/fields so we use optional types with defaults:
+  - field: Type | None = None
+  - field: Type = Field(default=value)
 
-Newer Ceph versions may add metrics not yet in our schema and allows parsing to succeed even when fields are missing
-so we add this option
-model_config = {"extra": "allow"}
+Newer Ceph versions may add fields not yet in our schema. All models inherit from
+CephBaseModel which has extra="allow" to accept unknown fields gracefully.
 """
 # Basedpyright Any type warnings are suppressed for this file
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportExplicitAny=false
@@ -24,7 +24,17 @@ from __future__ import annotations
 import pathlib
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel
+
+
+class CephBaseModel(BaseModel):
+    """Base model for all Ceph schemas with forward-compatibility settings.
+
+    This allows schemas to accept extra fields from newer Ceph versions
+    without validation errors.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
 
 class MalformedCephDataError(Exception):
@@ -33,14 +43,14 @@ class MalformedCephDataError(Exception):
     pass
 
 
-class OpQueueAgeHist(BaseModel):
+class OpQueueAgeHist(CephBaseModel):
     """Schema for operation queue age histogram."""
 
     histogram: list[int]
     upper_bound: int = Field(default=0)
 
 
-class PerfStat(BaseModel):
+class PerfStat(CephBaseModel):
     """Schema for OSD performance statistics."""
 
     commit_latency_ms: int = Field(default=0)
@@ -49,7 +59,7 @@ class PerfStat(BaseModel):
     apply_latency_ns: int = Field(default=0)
 
 
-class OSDNode(BaseModel):
+class OSDNode(CephBaseModel):
     """Schema for an OSD node in the OSD tree."""
 
     id: int = Field(default=0)
@@ -67,10 +77,8 @@ class OSDNode(BaseModel):
     primary_affinity: float | None = Field(default=None)
 
 
-class OSDTree(BaseModel):
+class OSDTree(CephBaseModel):
     """Schema for `ceph osd tree --format=json` response."""
-
-    model_config = {"extra": "allow"}
 
     nodes: list[OSDNode]
     stray: list[Any] = Field(default_factory=list)
@@ -92,7 +100,7 @@ class OSDTree(BaseModel):
         return cls.loads(raw)
 
 
-class PGStatSum(BaseModel):
+class PGStatSum(CephBaseModel):
     """Schema for PG statistics summary."""
 
     num_bytes: int = Field(default=0)
@@ -137,7 +145,7 @@ class PGStatSum(BaseModel):
     num_objects_repaired: int = Field(default=0)
 
 
-class PGStoreStats(BaseModel):
+class PGStoreStats(CephBaseModel):
     """Schema for PG store statistics."""
 
     total: int = Field(default=0)
@@ -152,7 +160,7 @@ class PGStoreStats(BaseModel):
     internal_metadata: int = Field(default=0)
 
 
-class PGStatsSum(BaseModel):
+class PGStatsSum(CephBaseModel):
     """Schema for PG stats summary."""
 
     stat_sum: PGStatSum
@@ -164,7 +172,7 @@ class PGStatsSum(BaseModel):
     num_store_stats: int = Field(default=0)
 
 
-class PGStatsDelta(BaseModel):
+class PGStatsDelta(CephBaseModel):
     """Schema for PG stats delta."""
 
     stat_sum: PGStatSum
@@ -177,7 +185,7 @@ class PGStatsDelta(BaseModel):
     stamp_delta: str = Field(default="")
 
 
-class PGStat(BaseModel):
+class PGStat(CephBaseModel):
     """Schema for individual PG statistics."""
 
     pgid: str = Field(default="")
@@ -235,7 +243,7 @@ class PGStat(BaseModel):
     purged_snaps: list[Any] = Field(default_factory=list)
 
 
-class OSDStat(BaseModel):
+class OSDStat(CephBaseModel):
     """Schema for individual OSD statistics."""
 
     osd: int = Field(default=0)
@@ -264,7 +272,7 @@ class OSDStat(BaseModel):
     network_ping_times: list[Any] = Field(default_factory=list)
 
 
-class OSDStatsSum(BaseModel):
+class OSDStatsSum(CephBaseModel):
     """Schema for aggregated OSD statistics summary."""
 
     up_from: int = Field(default=0)
@@ -290,7 +298,7 @@ class OSDStatsSum(BaseModel):
     network_ping_times: list[Any] = Field(default_factory=list)
 
 
-class PoolStatfs(BaseModel):
+class PoolStatfs(CephBaseModel):
     """Schema for pool statfs entries."""
 
     poolid: int = Field(default=0)
@@ -307,7 +315,7 @@ class PoolStatfs(BaseModel):
     internal_metadata: int = Field(default=0)
 
 
-class PoolStat(BaseModel):
+class PoolStat(CephBaseModel):
     """Schema for pool statistics."""
 
     poolid: int = Field(default=0)
@@ -321,7 +329,7 @@ class PoolStat(BaseModel):
     num_store_stats: int = Field(default=0)
 
 
-class PGMap(BaseModel):
+class PGMap(CephBaseModel):
     """Schema for PG map."""
 
     version: int = Field(default=0)
@@ -337,7 +345,7 @@ class PGMap(BaseModel):
     pool_statfs: list[PoolStatfs] = Field(default_factory=list)
 
 
-class PGDump(BaseModel):
+class PGDump(CephBaseModel):
     """Schema for `ceph pg dump --format=json` response."""
 
     pg_ready: bool
@@ -360,7 +368,7 @@ class PGDump(BaseModel):
         return cls.loads(raw)
 
 
-class OSDDFNode(BaseModel):
+class OSDDFNode(CephBaseModel):
     """Schema for OSD disk usage node from `ceph osd df --format=json`."""
 
     id: int = Field(default=0)
@@ -384,10 +392,8 @@ class OSDDFNode(BaseModel):
     status: str = Field(default="")
 
 
-class OSDDFResponse(BaseModel):
+class OSDDFResponse(CephBaseModel):
     """Schema for `ceph osd df --format=json` response."""
-
-    model_config = {"extra": "allow"}
 
     nodes: list[OSDDFNode]
 
@@ -408,7 +414,7 @@ class OSDDFResponse(BaseModel):
         return cls.loads(raw)
 
 
-class LastPGMergeMeta(BaseModel):
+class LastPGMergeMeta(CephBaseModel):
     """Schema for last PG merge metadata."""
 
     source_pgid: str = Field(default="")
@@ -419,13 +425,13 @@ class LastPGMergeMeta(BaseModel):
     target_version: str = Field(default="")
 
 
-class HitSetParams(BaseModel):
+class HitSetParams(CephBaseModel):
     """Schema for hit set parameters."""
 
     type: str = Field(default="")
 
 
-class PoolConfig(BaseModel):
+class PoolConfig(CephBaseModel):
     """Schema for pool configuration from osd dump."""
 
     pool: int = Field(default=0)
@@ -528,10 +534,8 @@ class PoolConfig(BaseModel):
     application_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class OSDDumpResponse(BaseModel):
+class OSDDumpResponse(CephBaseModel):
     """Schema for `ceph osd dump --format=json` response."""
-
-    model_config = {"extra": "allow"}
 
     epoch: int = Field(default=0)
     fsid: str = Field(default="")
@@ -585,7 +589,7 @@ class OSDDumpResponse(BaseModel):
         return cls.loads(raw)
 
 
-class LatencyHistogram(BaseModel):
+class LatencyHistogram(CephBaseModel):
     """Schema for latency histogram with count, sum and average time."""
 
     avgcount: int = Field(default=0)
@@ -593,7 +597,7 @@ class LatencyHistogram(BaseModel):
     avgtime: float = Field(default=0.0)
 
 
-class AsyncMessengerWorker(BaseModel):
+class AsyncMessengerWorker(CephBaseModel):
     """Schema for AsyncMessenger worker performance metrics."""
 
     msgr_recv_messages: int = Field(default=0)
@@ -614,7 +618,7 @@ class AsyncMessengerWorker(BaseModel):
     msgr_send_encrypted_bytes: int = Field(default=0)
 
 
-class BlueFS(BaseModel):
+class BlueFS(CephBaseModel):
     """Schema for BlueFS performance metrics."""
 
     db_total_bytes: int = Field(default=0)
@@ -682,7 +686,7 @@ class BlueFS(BaseModel):
     alloc_slow_max_lat: float = Field(default=0.0)
 
 
-class BlueStore(BaseModel):
+class BlueStore(CephBaseModel):
     """Schema for BlueStore performance metrics."""
 
     allocated: int = Field(default=0)
@@ -782,7 +786,7 @@ class BlueStore(BaseModel):
     slow_read_wait_aio_count: int = Field(default=0)
 
 
-class BlueStorePriCache(BaseModel):
+class BlueStorePriCache(CephBaseModel):
     """Schema for BlueStore priority cache metrics."""
 
     target_bytes: int = Field(default=0)
@@ -792,7 +796,7 @@ class BlueStorePriCache(BaseModel):
     cache_bytes: int = Field(default=0)
 
 
-class BlueStorePriCachePool(BaseModel):
+class BlueStorePriCachePool(CephBaseModel):
     """Schema for BlueStore priority cache pool (data/kv/meta/onode)."""
 
     pri0_bytes: int = Field(default=0)
@@ -811,21 +815,21 @@ class BlueStorePriCachePool(BaseModel):
     committed_bytes: int = Field(default=0)
 
 
-class CCT(BaseModel):
+class CCT(CephBaseModel):
     """Schema for Ceph Context Tracker metrics."""
 
     total_workers: int = Field(default=0)
     unhealthy_workers: int = Field(default=0)
 
 
-class FinisherMetrics(BaseModel):
+class FinisherMetrics(CephBaseModel):
     """Schema for finisher queue metrics."""
 
     queue_len: int = Field(default=0)
     complete_latency: LatencyHistogram = Field(default_factory=LatencyHistogram)
 
 
-class MemPoolMetrics(BaseModel):
+class MemPoolMetrics(CephBaseModel):
     """Schema for memory pool metrics."""
 
     bloom_filter_bytes: int = Field(default=0)
@@ -898,7 +902,7 @@ class MemPoolMetrics(BaseModel):
     unittest_2_items: int = Field(default=0)
 
 
-class ObjecterMetrics(BaseModel):
+class ObjecterMetrics(CephBaseModel):
     """Schema for Objecter client metrics."""
 
     op_active: int = Field(default=0)
@@ -973,7 +977,7 @@ class ObjecterMetrics(BaseModel):
     omap_del: int = Field(default=0)
 
 
-class OSDMetrics(BaseModel):
+class OSDMetrics(CephBaseModel):
     """Schema for OSD daemon performance metrics."""
 
     op_wip: int = Field(default=0)
@@ -1110,13 +1114,13 @@ class OSDMetrics(BaseModel):
     osd_pg_biginfo: int = Field(default=0)
 
 
-class OSDSlowOps(BaseModel):
+class OSDSlowOps(CephBaseModel):
     """Schema for OSD slow operations metrics."""
 
     slow_ops_count: int = Field(default=0)
 
 
-class RecoveryStatePerf(BaseModel):
+class RecoveryStatePerf(CephBaseModel):
     """Schema for recovery state performance metrics."""
 
     initial_latency: LatencyHistogram = Field(default_factory=LatencyHistogram)
@@ -1164,13 +1168,16 @@ class RecoveryStatePerf(BaseModel):
     notrecovering_latency: LatencyHistogram = Field(default_factory=LatencyHistogram)
 
 
-class RocksDBMetrics(BaseModel):
+class RocksDBMetrics(CephBaseModel):
     """Schema for RocksDB performance metrics."""
 
     get_latency: LatencyHistogram = Field(default_factory=LatencyHistogram)
     submit_latency: LatencyHistogram = Field(default_factory=LatencyHistogram)
     submit_sync_latency: LatencyHistogram = Field(default_factory=LatencyHistogram)
     compact: int = Field(default=0)
+    compact_running: int = Field(default=0)
+    compact_completed: int = Field(default=0)
+    compact_lasted: float = Field(default=0.0)
     compact_range: int = Field(default=0)
     compact_queue_merge: int = Field(default=0)
     compact_queue_len: int = Field(default=0)
@@ -1184,7 +1191,7 @@ class RocksDBMetrics(BaseModel):
     )
 
 
-class ThrottleMetrics(BaseModel):
+class ThrottleMetrics(CephBaseModel):
     """Schema for throttling metrics."""
 
     val: int = Field(default=0)
@@ -1201,10 +1208,8 @@ class ThrottleMetrics(BaseModel):
     wait: LatencyHistogram = Field(default_factory=LatencyHistogram)
 
 
-class OSDPerfDumpResponse(BaseModel):
+class OSDPerfDumpResponse(CephBaseModel):
     """Schema for `ceph tell osd.X perf dump` response."""
-
-    model_config = {"extra": "allow"}
 
     # AsyncMessenger workers - dynamic field names
     # Use a more flexible approach for dynamic worker names
@@ -1234,30 +1239,36 @@ class OSDPerfDumpResponse(BaseModel):
     bluefs: BlueFS = Field(default_factory=BlueFS)
     bluestore: BlueStore = Field(default_factory=BlueStore)
 
-    bluestore_pricache: BlueStorePriCache = Field(alias="bluestore-pricache")
-    bluestore_pricache_data: BlueStorePriCachePool = Field(
-        alias="bluestore-pricache:data"
+    bluestore_pricache: BlueStorePriCache = Field(
+        default_factory=BlueStorePriCache, alias="bluestore-pricache"
     )
-    bluestore_pricache_kv: BlueStorePriCachePool = Field(alias="bluestore-pricache:kv")
+    bluestore_pricache_data: BlueStorePriCachePool = Field(
+        default_factory=BlueStorePriCachePool, alias="bluestore-pricache:data"
+    )
+    bluestore_pricache_kv: BlueStorePriCachePool = Field(
+        default_factory=BlueStorePriCachePool, alias="bluestore-pricache:kv"
+    )
     bluestore_pricache_kv_onode: BlueStorePriCachePool = Field(
-        alias="bluestore-pricache:kv_onode"
+        default_factory=BlueStorePriCachePool, alias="bluestore-pricache:kv_onode"
     )
     bluestore_pricache_meta: BlueStorePriCachePool = Field(
-        alias="bluestore-pricache:meta"
+        default_factory=BlueStorePriCachePool, alias="bluestore-pricache:meta"
     )
 
     cct: CCT = Field(default_factory=CCT)
 
-    finisher_commit_finisher: FinisherMetrics = Field(alias="finisher-commit_finisher")
+    finisher_commit_finisher: FinisherMetrics = Field(
+        default_factory=FinisherMetrics, alias="finisher-commit_finisher"
+    )
     finisher_objecter_finisher_0: FinisherMetrics = Field(
-        alias="finisher-objecter-finisher-0"
+        default_factory=FinisherMetrics, alias="finisher-objecter-finisher-0"
     )
 
     mempool: MemPoolMetrics = Field(default_factory=MemPoolMetrics)
 
     objecter: ObjecterMetrics = Field(default_factory=ObjecterMetrics)
     osd: OSDMetrics = Field(default_factory=OSDMetrics)
-    osd_slow_ops: Optional[OSDSlowOps] = Field(alias="trackedop")
+    osd_slow_ops: Optional[OSDSlowOps] = Field(default=None, alias="trackedop")
 
     recoverystate_perf: RecoveryStatePerf = Field(default_factory=RecoveryStatePerf)
 
@@ -1265,39 +1276,50 @@ class OSDPerfDumpResponse(BaseModel):
 
     # Throttling metrics - multiple throttle instances with dynamic names
     throttle_bluestore_throttle_bytes: ThrottleMetrics = Field(
-        alias="throttle-bluestore_throttle_bytes"
+        default_factory=ThrottleMetrics, alias="throttle-bluestore_throttle_bytes"
     )
     throttle_bluestore_throttle_deferred_bytes: ThrottleMetrics = Field(
-        alias="throttle-bluestore_throttle_deferred_bytes"
+        default_factory=ThrottleMetrics,
+        alias="throttle-bluestore_throttle_deferred_bytes",
     )
     throttle_msgr_dispatch_throttler_client: ThrottleMetrics = Field(
-        alias="throttle-msgr_dispatch_throttler-client"
+        default_factory=ThrottleMetrics, alias="throttle-msgr_dispatch_throttler-client"
     )
     throttle_msgr_dispatch_throttler_cluster: ThrottleMetrics = Field(
-        alias="throttle-msgr_dispatch_throttler-cluster"
+        default_factory=ThrottleMetrics,
+        alias="throttle-msgr_dispatch_throttler-cluster",
     )
     throttle_msgr_dispatch_throttler_hb_back_client: ThrottleMetrics = Field(
-        alias="throttle-msgr_dispatch_throttler-hb_back_client"
+        default_factory=ThrottleMetrics,
+        alias="throttle-msgr_dispatch_throttler-hb_back_client",
     )
     throttle_msgr_dispatch_throttler_hb_back_server: ThrottleMetrics = Field(
-        alias="throttle-msgr_dispatch_throttler-hb_back_server"
+        default_factory=ThrottleMetrics,
+        alias="throttle-msgr_dispatch_throttler-hb_back_server",
     )
     throttle_msgr_dispatch_throttler_hb_front_client: ThrottleMetrics = Field(
-        alias="throttle-msgr_dispatch_throttler-hb_front_client"
+        default_factory=ThrottleMetrics,
+        alias="throttle-msgr_dispatch_throttler-hb_front_client",
     )
     throttle_msgr_dispatch_throttler_hb_front_server: ThrottleMetrics = Field(
-        alias="throttle-msgr_dispatch_throttler-hb_front_server"
+        default_factory=ThrottleMetrics,
+        alias="throttle-msgr_dispatch_throttler-hb_front_server",
     )
     throttle_msgr_dispatch_throttler_ms_objecter: ThrottleMetrics = Field(
-        alias="throttle-msgr_dispatch_throttler-ms_objecter"
+        default_factory=ThrottleMetrics,
+        alias="throttle-msgr_dispatch_throttler-ms_objecter",
     )
-    throttle_objecter_bytes: ThrottleMetrics = Field(alias="throttle-objecter_bytes")
-    throttle_objecter_ops: ThrottleMetrics = Field(alias="throttle-objecter_ops")
+    throttle_objecter_bytes: ThrottleMetrics = Field(
+        default_factory=ThrottleMetrics, alias="throttle-objecter_bytes"
+    )
+    throttle_objecter_ops: ThrottleMetrics = Field(
+        default_factory=ThrottleMetrics, alias="throttle-objecter_ops"
+    )
     throttle_osd_client_bytes: ThrottleMetrics = Field(
-        alias="throttle-osd_client_bytes"
+        default_factory=ThrottleMetrics, alias="throttle-osd_client_bytes"
     )
     throttle_osd_client_messages: ThrottleMetrics = Field(
-        alias="throttle-osd_client_messages"
+        default_factory=ThrottleMetrics, alias="throttle-osd_client_messages"
     )
 
     @classmethod
@@ -1317,21 +1339,21 @@ class OSDPerfDumpResponse(BaseModel):
         return cls.loads(raw)
 
 
-class CephfsClient(BaseModel):
+class CephfsClient(CephBaseModel):
     """Schema for CephFS client information from fs status."""
 
     clients: int = Field(default=0)
     fs: str = Field(default="")
 
 
-class CephfsMDSVersion(BaseModel):
+class CephfsMDSVersion(CephBaseModel):
     """Schema for MDS version information from fs status."""
 
     daemon: list[str] = Field(default_factory=list)
     version: str = Field(default="")
 
 
-class CephfsMDSMapEntry(BaseModel):
+class CephfsMDSMapEntry(CephBaseModel):
     """Schema for MDS map entry from fs status."""
 
     caps: int = Field(default=0)
@@ -1349,7 +1371,7 @@ class CephfsMDSMapEntry(BaseModel):
     )  # This field is present for the source logic in cephfs session top command
 
 
-class CephfsPool(BaseModel):
+class CephfsPool(CephBaseModel):
     """Schema for CephFS pool information from fs status."""
 
     avail: int = Field(default=0)
@@ -1359,10 +1381,8 @@ class CephfsPool(BaseModel):
     used: int = Field(default=0)
 
 
-class CephfsStatusResponse(BaseModel):
+class CephfsStatusResponse(CephBaseModel):
     """Schema for `ceph fs status --format=json` response."""
-
-    model_config = {"extra": "allow"}
 
     clients: list[CephfsClient] = Field(default_factory=list)
     mds_version: list[CephfsMDSVersion] = Field(default_factory=list)
@@ -1386,7 +1406,7 @@ class CephfsStatusResponse(BaseModel):
         return cls.loads(raw)
 
 
-class MDSAddressVector(BaseModel):
+class MDSAddressVector(CephBaseModel):
     """Schema for MDS address vector."""
 
     type: str = Field(default="")
@@ -1394,26 +1414,22 @@ class MDSAddressVector(BaseModel):
     nonce: int = Field(default=0)
 
 
-class MDSAddresses(BaseModel):
+class MDSAddresses(CephBaseModel):
     """Schema for MDS addresses."""
 
     addrvec: list[MDSAddressVector] = Field(default_factory=list)
 
 
-class MDSCompatibility(BaseModel):
+class MDSCompatibility(CephBaseModel):
     """Schema for MDS compatibility features."""
-
-    model_config = {"extra": "allow"}
 
     compat: dict[str, str] = Field(default_factory=dict)
     ro_compat: dict[str, str] = Field(default_factory=dict)
     incompat: dict[str, str] = Field(default_factory=dict)
 
 
-class MDSInfo(BaseModel):
+class MDSInfo(CephBaseModel):
     """Schema for individual MDS daemon information."""
-
-    model_config = {"extra": "allow"}
 
     gid: int = Field(default=0)
     name: str = Field(default="")
@@ -1431,7 +1447,7 @@ class MDSInfo(BaseModel):
     epoch: int = Field(default=0)  # Only present for standbys
 
 
-class MDSFlagsState(BaseModel):
+class MDSFlagsState(CephBaseModel):
     """Schema for MDS flags state."""
 
     joinable: bool = Field(default=True)
@@ -1443,10 +1459,8 @@ class MDSFlagsState(BaseModel):
     balance_automate: bool = Field(default=False)
 
 
-class MDSMap(BaseModel):
+class MDSMap(CephBaseModel):
     """Schema for MDS map within a filesystem."""
-
-    model_config = {"extra": "allow"}
 
     epoch: int = Field(default=0)
     flags: int = Field(default=0)
@@ -1482,14 +1496,14 @@ class MDSMap(BaseModel):
     standby_count_wanted: int = Field(default=1)
 
 
-class FilesystemInfo(BaseModel):
+class FilesystemInfo(CephBaseModel):
     """Schema for filesystem information from mds stat."""
 
     mdsmap: MDSMap = Field(default_factory=MDSMap)
     filesystem_id: int = Field(default=0, alias="id")
 
 
-class FSMapCompatibility(BaseModel):
+class FSMapCompatibility(CephBaseModel):
     """Schema for fsmap compatibility."""
 
     compat: dict[str, str] = Field(default_factory=dict)
@@ -1497,17 +1511,15 @@ class FSMapCompatibility(BaseModel):
     incompat: dict[str, str] = Field(default_factory=dict)
 
 
-class FSMapFeatureFlags(BaseModel):
+class FSMapFeatureFlags(CephBaseModel):
     """Schema for fsmap feature flags."""
 
     enable_multiple: bool = Field(default=False)
     ever_enabled_multiple: bool = Field(default=False)
 
 
-class FSMap(BaseModel):
+class FSMap(CephBaseModel):
     """Schema for the fsmap section of mds stat (detailed MDS map)."""
-
-    model_config = {"extra": "allow"}
 
     epoch: int = Field(default=0)
     default_fscid: int = Field(default=0)
@@ -1517,10 +1529,8 @@ class FSMap(BaseModel):
     filesystems: list[FilesystemInfo] = Field(default_factory=list)
 
 
-class CephfsMDSStatResponse(BaseModel):
+class CephfsMDSStatResponse(CephBaseModel):
     """Schema for `ceph mds stat --format=json` response."""
-
-    model_config = {"extra": "allow"}
 
     fsmap: FSMap = Field(default_factory=FSMap)
     mdsmap_first_committed: int = Field(default=0)
@@ -1553,14 +1563,14 @@ class CephfsMDSStatResponse(BaseModel):
         return cls.loads(raw)
 
 
-class CephfsSessionEntityName(BaseModel):
+class CephfsSessionEntityName(CephBaseModel):
     """Schema for CephFS session entity name."""
 
     entity_type: str = Field(default="client", alias="type")
     num: int = Field(default=0)
 
 
-class CephfsSessionEntityAddr(BaseModel):
+class CephfsSessionEntityAddr(CephBaseModel):
     """Schema for CephFS session entity address."""
 
     addr_type: str = Field(default="v1", alias="type")
@@ -1568,33 +1578,33 @@ class CephfsSessionEntityAddr(BaseModel):
     nonce: int = Field(default=0)
 
 
-class CephfsSessionEntity(BaseModel):
+class CephfsSessionEntity(CephBaseModel):
     """Schema for CephFS session entity."""
 
     name: CephfsSessionEntityName = Field(default_factory=CephfsSessionEntityName)
     addr: CephfsSessionEntityAddr = Field(default_factory=CephfsSessionEntityAddr)
 
 
-class CephfsSessionMetricValue(BaseModel):
+class CephfsSessionMetricValue(CephBaseModel):
     """Schema for CephFS session metric with value and halflife."""
 
     value: float = Field(default=0.0)
     halflife: float = Field(default=0.0)
 
 
-class CephfsSessionClientFeatures(BaseModel):
+class CephfsSessionClientFeatures(CephBaseModel):
     """Schema for CephFS session client features."""
 
     feature_bits: str = Field(default="0x0")
 
 
-class CephfsSessionMetricFlags(BaseModel):
+class CephfsSessionMetricFlags(CephBaseModel):
     """Schema for CephFS session metric flags."""
 
     feature_bits: str = Field(default="0x0")
 
 
-class CephfsSessionMetricSpec(BaseModel):
+class CephfsSessionMetricSpec(CephBaseModel):
     """Schema for CephFS session metric specification."""
 
     metric_flags: CephfsSessionMetricFlags = Field(
@@ -1602,10 +1612,8 @@ class CephfsSessionMetricSpec(BaseModel):
     )
 
 
-class CephfsSessionClientMetadata(BaseModel):
+class CephfsSessionClientMetadata(CephBaseModel):
     """Schema for CephFS session client metadata."""
-
-    model_config = {"extra": "allow"}
 
     client_features: CephfsSessionClientFeatures = Field(
         default_factory=CephfsSessionClientFeatures
@@ -1619,24 +1627,22 @@ class CephfsSessionClientMetadata(BaseModel):
     root: str = Field(default="")
 
 
-class CephfsSessionCompletedRequest(BaseModel):
+class CephfsSessionCompletedRequest(CephBaseModel):
     """Schema for CephFS session completed request."""
 
     tid: int = Field(default=0)
     created_ino: str = Field(default="")
 
 
-class CephfsSessionPreallocIno(BaseModel):
+class CephfsSessionPreallocIno(CephBaseModel):
     """Schema for CephFS session preallocated inode range."""
 
     start: str = Field(default="")
     length: int = Field(default=0)
 
 
-class CephfsSession(BaseModel):
+class CephfsSession(CephBaseModel):
     """Schema for individual CephFS session."""
-
-    model_config = {"extra": "allow"}
 
     session_id: int = Field(default=0, alias="id")
     entity: CephfsSessionEntity = Field(default_factory=CephfsSessionEntity)
@@ -1716,27 +1722,21 @@ class CephfsSessionListResponse(RootModel[list[CephfsSession]]):
         return cls.loads(raw)
 
 
-class HealthCheckSummary(BaseModel):
+class HealthCheckSummary(CephBaseModel):
     """Schema for health check summary."""
-
-    model_config = {"extra": "allow"}
 
     message: str = Field(default="")
     count: int = Field(default=0)
 
 
-class HealthCheckDetail(BaseModel):
+class HealthCheckDetail(CephBaseModel):
     """Schema for health check detail."""
-
-    model_config = {"extra": "allow"}
 
     message: str = Field(default="")
 
 
-class HealthCheck(BaseModel):
+class HealthCheck(CephBaseModel):
     """Schema for individual health check."""
-
-    model_config = {"extra": "allow"}
 
     severity: str = Field(default="")
     summary: HealthCheckSummary = Field(default_factory=HealthCheckSummary)
@@ -1744,29 +1744,23 @@ class HealthCheck(BaseModel):
     muted: bool = Field(default=False)
 
 
-class Health(BaseModel):
+class Health(CephBaseModel):
     """Schema for cluster health status."""
-
-    model_config = {"extra": "allow"}
 
     status: str = Field(default="")
     checks: dict[str, HealthCheck] = Field(default_factory=dict)
     mutes: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class MonMapFeatures(BaseModel):
+class MonMapFeatures(CephBaseModel):
     """Schema for monitor map features."""
-
-    model_config = {"extra": "allow"}
 
     persistent: list[str] = Field(default_factory=list)
     optional: list[str] = Field(default_factory=list)
 
 
-class MonInfo(BaseModel):
+class MonInfo(CephBaseModel):
     """Schema for monitor information."""
-
-    model_config = {"extra": "allow"}
 
     rank: int = Field(default=0)
     name: str = Field(default="")
@@ -1778,10 +1772,8 @@ class MonInfo(BaseModel):
     crush_location: str = Field(default="")
 
 
-class MonMap(BaseModel):
+class MonMap(CephBaseModel):
     """Schema for monitor map."""
-
-    model_config = {"extra": "allow"}
 
     epoch: int = Field(default=0)
     fsid: str = Field(default="")
@@ -1797,10 +1789,8 @@ class MonMap(BaseModel):
     mons: list[MonInfo] = Field(default_factory=list)
 
 
-class OSDInfo(BaseModel):
+class OSDInfo(CephBaseModel):
     """Schema for OSD information in osdmap."""
-
-    model_config = {"extra": "allow"}
 
     osd: int = Field(default=0)
     uuid: str = Field(default="")
@@ -1825,10 +1815,8 @@ class OSDInfo(BaseModel):
     state: list[str] = Field(default_factory=list)
 
 
-class OSDMap(BaseModel):
+class OSDMap(CephBaseModel):
     """Schema for OSD map."""
-
-    model_config = {"extra": "allow"}
 
     epoch: int = Field(default=0)
     fsid: str = Field(default="")
@@ -1854,7 +1842,7 @@ class OSDMap(BaseModel):
     erasure_code_profiles: dict[str, Any] = Field(default_factory=dict)
 
 
-class CrushTunables(BaseModel):
+class CrushTunables(CephBaseModel):
     """Schema for CRUSH tunables."""
 
     choose_local_tries: int = Field(default=0)
@@ -1879,10 +1867,8 @@ class CrushTunables(BaseModel):
     has_v5_rules: int = Field(default=0)
 
 
-class CrushMap(BaseModel):
+class CrushMap(CephBaseModel):
     """Schema for CRUSH map."""
-
-    model_config = {"extra": "allow"}
 
     devices: list[dict[str, Any]] = Field(default_factory=list)
     types: list[dict[str, Any]] = Field(default_factory=list)
@@ -1892,10 +1878,8 @@ class CrushMap(BaseModel):
     choose_args: dict[str, Any] = Field(default_factory=dict)
 
 
-class OSDMetadata(BaseModel):
+class OSDMetadata(CephBaseModel):
     """Schema for OSD metadata."""
-
-    model_config = {"extra": "allow"}
 
     id: int = Field(default=0)
     arch: str = Field(default="")
@@ -1953,10 +1937,8 @@ class OSDMetadata(BaseModel):
     rotational: str = Field(default="")
 
 
-class CephReport(BaseModel):
+class CephReport(CephBaseModel):
     """Schema for Ceph cluster diagnostic report."""
-
-    model_config = {"extra": "allow"}
 
     cluster_fingerprint: str = Field(default="")
     version: str = Field(default="")
