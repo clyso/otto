@@ -243,15 +243,12 @@ def simulate(args):
     if not hasattr(args, 'pgs'):
         # simulating a randomized pool
 
-        num_domains = args.num_domains
         pgs_per_osd = args.pgs_per_osd
-        num_osds = args.num_osds
+        num_domains = args.num_domains
+        osds_per_domain = args.osds_per_domain
+        num_osds = num_domains * osds_per_domain
 
         failure_domain = args.failure_domain
-
-        if num_osds % args.num_domains != 0:
-            raise ValueError("Number of OSDs must be divisible by number of domains.")
-        osds_per_domain = int(num_osds / args.num_domains)
 
         num_pgs = round_to_nearest_power_of_two((num_osds * pgs_per_osd) / pg_size)
         osds = list(range(1, num_osds + 1))
@@ -716,9 +713,9 @@ def main():
 
     sim = subparsers.add_parser('simulate', help='Calculate durability of a randomized pool')
     sim.add_argument('--verbose', action='store_true', help='enable verbose output')
-    sim.add_argument('--num-osds', type=int, default=100, help="number of OSDs in the Cluster (default: 100)")
     sim.add_argument('--failure-domain', type=str, default="host", help="Type of failure domain (host/rack/...) (default: host)")
     sim.add_argument('--num-domains', type=int, default=10, help="number of failure domains (default: 10)")
+    sim.add_argument('--osds-per-domain', type=int, default=16, help="number of OSDs per failure domain (default: 16)")
     sim.add_argument('--tb-per-osd', type=int, default=10, help="raw data per OSD in TB (default: 10)")
     sim.add_argument('--object-size', type=int, default=4*1024*1024, help="average object size in bytes (default: 4MB)")
     sim.add_argument('--pgs-per-osd', type=int, default=100, help="target PGs per OSD (default: 100)")
