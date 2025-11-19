@@ -35,9 +35,10 @@ releases:
     recommended: true
   v19:
     name: squid
-    version: 19.2.2
+    version: 19.2.3
   v20:
-    name: t
+    name: tentacle
+    version: 20.2.0
   v21:
     name: u
   v22:
