@@ -33,9 +33,9 @@ from datetime import datetime
 from threading import Condition, Lock, RLock, Thread
 
 parser = argparse.ArgumentParser(
-        prog='clyso-rgw-find-missing',
-        description='Search for rgw objects missing rados objects in data pool',
-        epilog='''Example:
+    prog='clyso-rgw-find-missing',
+    description='Search for rgw objects missing rados objects in data pool',
+    epilog='''Example:
            clyso-rgw-find-missing -b bucket1 bucket2 -- default.rgw.buckets.data
         ''',
 )
@@ -115,6 +115,7 @@ def get_pools():
             pools.append(v['data_pool'])
     return pools
 
+
 def get_buckets():
     cmd = ['radosgw-admin', 'bucket', 'list']
     return json.loads(
@@ -145,9 +146,9 @@ class StatusOutput:
 
     def print(self, msg):
         print(f'{datetime.now().strftime("%F %H:%M:%S")} {msg}',
-            file=self.status_output,
-            flush=True,
-        )
+              file=self.status_output,
+              flush=True,
+              )
 
 
 class ProcessedBucketsDB:
@@ -495,7 +496,6 @@ class ObjectsIterator:
             f'Found {self.object_idx} rados objects for {bucket}'
         )
 
-
     def print_progress_status(self):
         num_objects = self.objects_processed - self.last_objects_processed
         if num_objects == 0:
@@ -506,7 +506,7 @@ class ObjectsIterator:
         self.last_objects_processed = self.objects_processed
         self.last_status_time = current_time
         self.status_output.print(
-            f'Processing bucket: {self.bucket_idx}/{len(self.buckets)}, ' \
+            f'Processing bucket: {self.bucket_idx}/{len(self.buckets)}, '
             f'objects processed: {self.objects_processed}, rate: {rate:g} obj/s'
         )
 
@@ -561,7 +561,7 @@ class Worker(Thread):
 
         ioctx = self.ioctxs[0]
         try:
-            #ioctx.write(obj, b'\0', 4194304 - 1)
+            # ioctx.write(obj, b'\0', 4194304 - 1)
             ioctx.write_full(obj, b'\0' * 4194304)
         except rados.Error as e:
             Output.print(
@@ -575,7 +575,7 @@ def main():
     if not pools:
         pools = get_pools()
         if not pools:
-           parser.error('no pools found')
+            parser.error('no pools found')
     buckets = args.bucket
     if not buckets:
         buckets = get_buckets()
@@ -611,6 +611,7 @@ def main():
                            args.dry_run)
                 w.start()
                 workers.append(w)
+
             def interrupt_handler(signum, frame):
                 status_output.print('Interrupted')
                 objects.interrupt()
@@ -624,4 +625,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

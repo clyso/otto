@@ -27,6 +27,29 @@ class SmokeTestOttoCLI(unittest.TestCase):
             )
             print(f"tests/reports/{report} OK")
 
+    def test_rgw_commands_help(self):
+        """Test that RGW subcommands show help without errors."""
+        rgw_commands = [
+            ["otto", "rgw", "find-missing", "--help"],
+            ["otto", "rgw", "user-quota", "--help"],
+            ["otto", "rgw", "user-df", "--help"],
+            ["otto", "rgw", "incomplete-multipart-list", "--help"],
+        ]
+
+        for cmd in rgw_commands:
+            process = subprocess.Popen(  # noqa: S603
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stdout, stderr = process.communicate()
+
+            # Should show help, not crash
+            assert process.returncode in [0, 2], (
+                f"Command {' '.join(cmd)} failed unexpectedly: {stderr.decode()}"
+            )
+            assert b"usage:" in stdout, f"Expected usage output for {' '.join(cmd)}"
+
     def test_histogram(self):
         expected_output = textwrap.dedent("""\
         # NumSamples = 12; Min = 85.00; Max = 87.00

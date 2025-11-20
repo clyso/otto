@@ -816,7 +816,7 @@ def check_report_pool_min_pgnum(result: AIResult, data: CephData) -> None:
         if not crush_rule:
             # FIXME: do not silently ignore?
             continue
-        root_id = crush.get_rule_root(crush_rule["rule_name"])
+        root_id = crush.get_rule_root(crush_rule.rule_name)
         if not crush_rule:
             # FIXME: do not silently ignore?
             continue
@@ -876,7 +876,7 @@ def check_report_pool_crush_domain_buckets(result: AIResult, data: CephData) -> 
         if not item_type:
             # FIXME: do not silently ignore?
             continue
-        root_id = crush.get_rule_root(crush_rule["rule_name"])
+        root_id = crush.get_rule_root(crush_rule.rule_name)
         if not crush_rule:
             # FIXME: do not silently ignore?
             continue
@@ -931,7 +931,7 @@ def check_report_pool_zero_weight_buckets(result: AIResult, data: CephData) -> N
         if not item_type:
             # FIXME: do not silently ignore?
             continue
-        root_id = crush.get_rule_root(crush_rule["rule_name"])
+        root_id = crush.get_rule_root(crush_rule.rule_name)
         if not crush_rule:
             # FIXME: do not silently ignore?
             continue
@@ -979,7 +979,7 @@ def check_report_pool_crush_tree_balanced(result: AIResult, data: CephData) -> N
         if not item_type:
             # FIXME: do not silently ignore?
             continue
-        root_id = crush.get_rule_root(crush_rule["rule_name"])
+        root_id = crush.get_rule_root(crush_rule.rule_name)
         if not crush_rule:
             # FIXME: do not silently ignore?
             continue
