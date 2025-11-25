@@ -56,12 +56,12 @@ def run_json(cmd: List[str]) -> dict:
 def load_osd_and_pg() -> Tuple[dict, dict, dict]:
     try:
         osd_dump = run_json(["ceph", "osd", "dump", "-f", "json"])
-        pg_dump = run_json(["ceph", "pg", "dump", "-f", "json"])
+        pg_ls = run_json(["ceph", "pg", "ls", "-f", "json"])
         osd_df = run_json(["ceph", "osd", "df", "-f", "json"])
     except Exception as e:
         print(f"ERROR: Failed to load cluster state: {e}", file=sys.stderr)
         sys.exit(1)
-    return osd_dump, pg_dump, osd_df
+    return osd_dump, pg_ls, osd_df
 
 # ---------------------------- Data extraction --------------------------------
 
@@ -81,7 +81,7 @@ class CephSnapshot:
     pgs_pool: Dict[PG, int]               # pgid -> pool_id
 
 
-def parse_snapshot(osd_dump: dict, pg_dump: dict, osd_df: dict) -> CephSnapshot:
+def parse_snapshot(osd_dump: dict, pg_ls: dict, osd_df: dict) -> CephSnapshot:
     # osd weights
     osd_weight: Dict[int, float] = {}
     osd_in_up: Set[int] = set()
@@ -117,7 +117,7 @@ def parse_snapshot(osd_dump: dict, pg_dump: dict, osd_df: dict) -> CephSnapshot:
     # pg up sets
     pgs_up: Dict[PG, List[int]] = {}
     pgs_pool: Dict[PG, int] = {}
-    for s in pg_dump.get("pg_stats", []):
+    for s in pg_ls.get("pg_stats", []):
         pgid = str(s["pgid"])
         up = s.get("up", [])
         if up:
@@ -565,8 +565,8 @@ def main():
     if args.pools:
         only_pools = {int(x.strip()) for x in args.pools.split(",") if x.strip()}
 
-    osd_dump, pg_dump, osd_df = load_osd_and_pg()
-    snap = parse_snapshot(osd_dump, pg_dump, osd_df)
+    osd_dump, pg_ls, osd_df = load_osd_and_pg()
+    snap = parse_snapshot(osd_dump, pg_ls, osd_df)
 
     adapter = Adapter(snap=snap, pg_upmap_items=dict(snap.pg_upmap_items), seed=args.seed)
     res = calc_pg_upmaps(
