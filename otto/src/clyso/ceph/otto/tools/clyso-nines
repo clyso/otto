@@ -231,10 +231,10 @@ def infer_num_failure_domains(pgs):
 
         # split OSDs from this PG across different hosts
         for host_idx in range(len(osd_tree) + pg_size - 1):
-            if host_size[host_index] < 1:
+            if host_idx not in host_size:
                 continue
 
-            if host_idx not in host_size:
+            if host_size[host_idx] < 1:
                 continue
 
             first = True
@@ -249,7 +249,7 @@ def infer_num_failure_domains(pgs):
 
                 osd_tree[host_idx].remove(osd)
                 try:
-                    osd_tree[host_idx + j].append(osd)
+                    osd_tree[host_idx + new_host_offset].append(osd)
                 except IndexError:
                     osd_tree.append(list([osd]))
                 new_host_offset += 1
