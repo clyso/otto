@@ -181,16 +181,16 @@ def confidence_interval(successes, trials, confidence=0.95):
 def effective_recovery_rate(object_size_bytes,
                             recovery_bw=50*1024*1024,  # 50 MB/s
                             osd_recovery_sleep=0.1,
-                            objects_per_chunk=30):
+                            osd_recovery_max_active=1):
     """
     Calculate Ceph effective recovery throughput considering chunking and sleep.
 
     object_size_bytes: size of one object in bytes
     recovery_bw_MBps: raw recovery bandwidth (MB/s)
     osd_recovery_sleep: sleep time after each chunk (seconds)
-    objects_per_chunk: number of objects recovered per batch (default 30)
+    osd_recovery_max_active: number of concurrent recovery operations per OSD
     """
-    chunk_size_bytes = (object_size_bytes * objects_per_chunk)
+    chunk_size_bytes = (object_size_bytes * osd_recovery_max_active)
 
     # Time to recover chunk at given bandwidth (seconds)
     transfer_time = chunk_size_bytes / recovery_bw
@@ -200,6 +200,58 @@ def effective_recovery_rate(object_size_bytes,
 
     # Effective throughput (Bps)
     return chunk_size_bytes / total_time
+
+
+def infer_num_failure_domains(pgs):
+    """Infer number of failure domains from OSD and PG distribution."""
+
+    # discover all 'up' OSDs
+    osds = set()
+    for pg in pgs:
+        osds.update(pg)
+
+    osd_tree = [list(osds)] # [[osd1, osd2, ...], [osd16, osd17, ...], ...]
+
+    for pg in pgs:
+        pg_size = len(pg)
+        osd_to_host = {}
+        host_size = {}
+        host_index = 0
+        for host in osd_tree:
+            for osd in pg:
+                if osd in host:
+                    osd_to_host[osd] = host_index
+                    try:
+                        host_size[host_index] += 1
+                    except KeyError:
+                        host_size[host_index] = 1
+            host_index += 1
+
+        # split OSDs from this PG across different hosts
+        for host_index in range(len(osd_tree) + pg_size - 1):
+            if host_index not in host_size:
+                continue
+            if host_size[host_index] > 1:
+                first = True
+                j = 1
+                for osd in list(osd_tree[host_index]):
+                    if osd in pg:
+                        if first:
+                            first = False
+                            continue
+                        osd_tree[host_index].remove(osd)
+                        try:
+                            osd_tree[host_index + j].append(osd)
+                        except IndexError:
+                            osd_tree.append(list([osd]))
+                        j += 1
+
+    return len(osd_tree)
+
+
+
+
+
 
 
 # ---------------------------- Simulate Subcommand ----------------------------
@@ -226,7 +278,7 @@ def simulate(args):
     else:
         raise ValueError("Specify either --size or both --k and --m.")
 
-    if args.domains_down > 0:
+    if not hasattr(args, 'pgs') and args.domains_down > 0:
         num_failures -= args.domains_down
 
     num_failures = max(0, num_failures)
@@ -260,20 +312,23 @@ def simulate(args):
 
         # Print simulation summary
         print(f"Simulating a {profile} pool with {num_osds} OSDs and {num_domains} {failure_domain}s ({osds_per_domain} OSDs per {failure_domain})")
-        vprint(f"    PGs: {num_pgs} total, averaging {num_pgs * pg_size / num_osds:.3g} per OSD")
+        print(f"    PGs: {num_pgs} total, averaging {num_pgs * pg_size / num_osds:.3g} per OSD")
 
     else:
-        # simulating failures on a given pool
+        # analyzing simulated failures on a given pool
         pgs = args.pgs
         osds = args.osds
+        num_domains = args.num_domains
+        failure_domain = args.failure_domain
+        osds_per_domain = float(len(osds)) / num_domains
         num_pgs = len(pgs)
         num_osds = len(osds)
         pgs_per_osd = num_pgs * pg_size / num_osds
         
         # Print analyze summary
         print(f"Analyzing '{args.pool_name}':")
-        print(f"    Info: {profile} pool with {num_osds} OSDs and {num_pgs} PGs")
-        vprint(f"    PGs: {num_pgs} total, ~{num_pgs * pg_size / num_osds:.3g} per OSD")
+        print(f"    Info: {profile} pool with {num_osds} OSDs and {num_domains} {failure_domain}s")
+        print(f"    PGs: {num_pgs} total, ~{num_pgs * pg_size / num_osds:.3g} per OSD")
 
     # Re-derive the stored bytes/objects per PG from tb_per_osd
     bytes_per_osd = args.tb_per_osd * 1024**4
@@ -345,6 +400,7 @@ def simulate(args):
 
     vprint()
     vprint(f"    Finally, P. ≥1 PG lost: {loss_rate * 100:.3g}%")
+    print(f"    Calculated PG Loss Rate: {loss_rate * 100:.3g}%")
 
     vprint()
     vprint(f"---------------------------")
@@ -414,12 +470,15 @@ def simulate(args):
     if simulations_with_loss > 0:
         loss_rate = simulations_with_loss / num_simulations
         vprint(f"    Observed Incidents with ≥1 PG lost: {simulations_with_loss}/{num_simulations} ({100 * loss_rate:.3f}%)")
+        print(f"    Monte Carlo PG Loss Rate: {loss_rate * 100:.3g}%")
     elif args.skip_monte_carlo:
         vprint(f"    Skipped Monte Carlo simulation as per user request. Using theoretical estimate.")
+        print(f"    Monte Carlo PG Loss Rate: - skipped. using theoretical estimate.")
         total_pg_losses = simulations_with_loss = loss_rate * num_simulations  # use theoretical estimate
     else:
 #        vprint(f"    Observed Incidents with ≥1 PG lost: 0/{num_simulations} (0%)")
         vprint("      !! No data loss observed in simulations, using theoretical estimate.")
+        print(f"    Monte Carlo PG Loss Rate: - none found. using theoretical estimate.")
         total_pg_losses = simulations_with_loss = loss_rate * num_simulations  # use theoretical estimate
 
     confidence = confidence_interval(simulations_with_loss, num_simulations)
@@ -443,7 +502,7 @@ def simulate(args):
         recovery_rate = effective_recovery_rate(args.object_size,
                                                 args.recovery_rate*1024*1024,
                                                 args.osd_recovery_sleep,
-                                                objects_per_chunk=30)
+                                                args.osd_recovery_max_active)
 
         try:
             vprint(f"    Estimated per-OSD recovery rate: {format_bytes(recovery_rate)}ps ({format_int(recovery_rate/args.object_size)} objects/s)")
@@ -580,7 +639,7 @@ def analyze_pool(args, pool, pg_dump):
                 try:
                     with open('ceph-osd-erasure-code-profile-get.json', 'r') as f:
                         ec_profile_data = json.load(f)
-                    print("Using local ceph-osd-erasure-code-profile-get.json file.")
+                    print("Reading ceph-osd-erasure-code-profile-get.json ...")
                     args.k = int(ec_profile_data['k'])
                     args.m = int(ec_profile_data['m'])
                 except Exception as e2:
@@ -613,8 +672,13 @@ def analyze_pool(args, pool, pg_dump):
     args.num_osds = pg_dump['pg_map']['osd_stats_sum']['num_osds']
     assert args.num_osds == len(osds), "OSD count mismatch!"
 
+    # infer the number of failure domains
+    args.num_domains = infer_num_failure_domains(pgs)
+    args.failure_domain = "domain"
+
     vprint(f"    Number of PGs: {args.pg_num}")
     vprint(f"    Number of OSDs: {len(osds)}")
+    vprint(f"    Number of {args.failure_domain}s: {args.num_domains}")
 
     # Derive tb_per_osd from pool size and pg stat_sum num_bytes
     bytes_stored = sum(pg['stat_sum']['num_bytes'] for pg in pg_stats if pg['pgid'].startswith(f"{pool['pool_id']}."))
@@ -660,7 +724,7 @@ def analyze(args):
         try:
             with open('ceph-osd-pool-ls-detail.json', 'r') as f:
                 pool_data = json.load(f)
-            print("Using local ceph-osd-pool-ls-detail.json file.")
+            print("Reading ceph-osd-pool-ls-detail.json ...")
         except Exception as e2:
             print(f"Error loading local pool data: {e2}")
             return
@@ -678,7 +742,7 @@ def analyze(args):
         try:
             with open('ceph-pg-dump.json', 'r') as f:
                 pg_dump_data = json.load(f)
-            print("Using local ceph-pg-dump.json file.")
+            print("Reading ceph-pg-dump.json ...")
             vprint("")
             vprint("========================================")
             vprint("")
@@ -728,6 +792,7 @@ def main():
     sim.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
     sim.add_argument('--recovery-rate', type=float, default=50, help='Recovery rate per OSD (default: 50MBps)')
     sim.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
+    sim.add_argument('--osd-recovery-max-active', type=int, default=1, help='OSD Recovery Max Active (default: 1)')
     sim.add_argument('--domains-down', type=int, default=0, help='number of failure domains to take down in simulation (default: 0)')
     sim.add_argument('--skip-monte-carlo', action='store_true', help='Skip the Monte Carlo sims and use theoretical estimates instead')
     sim.add_argument('--max-mc-runtime', type=int, default=30, help='Maximum simulation runtime in seconds (default: 30s)')
@@ -743,6 +808,8 @@ def main():
     an.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
     an.add_argument('--recovery-rate', type=int, default=50, help='Per-OSD data recovery rate (default: 50MBps)')
     an.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
+    an.add_argument('--osd-recovery-max-active', type=int, default=1, help='OSD Recovery Max Active (default: 1)')
+    an.add_argument('--domains-down', type=int, default=0, help='number of failure domains to take down in simulation (default: 0)')
     an.add_argument('--skip-monte-carlo', action='store_true', help='Skip the Monte Carlo sims and use theoretical estimates instead')
     an.add_argument('--max-mc-runtime', type=int, default=30, help='Maximum Monte Carlo simulation runtime in seconds per pool (default: 30s)')
     an.set_defaults(func=analyze)
