@@ -67,7 +67,7 @@ def count_nines(value, max_digits=20):
     s = f"{rounded:.{max_digits}f}"
 
     if not s.startswith("0."):
-        return f"{max_digits} nines"  # Treat 1.0 as "max nines"
+        return f"{max_digits}-nines"  # Treat 1.0 as "max nines"
 
     decimal_part = s.split('.')[1]
     count = 0
@@ -258,7 +258,6 @@ def infer_num_failure_domains(pgs):
 
 # ---------------------------- Simulate Subcommand ----------------------------
 def simulate(args):
-
     # Set random seed for reproducibility
     random.seed(args.seed)
 
@@ -767,6 +766,95 @@ def analyze(args):
     return
 
 
+def run_tests(args):
+    # run some known simulate commands
+    # add all args
+    test_args = [
+        [
+            argparse.Namespace(
+                verbose=False,
+                failure_domain="host",
+                num_domains=10,
+                osds_per_domain=16,
+                tb_per_osd=10.0,
+                object_size=4*1024*1024,
+                pgs_per_osd=100,
+                size=3,
+                k=None,
+                m=None,
+                simulations=1000,
+                seed=42,
+                fudge=100,
+                afr=0.02,
+                recovery_rate=50,
+                osd_recovery_sleep=0.1,
+                osd_recovery_max_active=1,
+                domains_down=0,
+                skip_monte_carlo=False,
+                max_mc_runtime=30
+            ),
+            ("197.1 thousand years", "10-nines")
+        ],
+        [
+            argparse.Namespace(
+                verbose=False,
+                failure_domain="host",
+                num_domains=20,
+                osds_per_domain=16,
+                tb_per_osd=10.0,
+                object_size=4*1024*1024,
+                pgs_per_osd=100,
+                k=6,
+                m=3,
+                size=None,
+                simulations=1000,
+                seed=42,
+                fudge=100,
+                afr=0.02,
+                recovery_rate=50,
+                osd_recovery_sleep=0.1,
+                osd_recovery_max_active=1,
+                domains_down=0,
+                skip_monte_carlo=False,
+                max_mc_runtime=30
+            ),
+            ("15.4 thousand years", "10-nines")
+        ],
+        [
+            argparse.Namespace(
+                verbose=False,
+                failure_domain="host",
+                num_domains=500,
+                osds_per_domain=40,
+                tb_per_osd=0.0001,
+                object_size=4*1024*1024,
+                pgs_per_osd=0.01,
+                size=3,
+                k=None,
+                m=None,
+                simulations=1000,
+                seed=42,
+                fudge=100,
+                afr=0.02,
+                recovery_rate=50,
+                osd_recovery_sleep=0.1,
+                osd_recovery_max_active=1,
+                domains_down=0,
+                skip_monte_carlo=False,
+                max_mc_runtime=30
+            ),
+            ("80.8 billion years", "20-nines")
+        ]
+    ]
+    for i, test_arg in enumerate(test_args):
+        print(f"Running test case {i+1}...")
+        (mttdl, nines) = simulate(test_arg[0])
+        assert test_arg[1][0] == mttdl, f"MTTDL test case {i+1} failed! {mttdl} != {test_arg[1][0]}"
+        assert test_arg[1][1] == nines, f"Durability test case {i+1} failed! {nines} != {test_arg[1][1]}"
+        print(f"\nTest case {i+1} completed.")
+        print("========================================")
+
+
 # ---------------------------- Main CLI ----------------------------
 def main():
     parser = argparse.ArgumentParser(
@@ -784,7 +872,7 @@ def main():
     sim.add_argument('--osds-per-domain', type=int, default=16, help="number of OSDs per failure domain (default: 16)")
     sim.add_argument('--tb-per-osd', type=float, default=10.0, help="raw data per OSD in TB (default: 10.0)")
     sim.add_argument('--object-size', type=int, default=4*1024*1024, help="average object size in bytes (default: 4MB)")
-    sim.add_argument('--pgs-per-osd', type=int, default=100, help="target PGs per OSD (default: 100)")
+    sim.add_argument('--pgs-per-osd', type=float, default=100, help="target PGs per OSD (default: 100)")
     sim.add_argument('--size', type=int, default=3, help="simulate a replicated pool with SIZE replicas (default: 3)")
     sim.add_argument('--k', type=int, help="simulate an erasure coded pool with K data shards")
     sim.add_argument('--m', type=int, help="simulate an erasure coded pool with M parity shards")
@@ -815,6 +903,10 @@ def main():
     an.add_argument('--skip-monte-carlo', action='store_true', help='Skip the Monte Carlo sims and use theoretical estimates instead')
     an.add_argument('--max-mc-runtime', type=int, default=30, help='Maximum Monte Carlo simulation runtime in seconds per pool (default: 30s)')
     an.set_defaults(func=analyze)
+
+    test = subparsers.add_parser('test', help='run internal tests')
+    test.add_argument('--verbose', action='store_true', help='enable verbose output')
+    test.set_defaults(func=run_tests)
 
     args = parser.parse_args()
     if not args.command:
