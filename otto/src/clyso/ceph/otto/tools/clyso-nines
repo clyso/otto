@@ -205,54 +205,56 @@ def effective_recovery_rate(object_size_bytes,
 def infer_num_failure_domains(pgs):
     """Infer number of failure domains from OSD and PG distribution."""
 
-    # discover all 'up' OSDs
+    # discover all 'up' OSDs -- those are outputs of the crush map
     osds = set()
     for pg in pgs:
         osds.update(pg)
 
-    osd_tree = [list(osds)] # [[osd1, osd2, ...], [osd16, osd17, ...], ...]
+    # start with a single host containing all OSDs
+    osd_tree = [list(osds)]
 
     for pg in pgs:
         pg_size = len(pg)
+
+        # map OSDs to hosts, and count how many PG OSDs fall into each host
         osd_to_host = {}
         host_size = {}
-        host_index = 0
-        for host in osd_tree:
+
+        for host_idx, host in enumerate(osd_tree):
+            count = 0
             for osd in pg:
                 if osd in host:
-                    osd_to_host[osd] = host_index
-                    try:
-                        host_size[host_index] += 1
-                    except KeyError:
-                        host_size[host_index] = 1
-            host_index += 1
+                    osd_to_host[osd] = host_idx
+                    count += 1
+            if count > 0:
+                host_size[host_idx] = count
 
         # split OSDs from this PG across different hosts
-        for host_index in range(len(osd_tree) + pg_size - 1):
-            if host_index not in host_size:
+        for host_idx in range(len(osd_tree) + pg_size - 1):
+            if host_size[host_index] < 1:
                 continue
-            if host_size[host_index] > 1:
-                first = True
-                j = 1
-                for osd in list(osd_tree[host_index]):
-                    if osd in pg:
-                        if first:
-                            first = False
-                            continue
-                        osd_tree[host_index].remove(osd)
-                        try:
-                            osd_tree[host_index + j].append(osd)
-                        except IndexError:
-                            osd_tree.append(list([osd]))
-                        j += 1
+
+            if host_idx not in host_size:
+                continue
+
+            first = True
+            new_host_offset = 1
+            for osd in list(osd_tree[host_idx]):
+                if osd not in pg:
+                    continue
+
+                if first:
+                    first = False
+                    continue
+
+                osd_tree[host_idx].remove(osd)
+                try:
+                    osd_tree[host_idx + j].append(osd)
+                except IndexError:
+                    osd_tree.append(list([osd]))
+                new_host_offset += 1
 
     return len(osd_tree)
-
-
-
-
-
-
 
 # ---------------------------- Simulate Subcommand ----------------------------
 def simulate(args):
