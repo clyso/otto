@@ -782,7 +782,7 @@ def main():
     sim.add_argument('--failure-domain', type=str, default="host", help="Type of failure domain (host/rack/...) (default: host)")
     sim.add_argument('--num-domains', type=int, default=10, help="number of failure domains (default: 10)")
     sim.add_argument('--osds-per-domain', type=int, default=16, help="number of OSDs per failure domain (default: 16)")
-    sim.add_argument('--tb-per-osd', type=int, default=10, help="raw data per OSD in TB (default: 10)")
+    sim.add_argument('--tb-per-osd', type=float, default=10.0, help="raw data per OSD in TB (default: 10.0)")
     sim.add_argument('--object-size', type=int, default=4*1024*1024, help="average object size in bytes (default: 4MB)")
     sim.add_argument('--pgs-per-osd', type=int, default=100, help="target PGs per OSD (default: 100)")
     sim.add_argument('--size', type=int, default=3, help="simulate a replicated pool with SIZE replicas (default: 3)")
