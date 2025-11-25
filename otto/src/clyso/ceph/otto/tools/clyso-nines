@@ -24,9 +24,7 @@ import random
 import time
 import shlex
 import itertools
-
-# hide cursor
-print('\033[?25l', end="")
+import sys
 
 VERBOSE = False
 
@@ -984,4 +982,15 @@ def main():
         vprint()
 
 if __name__ == "__main__":
-    main()
+    # Hide cursor
+    print('\033[?25l', end='', flush=True)
+
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+    except Exception:
+        traceback.print_exc()
+    finally:
+        # Restore cursor
+        print('\033[?25h', end='', flush=True)
