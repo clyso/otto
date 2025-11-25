@@ -97,14 +97,41 @@ def mttdl(N, k, afr, fudge, recovery_time_sec):
     mttdl_seconds = recovery_time_sec / prob_k_failures
     return mttdl_seconds
 
-def prob_exact_k_failures(n, p, k):
-    return comb(n, k) * (p ** k) * ((1 - p) ** (n - k))
+# https://en.wikipedia.org/wiki/Binomial_distribution
+def log_prob_exact_k_failures(n, p, k):
+    if p == 0:
+        return float('-inf') if k > 0 else 0.0
+    if p == 1:
+        return float('-inf') if k < n else 0.0
+    return (
+        math.log(comb(n, k))
+        + k * math.log(p)
+        + (n - k) * math.log1p(-p)
+    )
 
-def prob_k_or_more_failures(n, p, k):
-    cumulative = 0
-    for i in range(k): # 0, 1, 2, ..., k-1
-        cumulative += prob_exact_k_failures(n, p, i)
-    return 1 - cumulative
+def prob_k_or_more_failures(n, p, k, cutoff=1e-30):
+    """Stable + fast binomial tail probability P(X>=k)."""
+    logs = []
+    max_log = -float('inf')
+
+    # Only go forward until terms become negligible
+    for i in range(k, n + 1):
+        lp = log_prob_exact_k_failures(n, p, i)
+
+        # Track maximum for log-sum-exp normalization
+        if lp > max_log:
+            max_log = lp
+
+        logs.append(lp)
+
+        # Stop when next term is extremely small
+        if len(logs) > 5:
+            # Compare last 5 terms with peak
+            if all((max_log - x) > -math.log(cutoff) for x in logs[-5:]):
+                break
+
+    # log-sum-exp
+    return math.exp(max_log) * sum(math.exp(x - max_log) for x in logs)
 
 def expected_max_osd_load(n_osds, n_pgs):
     if n_pgs == 0 or n_osds == 0:
@@ -765,6 +792,31 @@ def analyze(args):
 
     return
 
+def test_prob_k_or_more_failures():
+    # (n, p, k, expected_P_X_ge_k)
+    test_cases = [
+        # Small n, moderate p (exact binomial)
+        (10,    0.1,     2, 0.263901),
+        (20,    0.05,    3, 0.0754837),
+        (50,    0.02,    2, 0.264229),
+
+        # Ceph-like: moderate n, very small p (exact binomial)
+        (1000,  1e-6,    2, 4.99168e-07),
+        (1000,  1e-5,    2, 4.96189e-05),
+        (5000,  2e-7,    2, 4.99567e-07),
+        (10000, 1e-8,    2, 4.99917e-09),
+        (10000, 1e-7,    3, 1.66492e-10),
+    ]
+
+    for n, p, k, expected in test_cases:
+        got = prob_k_or_more_failures(n, p, k)
+        if not math.isclose(got, expected, rel_tol=0.00001):
+            raise AssertionError(
+                f"Failed for n={n}, p={p}, k={k}: "
+                f"got {got:.18g}, expected {expected:.18g}"
+            )
+
+    print("\nAll prob_k_or_more_failures tests passed.")
 
 def run_tests(args):
     # run some known simulate commands
@@ -853,6 +905,8 @@ def run_tests(args):
         assert test_arg[1][1] == nines, f"Durability test case {i+1} failed! {nines} != {test_arg[1][1]}"
         print(f"\nTest case {i+1} completed.")
         print("========================================")
+
+    test_prob_k_or_more_failures()
 
 
 # ---------------------------- Main CLI ----------------------------
