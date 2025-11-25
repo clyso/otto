@@ -53,14 +53,15 @@ def run_json(cmd: List[str]) -> dict:
         raise
     return json.loads(out)
 
-def load_osd_and_pg() -> Tuple[dict, dict]:
+def load_osd_and_pg() -> Tuple[dict, dict, dict]:
     try:
         osd_dump = run_json(["ceph", "osd", "dump", "-f", "json"])
         pg_dump = run_json(["ceph", "pg", "dump", "-f", "json"])
+        osd_df = run_json(["ceph", "osd", "df", "-f", "json"])
     except Exception as e:
         print(f"ERROR: Failed to load cluster state: {e}", file=sys.stderr)
         sys.exit(1)
-    return osd_dump, pg_dump
+    return osd_dump, pg_dump, osd_df
 
 # ---------------------------- Data extraction --------------------------------
 
@@ -80,20 +81,22 @@ class CephSnapshot:
     pgs_pool: Dict[PG, int]               # pgid -> pool_id
 
 
-def parse_snapshot(osd_dump: dict, pg_dump: dict) -> CephSnapshot:
+def parse_snapshot(osd_dump: dict, pg_dump: dict, osd_df: dict) -> CephSnapshot:
     # osd weights
     osd_weight: Dict[int, float] = {}
     osd_in_up: Set[int] = set()
+    for osd in osd_df.get("nodes", []):
+        oid = int(osd["id"])
+        # effective weight (rough approximation)
+        crush_w = float(osd.get("crush_weight", 0.0))
+        reweight = float(osd.get("reweight", 1.0))
+        w = crush_w * reweight
+        osd_weight[oid] = w
     for osd in osd_dump.get("osds", []):
         oid = int(osd["osd"])
         up = bool(osd.get("up", 0))
         inn = bool(osd.get("in", 0))
-        # effective weight (rough approximation)
-        crush_w = float(osd.get("crush_weight", osd.get("weight", 0.0)))
-        reweight = float(osd.get("reweight", 1.0))
-        w = crush_w * reweight
-        if inn and up and w > 0:
-            osd_weight[oid] = w
+        if inn and up:
             osd_in_up.add(oid)
 
     # pool sizes
@@ -562,8 +565,8 @@ def main():
     if args.pools:
         only_pools = {int(x.strip()) for x in args.pools.split(",") if x.strip()}
 
-    osd_dump, pg_dump = load_osd_and_pg()
-    snap = parse_snapshot(osd_dump, pg_dump)
+    osd_dump, pg_dump, osd_df = load_osd_and_pg()
+    snap = parse_snapshot(osd_dump, pg_dump, osd_df)
 
     adapter = Adapter(snap=snap, pg_upmap_items=dict(snap.pg_upmap_items), seed=args.seed)
     res = calc_pg_upmaps(
@@ -587,4 +590,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
