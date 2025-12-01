@@ -1,0 +1,375 @@
+#!/usr/bin/env python3
+# Kick PGs stuck in backfill_full by remapping a blocked (nearfull/backfillfull) 'up' OSD
+# to the least-used eligible OSD.
+# recovery can be stuck since the balancer does not run while there are degraded objects
+# Use this script if you have the pg backfill_toofull warning
+
+import json, subprocess, sys, argparse
+
+
+def j(cmd):
+    out = subprocess.check_output(cmd.split(), universal_newlines=True)
+    return json.loads(out)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Kick PGs stuck in backfill_full by remapping blocked OSDs to respect failure domains"
+    )
+    parser.add_argument(
+        "--failure-domain",
+        type=str,
+        default=None,
+        help="Override failure domain (e.g., host, rack, datacenter). If not specified, uses each pool's CRUSH rule.",
+    )
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="Execute upmap commands. By default, only prints commands (dry-run mode).",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print extra calculations taking place",
+    )
+    return parser.parse_args()
+
+
+def get_crush_rules():
+    """Fetch CRUSH rules and extract failure domain for each rule"""
+    try:
+        # rule_dump = j("cds crush")
+        rule_dump = j("ceph osd crush rule dump --format json")
+    except subprocess.CalledProcessError as e:
+        print(f"# Warning: Could not fetch CRUSH rules: {e}")
+        return {}
+
+    rule_failure_domains = {}
+
+    for rule in rule_dump:
+        rule_id = rule.get("rule_id")
+        rule_name = rule.get("rule_name")
+        failure_domain = None
+
+        for step in rule.get("steps", []):
+            op = step.get("op")
+            # Look for chooseleaf or choose operations that specify the failure domain
+            if op in [
+                "chooseleaf_firstn",
+                "chooseleaf_indep",
+                "choose_firstn",
+                "choose_indep",
+            ]:
+                failure_domain = step.get("type")
+                break
+
+        if failure_domain:
+            rule_failure_domains[rule_id] = {
+                "name": rule_name,
+                "failure_domain": failure_domain,
+            }
+        else:
+            # default to host
+            rule_failure_domains[rule_id] = {
+                "name": rule_name,
+                "failure_domain": "host",
+            }
+
+    return rule_failure_domains
+
+
+def build_failure_domain_mapping(nodes, failure_domain_type):
+    """Build OSD to failure domain mapping for any domain type (host, rack, etc.)"""
+    osd_to_domain = {}
+    domain_children = {}
+
+    # Find all nodes of the specified failure domain type
+    for node in nodes:
+        if node.get("type") == failure_domain_type:
+            domain_id = node["id"]
+            domain_children[domain_id] = set()
+
+    # Recursively collect all OSDs under each domain
+    def collect_osds_under_domain(node_id, domain_id):
+        for node in nodes:
+            if node["id"] == node_id:
+                if node.get("type") == "osd":
+                    osd_to_domain[node["id"]] = domain_id
+                for child_id in node.get("children", []):
+                    collect_osds_under_domain(child_id, domain_id)
+
+    # Start collection from each domain node
+    for node in nodes:
+        if node.get("type") == failure_domain_type:
+            domain_id = node["id"]
+            for child_id in node.get("children", []):
+                collect_osds_under_domain(child_id, domain_id)
+
+    return osd_to_domain
+
+
+def main():
+    args = parse_args()
+
+    if args.write:
+        print("# --write mode: commands will be executed")
+    else:
+        print(
+            "# dry-run mode - commands will only be printed (use --write to execute or pipe to sh)"
+        )
+    print()
+
+    pg_dump = j("ceph pg dump -f json")
+    osd_dump = j("ceph osd dump -f json")
+    osd_df = j("ceph osd df -f json")
+    osd_tree = j("ceph osd tree -f json")
+
+    # Get CRUSH rules and their failure domains
+    crush_rules = get_crush_rules()
+    # print("# CRUSH rules and failure domains:")
+    # for rule_id, rule_info in sorted(crush_rules.items()):
+    #     print(f"#   Rule {rule_id} ({rule_info['name']}): {rule_info['failure_domain']}")
+
+    pool_to_rule = {}
+    pool_to_failure_domain = {}
+    pool_names = {}
+
+    for p in osd_dump.get("pools", []):
+        pool_id = int(p["pool"])
+        pool_name = p.get("pool_name", f"pool_{pool_id}")
+        rule_id = int(p.get("crush_rule", 0))
+        pool_to_rule[pool_id] = rule_id
+        pool_names[pool_id] = pool_name
+
+        if args.failure_domain:
+            # Override with command-line argument
+            pool_to_failure_domain[pool_id] = args.failure_domain
+        elif rule_id in crush_rules:
+            pool_to_failure_domain[pool_id] = crush_rules[rule_id]["failure_domain"]
+        else:
+            # Default to host if rule not found
+            pool_to_failure_domain[pool_id] = "host"
+            print(
+                f"# Warning: Rule {rule_id} not found for pool {pool_id} ({pool_name}), defaulting to 'host'"
+            )
+
+    if args.verbose:
+        print("\n# Pool to failure domain mapping:")
+        for pool_id in sorted(pool_to_failure_domain.keys()):
+            print(
+                f"#   Pool {pool_id} ({pool_names.get(pool_id, 'unknown')}): {pool_to_failure_domain[pool_id]}"
+            )
+
+    # Build topology mappings for all failure domains used
+    failure_domains_needed = set(pool_to_failure_domain.values())
+    osd_to_domain_maps = {}
+
+    for fd_type in failure_domains_needed:
+        osd_to_domain_maps[fd_type] = build_failure_domain_mapping(
+            osd_tree.get("nodes", []), fd_type
+        )
+        if args.verbose:
+            print(
+                f"\n# Built {fd_type} topology: {len(osd_to_domain_maps[fd_type])} OSDs mapped"
+            )
+        if not osd_to_domain_maps[fd_type]:
+            print(
+                f"# WARNING: No {fd_type} nodes found in OSD tree! This failure domain may not exist."
+            )
+
+    # --- OSDs flagged nearfull/backfillfull from osd.state ---
+    osd_up, osd_in, flagged = {}, {}, set()
+    for o in osd_dump.get("osds", []):
+        oid = int(o["osd"])
+        osd_up[oid] = bool(o.get("up", 0))
+        osd_in[oid] = bool(o.get("in", 0))
+        st = set(o.get("state", []))
+        if ("nearfull" in st) or ("backfillfull" in st):
+            flagged.add(oid)
+
+    # --- For choosing a target: least-used eligible OSD from osd df ---
+    usage = {}  # osd -> used_ratio
+    for n in osd_df.get("nodes", []):
+        name = str(n.get("name", ""))
+        if not name.startswith("osd."):
+            continue
+        # Do not choose any OSDs with a very small weight
+        # this could mean that we are draining the OSD
+        # and we don't want to upmap PGs to the draining OSD
+        if n["crush_weight"] < 0.1:
+            continue
+        oid = int(n["id"])
+        kb = float(n.get("kb", 0) or 0)
+        kbu = float(n.get("kb_used", 0) or 0)
+        usage[oid] = (kbu / kb) if kb > 0 else 0.0
+
+    pool_size = {
+        int(p["pool"]): int(p.get("size", 3)) for p in osd_dump.get("pools", [])
+    }
+
+    # existing pg_upmap_items (so we can append/update cleanly)
+    existing = {}
+    for it in osd_dump.get("pg_upmap_items", []):
+        pgid = str(it["pgid"])
+        pairs = [(int(m["from"]), int(m["to"])) for m in it.get("mappings", [])]
+        if pairs:
+            existing[pgid] = pairs
+
+    target_cmds = []
+
+    if args.verbose:
+        print("# OSDs flagged (nearfull/backfillfull):", sorted(flagged))
+
+    for s in pg_dump.get("pg_map", {}).get("pg_stats", []):
+        state = str(s.get("state", ""))
+        if "backfill_full" not in state and not (
+            "backfill" in state and "full" in state
+        ):
+            continue
+
+        pgid = str(s["pgid"])
+        up = [int(x) for x in s.get("up", [])]
+        acting = [int(x) for x in s.get("acting", [])]
+        if not up:
+            continue
+
+        # Get the failure domain for this pool
+        pool_id = int(pgid.split(".")[0])
+        failure_domain = pool_to_failure_domain.get(pool_id, "host")
+        osd_to_domain = osd_to_domain_maps.get(failure_domain, {})
+
+        if args.verbose:
+            print(
+                "# PG {} state='{}' up={} acting={} [pool={}, failure_domain={}]".format(
+                    pgid,
+                    state,
+                    up,
+                    acting,
+                    pool_names.get(pool_id, pool_id),
+                    failure_domain,
+                )
+            )
+
+        # identify blocked OSD(s) (from state flags), pick least-used eligible target ---
+        blocked = None
+        for o in up:
+            if o in flagged:
+                blocked = o
+                break
+        if blocked is None:
+            # Nothing in this PG's up set is flagged; skip.
+            if args.verbose:
+                print("#   skip: no 'up' OSD flagged nearfull/backfillfull in this PG")
+            continue
+
+        # Find blocked OSD's failure domain
+        blocked_domain = osd_to_domain.get(blocked)
+        if blocked_domain is None:
+
+            if args.verbose:
+                print(
+                    "#   skip: blocked OSD {} not found in {} mapping".format(
+                        blocked, failure_domain
+                    )
+                )
+            continue
+
+        # Eligible target: not in PG, up+in, not flagged, same domain as blocked; choose min used_ratio
+        candidates = [
+            (usage.get(oid, 1.0), oid)
+            for oid in usage.keys()
+            if (oid not in up)
+            and osd_up.get(oid, False)
+            and osd_in.get(oid, False)
+            and (oid not in flagged)
+            and (osd_to_domain.get(oid) == blocked_domain)
+        ]
+        if not candidates:
+            if args.verbose:
+                print("#   no eligible target OSD found in same {}".format(failure_domain))
+            continue
+        candidates.sort()
+        to_osd = candidates[0][1]
+
+        # create/update upmap mapping blocked -> to_osd ---
+        pairs = list(existing.get(pgid, []))
+        # drop conflicting pairs (same from/to) to keep mapping clean
+        pairs = [(f, t) for (f, t) in pairs if f != blocked and t != to_osd]
+        max_pairs = max(1, pool_size.get(pool_id, 3))
+        if len(pairs) >= max_pairs:
+ 
+            if args.verbose:
+                print(
+                    "#   skip: PG has {} upmap pair(s) (pool size {})".format(
+                        len(pairs), max_pairs
+                    )
+                )
+            continue
+        pairs.append((blocked, to_osd))
+
+        flat = " ".join("{} {}".format(a, b) for a, b in pairs)
+        cmd = "ceph osd pg-upmap-items {} {}".format(pgid, flat)
+
+        if args.write:
+
+            if args.verbose:
+                print("#   map {} -> {} ; executing: {}".format(blocked, to_osd, cmd))
+            try:
+                result = subprocess.run(
+                    cmd.split(), capture_output=True, text=True, check=True
+                )
+                print(
+                    "#   SUCCESS: {}".format(
+                        result.stdout.strip()
+                        if result.stdout.strip()
+                        else "Command executed successfully"
+                    )
+                )
+                target_cmds.append(cmd)
+            except subprocess.CalledProcessError as e:
+                print(
+                    "#   ERROR: Command failed with exit code {}: {}".format(
+                        e.returncode, e.stderr.strip() if e.stderr else str(e)
+                    )
+                )
+                print(
+                    "#   STDERR: {}".format(
+                        e.stderr.strip() if e.stderr else "No error output"
+                    )
+                )
+            except Exception as e:
+                print("#   ERROR: Unexpected error: {}".format(str(e)))
+        else:
+            print(
+                "#   [DRY-RUN] map {} -> {} ; would execute: {}".format(
+                    blocked, to_osd, cmd
+                )
+            )
+            target_cmds.append(cmd)
+
+    # --- Step 5: Summary of executed commands ---
+    if not target_cmds:
+        print("\n# No commands generated.")
+    else:
+        if args.write:
+            print("\n# Executed {} command(s):".format(len(target_cmds)))
+        else:
+            print(
+                "\n# [DRY-RUN] Generated {} command(s) (use --write to execute):".format(
+                    len(target_cmds)
+                )
+            )
+        for c in target_cmds:
+            print(c)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except subprocess.CalledProcessError as e:
+        sys.stderr.write(
+            "Command failed: {}\n{}\n".format(
+                e.cmd, e.output if hasattr(e, "output") else ""
+            )
+        )
+        sys.exit(1)
