@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+#
 #   clyso-nines - A tool to estimate data loss risk in Ceph clusters
 #
 #   Copyright (C) 2025 Dan van der Ster <dan.vanderster@clyso.com>
@@ -27,11 +27,16 @@ import itertools
 import sys
 
 VERBOSE = False
+DEBUG = False
 
 # ---------------------------- Utilities ----------------------------
 
 def vprint(*args, **kwargs):
-    if VERBOSE:
+    if VERBOSE or DEBUG:
+        print(*args, **kwargs)
+
+def dprint(*args, **kwargs):
+    if DEBUG:
         print(*args, **kwargs)
 
 def reconstruct_command_line(parser, args):
@@ -919,6 +924,7 @@ def main():
 
     sim = subparsers.add_parser('simulate', help='Calculate durability of a randomized pool')
     sim.add_argument('--verbose', action='store_true', help='enable verbose output')
+    sim.add_argument('--debug', action='store_true', help='enable debug output')
     sim.add_argument('--failure-domain', type=str, default="host", help="Type of failure domain (host/rack/...) (default: host)")
     sim.add_argument('--num-domains', type=int, default=10, help="number of failure domains (default: 10)")
     sim.add_argument('--osds-per-domain', type=int, default=16, help="number of OSDs per failure domain (default: 16)")
@@ -942,6 +948,7 @@ def main():
 
     an = subparsers.add_parser('analyze', help='Calculate durability of the local pools')
     an.add_argument('--verbose', action='store_true', help='enable verbose output')
+    an.add_argument('--debug', action='store_true', help='enable debug output')
     an.add_argument('--cluster', type=str, default='ceph', help='Ceph cluster name (default: ceph)')
     an.add_argument('--pool', type=str, help='analyze only the given pool (default: all pools)')
     an.add_argument('--simulations', type=int, default=1000, help="number of incidents to simulate (default: 1000)")
@@ -958,6 +965,7 @@ def main():
 
     test = subparsers.add_parser('test', help='run internal tests')
     test.add_argument('--verbose', action='store_true', help='enable verbose output')
+    test.add_argument('--debug', action='store_true', help='enable debug output')
     test.set_defaults(func=run_tests)
 
     args = parser.parse_args()
@@ -965,7 +973,9 @@ def main():
         parser.print_help()
     else:
         global VERBOSE
+        global DEBUG
         VERBOSE = args.verbose
+        DEBUG = args.debug
         # Reconstruct command
         cmdline = reconstruct_command_line(parser, args)
         # Print header
@@ -990,6 +1000,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
     except Exception:
+        import traceback
         traceback.print_exc()
     finally:
         # Restore cursor
