@@ -201,11 +201,12 @@ def simple_crush(osd_ids, number_of_domains, size, num_pgs):
 
     return pgs
 
-def confidence_interval(successes, trials, confidence=0.95):
+def confidence_interval(successes, trials):
     if trials == 0:
         return (0, 0)
     p_hat = successes / trials
-    z = 1.96  # For 95% confidence
+    # 99.9% confidence interval using normal approximation
+    z = 3.2905  # z-score for 99.9% confidence
     margin_of_error = z * ((p_hat * (1 - p_hat)) / trials) ** 0.5
     return (max(0, p_hat - margin_of_error), min(1, p_hat + margin_of_error))
 
