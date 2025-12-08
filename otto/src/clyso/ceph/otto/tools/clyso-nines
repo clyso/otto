@@ -188,6 +188,8 @@ def simple_crush(osd_ids, number_of_domains, size, num_pgs):
         domains[domain].append(osd)
 
     domain_ids = list(domains.keys())
+    for domain in domain_ids:
+        dprint(f"Domain {domain}: OSDs {domains[domain]}")
 
     pgs = []
     for _ in range(num_pgs):
@@ -198,8 +200,9 @@ def simple_crush(osd_ids, number_of_domains, size, num_pgs):
             # Pick a random OSD from the selected domain
             pg_osds.append(random.choice(domains[domain]))
         pgs.append(tuple(pg_osds))
+        dprint(f"Generated PG: {pgs[-1]} from domains {chosen_domains}")
 
-    return pgs
+    return domains, pgs
 
 def confidence_interval(successes, trials):
     if trials == 0:
@@ -338,11 +341,8 @@ def simulate(args):
 
         num_pgs = round_to_nearest_power_of_two((num_osds * pgs_per_osd) / pg_size)
         osds = list(range(1, num_osds + 1))
-        vprint(f"Generating {num_pgs} PGs with size {pg_size} over {num_osds} OSDs...")
-        if not args.skip_monte_carlo:
-            pgs = simple_crush(osds,num_domains,pg_size,num_pgs) # [tuple(random.sample(osds, pg_size)) for _ in range(num_pgs)]
-        else:
-            pgs = [tuple(random.sample(osds, pg_size)) for _ in range(num_pgs)]
+        vprint(f"Generating {num_pgs} PGs using simple CRUSH-like algorithm...")
+        domains, pgs = simple_crush(osds,num_domains,pg_size,num_pgs)
 
         # Print simulation summary
         print(f"Simulating a {profile} pool with {num_osds} OSDs and {num_domains} {failure_domain}s ({osds_per_domain} OSDs per {failure_domain})")
@@ -358,7 +358,7 @@ def simulate(args):
         num_pgs = len(pgs)
         num_osds = len(osds)
         pgs_per_osd = num_pgs * pg_size / num_osds
-        
+
         # Print analyze summary
         print(f"Analyzing '{args.pool_name}':")
         print(f"    Info: {profile} pool with {num_osds} OSDs and {num_domains} {failure_domain}s")
@@ -707,7 +707,8 @@ def analyze_pool(args, pool, pg_dump):
     assert args.num_osds == len(osds), "OSD count mismatch!"
 
     # infer the number of failure domains
-    args.num_domains = infer_num_failure_domains(pgs)
+    domains = infer_failure_domains(pgs)
+    args.num_domains = len(domains)
     args.failure_domain = "domain"
 
     vprint(f"    Number of PGs: {args.pg_num}")
