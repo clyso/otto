@@ -368,6 +368,28 @@ def simulate(args):
         print(f"    Info: {profile} pool with {num_osds} OSDs and {num_domains} {failure_domain}s")
         print(f"    PGs: {num_pgs} total, ~{num_pgs * pg_size / num_osds:.3g} per OSD")
 
+    # --- Calculate OSD distribution stats ---
+    osd_counts = defaultdict(int)
+    for pg in pgs:
+        for osd in pg:
+            osd_counts[osd] += 1
+
+    # specific list of OSDs from your previous lines
+    counts = [osd_counts.get(osd, 0) for osd in osds]
+
+    if counts:
+        min_pgs = min(counts)
+        max_pgs = max(counts)
+        mean_pgs = sum(counts) / len(counts)
+        variance = sum((x - mean_pgs) ** 2 for x in counts) / len(counts)
+        std_dev = math.sqrt(variance)
+
+        print(f"    OSD Distribution (PGs per OSD):")
+        print(f"      Min:  {min_pgs}")
+        print(f"      Max:  {max_pgs}")
+        print(f"      Mean: {mean_pgs:.2f}")
+        print(f"      Std:  {std_dev:.2f}")
+
     # Re-derive the stored bytes/objects per PG from tb_per_osd
     bytes_per_osd = args.tb_per_osd * 1024**4
     total_bytes = num_osds * bytes_per_osd
