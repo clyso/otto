@@ -177,30 +177,31 @@ def format_time(seconds):
             return f"{round(seconds / thresholds[i], 1)} {units[i]}"
     return f"{round(seconds)} s"
 
-def simple_crush(osd_ids, number_of_domains, size, num_pgs):
-    if size > number_of_domains:
-        raise ValueError("Replication size cannot be greater than the number of failure domains.")
+def simple_crush(osd_ids, num_domains, pg_size, num_pgs):
+    if pg_size > num_domains:
+        raise ValueError("PG size cannot be greater than num failure domains.")
 
-    # Group OSDs into failure domains evenly
+    # Group OSDs into failure domains
     domains = defaultdict(list)
     for i, osd in enumerate(osd_ids):
-        domain = i % number_of_domains
+        domain = i % num_domains
         domains[domain].append(osd)
 
     domain_ids = list(domains.keys())
-    for domain in domain_ids:
-        dprint(f"Domain {domain}: OSDs {domains[domain]}")
+    if DEBUG:
+        for domain in domain_ids:
+            dprint(f"Domain {domain}: OSDs {domains[domain]}")
 
     pgs = []
     for _ in range(num_pgs):
         # Randomly choose failure domains for this PG
-        chosen_domains = random.sample(domain_ids, size)
+        chosen_domains = random.sample(domain_ids, pg_size)
         pg_osds = []
         for domain in chosen_domains:
             # Pick a random OSD from the selected domain
             pg_osds.append(random.choice(domains[domain]))
         pgs.append(tuple(pg_osds))
-        dprint(f"Generated PG: {pgs[-1]} from domains {chosen_domains}")
+        if DEBUG: dprint(f"Generated PG: {pgs[-1]} from domains {chosen_domains}")
 
     return domains, pgs
 
