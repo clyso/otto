@@ -343,7 +343,10 @@ def simulate(args):
         num_pgs = round_to_nearest_power_of_two((num_osds * pgs_per_osd) / pg_size)
         osds = list(range(1, num_osds + 1))
         vprint(f"Generating {num_pgs} PGs using simple CRUSH-like algorithm...")
-        domains, pgs = simple_crush(osds,num_domains,pg_size,num_pgs)
+        time_start = time.time()
+        domains, pgs = simple_crush(osds, num_domains, pg_size, num_pgs)
+        time_end = time.time()
+        dprint(f"    Generated {num_pgs} PGs in {time_end - time_start:.2f} seconds.")
 
         # Print simulation summary
         print(f"Simulating a {profile} pool with {num_osds} OSDs and {num_domains} {failure_domain}s ({osds_per_domain} OSDs per {failure_domain})")
