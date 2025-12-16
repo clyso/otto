@@ -239,8 +239,8 @@ def effective_recovery_rate(object_size_bytes,
     return chunk_size_bytes / total_time
 
 
-def infer_num_failure_domains(pgs):
-    """Infer number of failure domains from OSD and PG distribution."""
+def infer_failure_domains(pgs):
+    """Infer failure domains from OSD and PG distribution."""
 
     # discover all 'up' OSDs -- those are outputs of the crush map
     osds = set()
@@ -291,7 +291,14 @@ def infer_num_failure_domains(pgs):
                     osd_tree.append(list([osd]))
                 new_host_offset += 1
 
-    return len(osd_tree)
+    dprint("Inferred failure domains:")
+    for idx, host in enumerate(osd_tree):
+        dprint(f"  Domain {idx}: OSDs {host}")
+
+    return osd_tree
+
+
+
 
 # ---------------------------- Simulate Subcommand ----------------------------
 def simulate(args):
