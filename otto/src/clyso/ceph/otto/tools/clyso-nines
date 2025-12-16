@@ -391,11 +391,11 @@ def simulate(args):
         variance = sum((x - mean_pgs) ** 2 for x in counts) / len(counts)
         std_dev = math.sqrt(variance)
 
-        print(f"    OSD Distribution (PGs per OSD):")
-        print(f"      Min:  {min_pgs}")
-        print(f"      Max:  {max_pgs}")
-        print(f"      Mean: {mean_pgs:.2f}")
-        print(f"      Std:  {std_dev:.2f}")
+        vprint(f"    OSD Distribution (PGs per OSD):")
+        vprint(f"      Min:  {min_pgs}")
+        vprint(f"      Max:  {max_pgs}")
+        vprint(f"      Mean: {mean_pgs:.2f}")
+        vprint(f"      Std:  {std_dev:.2f}")
 
     # Re-derive the stored bytes/objects per PG from tb_per_osd
     bytes_per_osd = args.tb_per_osd * 1024**4
