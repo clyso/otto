@@ -305,6 +305,10 @@ def simulate(args):
     # Set random seed for reproducibility
     random.seed(args.seed)
 
+    # FIXME: The math breaks without this workaround
+    if args.domains_down > 0:
+        args.fudge = 1
+
     raw_to_stored_factor = 0
     profile = ""
     # Derive PG size and min_size
@@ -686,6 +690,10 @@ def analyze_pool(args, pool, pg_dump):
     import subprocess
     import json
 
+    # FIXME: The math breaks without this workaround
+    if args.domains_down > 0:
+        args.fudge = 1
+
     vprint(f"Analyzing pool '{pool['pool_name']}' (id {pool['pool_id']}, size {pool['size']}) ")
     if 'erasure_code_profile' in pool and pool['erasure_code_profile']:
         vprint(f"    Type: erasure-coded ({pool['erasure_code_profile']})")
@@ -1042,10 +1050,6 @@ def main():
         global DEBUG
         VERBOSE = args.verbose
         DEBUG = args.debug
-
-        # FIXME: The math breaks without this workaround
-        if args.domains_down > 0:
-            args.fudge = 1
 
         # Reconstruct command
         cmdline = reconstruct_command_line(parser, args)
