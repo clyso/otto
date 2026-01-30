@@ -298,10 +298,135 @@ def infer_failure_domains(pgs):
     return osd_tree
 
 
+def calculate_pg_loss_rate(num_domains,
+                           osds_per_domain,
+                           pg_size,
+                           num_pgs,
+                           num_failures_for_data_loss,
+                           num_osds,
+                           prefailed_domains=0):
+
+    vprint(f"---------------------------")
+    vprint(f"Theoretical loss rate calculation (with {prefailed_domains} pre-failed domains):")
+
+    H = int(num_domains)
+    f_total_threshold = int(num_failures_for_data_loss)
+    f_new = max(0, f_total_threshold - int(prefailed_domains))
+
+    H_dead = int(prefailed_domains)
+    n = int(osds_per_domain)
+    r = int(pg_size)
+    N = int(num_osds)
+
+    if H_dead >= H: return 1.0
+
+    H_alive = H - H_dead
+    N_alive = H_alive * n
+
+    # 1. Eligibility (Global)
+    if f_new == 0:
+        eligibility = 1.0
+    elif f_new > H_alive:
+        eligibility = 0.0
+    else:
+        try:
+            eligibility = (comb(H_alive, f_new) * (n ** f_new)) / comb(N_alive, f_new)
+        except ValueError:
+            eligibility = 0.0
+
+    vprint(f"  1. Eligibility (New failures on distinct alive hosts): {eligibility:.3g}")
+
+    # 2. Iterate through PG "Vulnerability Buckets"
+    prob_pool_survives = 1.0
+
+    for k in range(r + 1):
+        # Safety checks
+        if k > H_dead: continue
+        if (r - k) > H_alive: continue
+
+        # Proportion of PGs in this state
+        try:
+            prob_pg_state_k = (comb(H_dead, k) * comb(H_alive, r - k)) / comb(H, r)
+        except ValueError: continue
+
+        if prob_pg_state_k == 0: continue
+
+        num_pgs_in_state = num_pgs * prob_pg_state_k
+
+        # The number of *additional* shards we need to lose to kill this PG
+        needed = max(0, f_total_threshold - k)
+
+        p_kill_pg = 0.0
+
+        if needed <= 0:
+            p_kill_pg = 1.0
+        elif f_new < needed:
+            p_kill_pg = 0.0
+        else:
+            # For EC, we might lose 'x' shards, where 'needed' <= x <= 'f_new'.
+            # Any overlap >= needed is fatal.
+            # We sum the probabilities of all fatal overlap sizes.
+
+            r_alive = r - k  # Healthy legs of this PG
+
+            # The denominator for picking hosts (how many ways to pick f_new hosts from H_alive)
+            total_host_combos = comb(H_alive, f_new)
+
+            # We iterate x (the number of hits on this PG's healthy legs)
+            # Max hits is min(f_new, r_alive) because we can't hit more hosts than we failed,
+            # and we can't hit more legs than the PG has.
+            for x in range(needed, min(f_new, r_alive) + 1):
+                # 1. Choose 'x' hosts that are part of the PG (from r_alive)
+                ways_hit_pg = comb(r_alive, x)
+
+                # 2. Choose the remaining 'f_new - x' failures from non-PG hosts (H_alive - r_alive)
+                ways_miss_pg = comb(H_alive - r_alive, f_new - x)
+
+                if total_host_combos > 0:
+                    prob_hosts = (ways_hit_pg * ways_miss_pg) / total_host_combos
+                else:
+                    prob_hosts = 0
+
+                # 3. Probability that we hit the specific OSDs on those 'x' hosts
+                # Since we assume 1 failure per host (eligibility), simply (1/n)^x
+                prob_osds = (1 / n) ** x
+
+                p_kill_pg += prob_hosts * prob_osds
+
+        # Aggregate Risk for this bucket
+        if p_kill_pg >= 1.0:
+             prob_survive_bucket = math.exp(-num_pgs_in_state)
+        elif p_kill_pg <= 0.0:
+            prob_survive_bucket = 1.0
+        else:
+            # High precision aggregation
+            prob_survive_bucket = math.exp(num_pgs_in_state * math.log1p(-p_kill_pg))
+
+        vprint(f"    Bucket [Overlap={k}]: {prob_pg_state_k*100:.1f}% of PGs. Kill Prob: {p_kill_pg:.4g}")
+        prob_pool_survives *= prob_survive_bucket
+
+    # Final Risk Calculation
+    risk_raw = 1.0 - prob_pool_survives
+
+    # Handle the Dead-On-Arrival edge case (where eligibility shouldn't reduce risk)
+    prob_survive_doa = 1.0
+    for k in range(r + 1):
+        if k > H_dead: continue
+        needed = max(0, f_total_threshold - k)
+        if needed <= 0:
+            try:
+                p_state = (comb(H_dead, k) * comb(H_alive, r - k)) / comb(H, r)
+                prob_survive_doa *= math.exp(- (num_pgs * p_state))
+            except ValueError: continue
+
+    risk_doa = 1.0 - prob_survive_doa
+    total_risk = max(risk_doa, eligibility * risk_raw)
+
+    return min(1.0, max(0.0, total_risk))
 
 
 # ---------------------------- Simulate Subcommand ----------------------------
-def simulate(args):
+def simulate(args, domains=None):
     # Set random seed for reproducibility
     random.seed(args.seed)
 
@@ -311,26 +436,25 @@ def simulate(args):
 
     raw_to_stored_factor = 0
     profile = ""
-    # Derive PG size and min_size
+    # Derive PG size
     if args.k is not None and args.m is not None:
         pg_size = args.k + args.m
-        min_size = args.k
         raw_to_stored_factor = args.k / (args.k + args.m)
         profile = f"{args.k}+{args.m} erasure"
-        num_failures = args.m + 1
+        num_failures_for_data_loss = args.m + 1
     elif args.size is not None:
         pg_size = args.size
-        min_size = 1
         raw_to_stored_factor = 1 / (args.size)
         profile = f"{args.size}x replicated"
-        num_failures = args.size
+        num_failures_for_data_loss = args.size
     else:
         raise ValueError("Specify either --size or both --k and --m.")
 
-    if not hasattr(args, 'pgs') and args.domains_down > 0:
-        num_failures -= args.domains_down
+    num_failures_for_data_loss = max(0, num_failures_for_data_loss)
 
-    num_failures = max(0, num_failures)
+    # how many (additional) OSD failures would cause data loss?
+    # adjust for pre-failed domains
+    num_osds_to_fail = max(0, num_failures_for_data_loss - args.domains_down)
 
     num_simulations = args.simulations
     if num_simulations < 100:
@@ -415,71 +539,25 @@ def simulate(args):
     print(f"    Data per PG: {format_bytes(bytes_per_pg)}, {format_int(objects_per_pg)} objects")
     vprint(f"    Example PG: {pgs[0]}\n")
 
-    vprint(f"---------------------------")
-    vprint()
 
-    vprint(f"Theoretical loss rate calculation:")
-    H = num_domains # num hosts
-    f = num_failures # normally m+1
-    n = osds_per_domain # osds per host
-    r = pg_size  # normally k + m
-    N = num_osds  # total osds
+    # Compute theoretical loss rate
+    # i.e. how often do random failures cause data loss
+    calculated_loss_rate = loss_rate = calculate_pg_loss_rate(
+        num_domains,
+        osds_per_domain,
+        pg_size,
+        num_pgs,
+        num_failures_for_data_loss,
+        num_osds,
+        args.domains_down
+    )
 
-    vprint("    PG loss rate calculation:")
-    vprint(f"      H (failure domains): {H}")
-    vprint(f"      f (failures to cause data loss): {f}")
-    vprint(f"      n (OSDs per failure domain): {n}")
-    vprint(f"      r (PG size): {r}")
-    vprint(f"      N (total OSDs): {N}")
-    vprint(f"      Number of PGs: {num_pgs}")
+    print(f"    Calculated PG Loss Rate (with {args.domains_down} pre-failed domains): {loss_rate * 100:.4g}%")
 
-    # Assume we have f concurrent failures. They will cause data loss if:
-    # - they land on f different failure domains
-    # - per-PG probability that those domains are hit
-    # - at least one PG is lost
-
-    # 1. Eligibility: Do the f failures land on f different domains?
-    elig = comb(H, f) * (n ** f) / comb(N, f)
-    vprint("    1. Eligibility (Do the f failures land on f different domains): C(H, f) * n^f / C(N, f)")
-    vprint(f"       C({H}, {f}) * {n}^{f} / C({N}, {f}) = {comb(H, f)} * {n**f} / {comb(N, f)} = {elig:.3g}")
-
-    # 2. Per-PG hit probability
-    #    PG picks r domains uniformly: probability it includes those f failed domains is
-    p_hosts_in_pg = comb(H - f, r - f) / comb(H, r)
-    vprint("    2. Per-PG hit probability: C(H - f, r - f) / C(H, r)")
-    vprint(f"       C({H} - {f}, {r} - {f}) / C({H}, {r}) = {comb(H - f, r - f)} / {comb(H, r)} = {p_hosts_in_pg:.3g}")
-
-    # 3. Within those f domains, PG must pick the failed OSD in each: 
-    p_osds_match = (1 / n) ** f
-    vprint("    3. PG picks failed OSDs within those domains: (1 / n)^f")
-    vprint(f"       (1 / {n})^{f} = {p_osds_match:.3g}")
-
-    # 4. Combine to get per-PG loss probability
-    p_pg_loss = p_hosts_in_pg * p_osds_match
-    vprint("    4. Per-PG loss probability: #2 * #3")
-    vprint(f"       {p_pg_loss:.3g}")
-
-    # 5. Probability that at least one PG is lost
-    p_at_least_one_lost = 1 - (1 - p_pg_loss) ** num_pgs
-    vprint("    5. Probability that at least one PG is lost: 1 - (1 - #4)^num_pgs")
-    vprint(f"    1 - (1 - {p_pg_loss:.3g})^{num_pgs} = {p_at_least_one_lost:.3g}")
-
-    loss_rate = elig * p_at_least_one_lost
-    vprint("    6. Overall data loss probability: #1 * #5")
-
-    assert 0 <= loss_rate <= 1, "Calculated loss rate is out of bounds!"
-
-    vprint()
-    vprint(f"    Finally, P. ≥1 PG lost: {loss_rate * 100:.3g}%")
-    print(f"    Calculated PG Loss Rate: {loss_rate * 100:.3g}%")
-
-    vprint()
-    vprint(f"---------------------------")
-    vprint()
 
     # simulate the major incidents
-    vprint(f"Monte Carlo Sim: n={num_simulations} {num_failures}x failures")
-    threshold = pg_size - min_size
+    vprint(f"Monte Carlo Sim: n={num_simulations} {num_failures_for_data_loss}x failures")
+
     num_batches = 50
     batch_size = num_simulations // num_batches
     if args.skip_monte_carlo:
@@ -507,17 +585,25 @@ def simulate(args):
                 spin_time = time.time()
             simulations_done += 1
             failed_osds = set()
+
             if args.domains_down > 0:
                 # pre-fail args.domains_down * osds_per_domain OSDs
-                failed_osds = set([osds[i] for i in range(args.domains_down * osds_per_domain)])
+                failed_osds = set()
+                failed_domains = random.sample(range(num_domains), args.domains_down)
+                for domain in failed_domains:
+                    failed_osds.update(domains[domain])
 
-            failed_osds.update(random.sample(list(set(osds) - failed_osds), num_failures))
+            dprint(f"Pre-failed OSDs: {failed_osds}")
+            failed_osds.update(random.sample(list(set(osds) - failed_osds), num_osds_to_fail))
+            dprint(f"Failed OSDs: {failed_osds}")
 
-            assert len(failed_osds) == num_failures + args.domains_down * (osds_per_domain), f"Failed OSD count mismatch! {len(failed_osds)} != {num_failures + args.domains_down * osds_per_domain}"
+            dead_pgs = 0
+            for pg in pgs:
+                if sum(1 for osd in pg if osd in failed_osds) >= num_failures_for_data_loss:
+                    dead_pgs += 1
+                    dprint(f"PG {pg} lost due to failed OSDs {failed_osds}")
 
-            dead_pgs = sum(
-                1 for pg in pgs if sum(1 for osd in pg if osd in failed_osds) > threshold
-            )
+
             total_pg_losses += dead_pgs
             if dead_pgs > 0:
                 simulations_with_loss += 1
@@ -538,23 +624,28 @@ def simulate(args):
         vprint(f"    ╰{'─' * num_batches}╯")
         vprint()
 
-    if simulations_with_loss > 0:
-        loss_rate = simulations_with_loss / num_simulations
-        vprint(f"    Observed Incidents with ≥1 PG lost: {simulations_with_loss}/{num_simulations} ({100 * loss_rate:.3f}%)")
-        print(f"    Monte Carlo PG Loss Rate: {loss_rate * 100:.3g}%")
-    elif args.skip_monte_carlo:
-        vprint(f"    Skipped Monte Carlo simulation as per user request. Using theoretical estimate.")
-        print(f"    Monte Carlo PG Loss Rate: - skipped. using theoretical estimate.")
-        total_pg_losses = simulations_with_loss = loss_rate * num_simulations  # use theoretical estimate
+    if args.skip_monte_carlo or simulations_with_loss < 1:
+        # use theoretical estimate
+        total_pg_losses = simulations_with_loss = calculated_loss_rate * num_simulations  # use theoretical estimate
+        confidence = (loss_rate, loss_rate)
+        plus_minus = 0.0
+        vprint(f"    No PGs lost in Monte Carlo simulation, using theoretical estimate.")
     else:
-#        vprint(f"    Observed Incidents with ≥1 PG lost: 0/{num_simulations} (0%)")
-        vprint("      !! No data loss observed in simulations, using theoretical estimate.")
-        print(f"    Monte Carlo PG Loss Rate: - none found. using theoretical estimate.")
-        total_pg_losses = simulations_with_loss = loss_rate * num_simulations  # use theoretical estimate
+        # use simulated result
+        loss_rate = simulations_with_loss / num_simulations
+        confidence = confidence_interval(simulations_with_loss, num_simulations)
+        plus_minus = confidence[1] - loss_rate
+        vprint(f"    Observed Incidents with ≥1 PG lost: {simulations_with_loss}/{num_simulations} ({100 * loss_rate:.3f}%)")
+        print(f"    Monte Carlo Data Loss Rate: {loss_rate * 100:.3g}% ± {plus_minus * 100:.3g}%")
 
-    confidence = confidence_interval(simulations_with_loss, num_simulations)
-    vprint(f"        95% Confidence Interval: {confidence[0] * 100:.3g}% - {confidence[1] * 100:.3g}%")
-    
+        # warn if theoretical and simulated differ significantly
+        if calculated_loss_rate < confidence[0] or calculated_loss_rate > confidence[1]:
+            vprint()
+            vprint("    Warning: Theoretical and simulated loss rates differ significantly!")
+            vprint(f"      Theoretical: {calculated_loss_rate * 100:.3g}%, Simulated: {100 * loss_rate:.3g}% ± {plus_minus * 100:.3g}%")
+            vprint()
+
+
     pgs_lost_per_event = total_pg_losses / num_simulations
     pct_data_loss = total_pg_losses / (num_simulations * num_pgs)
     vprint(f"    Expected Data Loss Per Incident: {pgs_lost_per_event:.3g} PGs, {format_bytes(pgs_lost_per_event*bytes_per_pg)} ({pct_data_loss * 100:.3g}%)")
@@ -564,7 +655,7 @@ def simulate(args):
     vprint("---------------------------")
     vprint("")
 
-    vprint(f"Estimating the probability of {num_failures}x failures")
+    vprint(f"Estimating the probability of {num_osds_to_fail}x failures")
     afr = args.afr
     if pg_size > 1:
         vprint(f"    Estimated per-drive AFR: {afr}")
@@ -590,34 +681,35 @@ def simulate(args):
         # Estimate max OSD load during recovery when things are critical
         # e.g. for 3x repl: how long to recover 2 OSDs failed.
         # e.g. for 6+3 EC: how long to recover 3 OSDs failed.
+        # TODO: check this part
         if args.k is not None:
             critical_osds = args.m
         else:
             critical_osds = args.size - 1
-        num_osds_left = num_osds - num_failures + 1
+        num_osds_left = num_osds - args.domains_down*osds_per_domain - num_osds_to_fail + 1
         # How many PGs need to be recovered 
         max_osd_load = expected_max_osd_load(num_osds_left, critical_osds*pgs_per_osd)
 
-        vprint(f"    Expected most loaded OSD when recovering {format_int((num_failures-1)*pgs_per_osd)} PGs to {num_osds-num_failures+1} OSDs = {max_osd_load} PGs")
+        vprint(f"    Expected most loaded OSD when recovering {format_int(critical_osds*pgs_per_osd)} PGs to {num_osds_left} OSDs = {max_osd_load} PGs")
 
         recovery_time = max(max_osd_load * recovery_time_per_pg, 60) # minimum 1 minutes per PG
         vprint(f"    Expected critical period ({max_osd_load} PGs * {format_time(recovery_time_per_pg)}) = {format_time(recovery_time)}")
 
         critical_windows_per_year = 31536000 / recovery_time
-        vprint(f"    Expected critical periods annually (1yr / {format_time(recovery_time)}) = {critical_windows_per_year:.1f}")
+        vprint(f"    Expected critical periods annually (1 yr / {format_time(recovery_time)}) = {critical_windows_per_year:.1f}")
 
         failure_prob_per_disk = recovery_time / 31536000 * afr
         vprint(f"    Expected per-OSD critical period failure rate = {failure_prob_per_disk:.2g} (1 in {format_int(1/failure_prob_per_disk)})")
 
         vprint(f"    Failure correlation factor = {args.fudge}")
         
-        failure_prob = args.fudge * prob_k_or_more_failures(num_osds, failure_prob_per_disk, num_failures)
-        vprint(f"    Probability of {num_failures}+ failures in any critical period ({format_time(recovery_time)}) = 1 in {format_int(1/failure_prob)}")
+        failure_prob = args.fudge * prob_k_or_more_failures(num_osds, failure_prob_per_disk, num_osds_to_fail)
+        vprint(f"    Probability of {num_osds_to_fail}+ failures in any critical period ({format_time(recovery_time)}) = 1 in {format_int(1/failure_prob)}")
 
         expected_annual_events = critical_windows_per_year * failure_prob
-        vprint(f"    Expected annual {num_failures}+ failure events: {expected_annual_events:.3g} (1 every {format_time(31536000/expected_annual_events)})")
-        mtt_multi_failure = mttdl(num_osds, num_failures, afr, args.fudge, recovery_time)
-        vprint(f"    Alternate calculation (mean time to {num_failures}+ concurrent failures) = {format_time(mtt_multi_failure)}")
+        vprint(f"    Expected annual {num_osds_to_fail}+ failure events: {expected_annual_events:.3g} (1 every {format_time(31536000/expected_annual_events)})")
+        mtt_multi_failure = mttdl(num_osds, num_failures_for_data_loss, afr, args.fudge, recovery_time)
+        vprint(f"    Alternate calculation (mean time to {num_osds_to_fail}+ concurrent failures) = {format_time(mtt_multi_failure)}")
     else: # size == 1 (no redundancy)
         vprint("    No redundancy configured, data loss is certain on any failure.")
         expected_annual_events = num_osds * afr
@@ -637,8 +729,8 @@ def simulate(args):
     inv_max_loss_rate = 1/max_loss_rate if max_loss_rate > 0 else float('inf')
 
     vprint(f"MTTDL/Durability Estimates:")
-    vprint(f"    Mean time to {num_failures}x failure: {format_time(mtt_multi_failure)}")
-    vprint(f"    Probability that {num_failures}x failures causes data loss: {loss_rate*100:.3g}% (1 in {format_int(inv_loss_rate)})")
+    vprint(f"    Mean time to {num_osds_to_fail}x failure: {format_time(mtt_multi_failure)}")
+    vprint(f"    Probability that {num_osds_to_fail}x failures causes data loss: {loss_rate*100:.3g}% (1 in {format_int(inv_loss_rate)})")
     vprint(f"       95% CI: {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}% (1 in {format_int(inv_max_loss_rate)} to 1 in {format_int(inv_min_loss_rate)})")
 
     vprint("")
@@ -774,7 +866,7 @@ def analyze_pool(args, pool, pg_dump):
     vprint(f"    Data per OSD: {format_bytes(args.tb_per_osd * 1024**4)} ({format_int(objects_raw / len(osds))} objects)")
     vprint(f"    Average object size: {format_bytes(args.object_size)}")
     vprint("")
-    [mttdl, nines] = simulate(args)
+    [mttdl, nines] = simulate(args, domains=domains)
 
 
 def analyze(args):
@@ -919,6 +1011,31 @@ def run_tests(args):
                 max_mc_runtime=30
             ),
             ("15.4 thousand years", "10-nines")
+        ],
+        [
+            argparse.Namespace(
+                verbose=False,
+                failure_domain="host",
+                num_domains=20,
+                osds_per_domain=16,
+                tb_per_osd=10.0,
+                object_size=4*1024*1024,
+                pgs_per_osd=100,
+                k=6,
+                m=3,
+                size=None,
+                simulations=1000,
+                seed=42,
+                fudge=100,
+                afr=0.02,
+                recovery_rate=50,
+                osd_recovery_sleep=0.1,
+                osd_recovery_max_active=1,
+                domains_down=1,
+                skip_monte_carlo=False,
+                max_mc_runtime=30
+            ),
+            ("173.4 y", "7-nines")
         ],
         [
             argparse.Namespace(
