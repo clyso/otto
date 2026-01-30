@@ -1042,6 +1042,11 @@ def main():
         global DEBUG
         VERBOSE = args.verbose
         DEBUG = args.debug
+
+        # FIXME: The math breaks without this workaround
+        if args.domains_down > 0:
+            args.fudge = 1
+
         # Reconstruct command
         cmdline = reconstruct_command_line(parser, args)
         # Print header
