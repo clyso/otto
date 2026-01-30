@@ -936,10 +936,39 @@ def run_tests(args):
                 max_mc_runtime=30
             ),
             ("80.8 billion years", "20-nines")
+        ],
+        [
+            argparse.Namespace(
+                verbose=False,
+                failure_domain="host",
+                num_domains=500,
+                osds_per_domain=40,
+                tb_per_osd=10,
+                object_size=4*1024,
+                pgs_per_osd=500,
+                size=None,
+                k=8,
+                m=3,
+                simulations=1000,
+                seed=42,
+                fudge=100,
+                afr=0.02,
+                recovery_rate=50,
+                osd_recovery_sleep=0.1,
+                osd_recovery_max_active=1,
+                domains_down=0,
+                skip_monte_carlo=True,
+                max_mc_runtime=30
+            ),
+            ("11.4 thousand years", "20-nines")
         ]
     ]
     for i, test_arg in enumerate(test_args):
         print(f"Running test case {i+1}...")
+        parser = argparse.ArgumentParser(prog='clyso-nines')
+        test_arg[0].command = 'simulate'
+        cmdline = reconstruct_command_line(parser, test_arg[0])
+        print(f"Command line: {cmdline}")
         (mttdl, nines) = simulate(test_arg[0])
         assert test_arg[1][0] == mttdl, f"MTTDL test case {i+1} failed! {mttdl} != {test_arg[1][0]}"
         assert test_arg[1][1] == nines, f"Durability test case {i+1} failed! {nines} != {test_arg[1][1]}"
