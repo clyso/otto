@@ -169,7 +169,7 @@ def format_int(val):
     return f"~{round(val)}"
 
 def format_time(seconds):
-    units = ["s", "min", "hr", "days", "years", "thousand years", "million years", "billion years"]
+    units = ["s", "m", "h", "d", "y", "thousand years", "million years", "billion years"]
     thresholds = [1, 60, 3600, 86400, 86400*365, 86400*365*1000, 86400*365*10**6, 86400*365*10**9]
 
     for i in reversed(range(1, len(units))):
