@@ -58,3 +58,10 @@ jobs:
     with:
       artifact_name: binary
       release_tag: ${{ github.ref_name }}
+
+  trigger_clyso_tools:
+    needs: [upload_binary_to_s3]
+    uses: clyso/clyso-tools-build/.github/workflows/build-push.yaml@main
+    with:
+      triggered_by: "otto"
+    secrets: inherit
