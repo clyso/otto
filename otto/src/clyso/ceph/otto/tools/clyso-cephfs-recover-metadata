@@ -1,10 +1,12 @@
-#!/bin/sh -e
+#!/usr/bin/env bash
 #
 # This script will recover cephfs missing metada from data objects
 # using a procedure described in:
 #
 # https://docs.ceph.com/en/quincy/cephfs/disaster-recovery-experts/#recovery-from-missing-metadata-objects
 #
+
+set -eo pipefail
 
 #
 # Globals
@@ -17,7 +19,8 @@ NRANKS=
 NWORKERS=16
 WAIT_SLEEP_INTERVAL=10
 LOGDIR=recover_metadata_logs
-: ${PROCESS_SCAN_LINK_LOG:=}
+: ${PROCESS_SCAN_LINK_LOG:=YES}
+JOURNAL_RESET_COMPAT_FLAGS=
 
 #
 # Uncomment for NOP testing:
@@ -26,6 +29,17 @@ LOGDIR=recover_metadata_logs
 # alias cephfs-journal-tool="echo cephfs-journal-tool"
 # alias cephfs-data-scan="echo cephfs-data-scan"
 
+declare -A RECOVERY_STEPS=(
+  [init]="INITIALIZING METADATA"
+  [scan_extents]="SCANNING EXTENTS"
+  [scan_inodes]="SCANNING INODES"
+  [scan_links]="SCANNING LINKS"
+  [cleanup]="CLEANUP"
+  [end]="RECOVERY COMPLETE"
+)
+CURRENT_RECOVERY_STEP=""
+
+
 #
 # Functions
 #
@@ -33,10 +47,39 @@ usage() {
     echo "$0 <cephfs> [nranks [nworkers]]"
 }
 
+set_recovery_step() {
+    local step="$1"
+
+    if [ -n "${CURRENT_RECOVERY_STEP}" ]; then
+        echo "${RECOVERY_STEPS[${CURRENT_RECOVERY_STEP}]} DONE" >&2
+    fi
+
+    CURRENT_RECOVERY_STEP="${step}"
+
+    echo "${RECOVERY_STEPS[${step}]}" >&2
+}
+
+on_exit() {
+    local rc=$?
+
+    if [ $rc -ne 0 ] && [ -n "${CURRENT_RECOVERY_STEP}" ]; then
+        echo "${RECOVERY_STEPS[${CURRENT_RECOVERY_STEP}]} FAILED" >&2
+    fi
+
+    exit $rc
+}
+
 check_deps() {
     if ! which jq >/dev/null 2>&1; then
 	echo 'jq is not installed' >&2
 	return 1
+    fi
+}
+
+set_compat_flags() {
+    if cephfs-journal-tool --help |
+            grep -q 'reset .*--yes-i-really-really-mean-it'; then
+        JOURNAL_RESET_COMPAT_FLAGS="--yes-i-really-really-mean-it"
     fi
 }
 
@@ -106,6 +149,7 @@ cephfs_data_scan() {
     test -n "$1"
     local cmd="$1"
     local datapools="${DATAPOOL}"
+    local debug_mds=10
 
     test -n "$2"
     local worker="$2"
@@ -114,8 +158,12 @@ cephfs_data_scan() {
 	datapools="${datapools} ${EXTRA_DATAPOOLS}"
     fi
 
+    if [ "${cmd}" = "cleanup" ]; then
+	debug_mds=20
+    fi
+
     cephfs-data-scan "${cmd}" --worker_n "${worker}" --worker_m "${NWORKERS}" \
-		     --filesystem "${CEPHFS}" --debug-mds 10 ${datapools} 2>&1 |
+		     --filesystem "${CEPHFS}" --debug-mds ${debug_mds} ${datapools} 2>&1 |
 	tee "${LOGDIR}"/cephfs-data-scan."${cmd}"."${worker}".log
     echo "${cmd} ${worker} complete" >&2
 }
@@ -228,9 +276,12 @@ scan_links() {
 }
 
 cleanup() {
-    cephfs-data-scan cleanup --filesystem "${CEPHFS}" --debug-mds 20 2>&1 |
-    tee "${LOGDIR}"/cephfs-data-scan.cleanup.0.log |
-    awk -v f=${LOGDIR}/num_cleanup.0.dat \
+    test -n "$1"
+
+    local worker="$1"
+
+    cephfs_data_scan cleanup "${worker}" |
+    awk -v f=${LOGDIR}/num_cleanup."${worker}".dat \
 	'
 		BEGIN {
 			n = 0
@@ -382,6 +433,7 @@ wait_cleanup_complete() {
 #
 
 check_deps
+set_compat_flags
 
 case $1 in
     --help|-h)
@@ -416,12 +468,15 @@ get_metadatapool
 get_datapools
 prepare_log_dir
 
-echo "INITIALIZING METADATA" >&2
+trap on_exit EXIT
+
+set_recovery_step init
 
 for rank in `seq 0 $((NRANKS - 1))`; do
     # try to recover whatever is possible from journal and reset it
     cephfs-journal-tool --rank=${CEPHFS}:${rank} event recover_dentries summary || true
-    cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force
+    cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
+                        ${JOURNAL_RESET_COMPAT_FLAGS}
 
     # reset session table
     cephfs-table-tool ${CEPHFS}:${rank} reset session
@@ -437,10 +492,6 @@ done
 # Regenareate root inodes ("/" and MDS directory) if missing
 cephfs-data-scan init --filesystem "${CEPHFS}"
 
-echo "INITIALIZING METADATA DONE" >&2
-
-echo "SCANNING EXTENTS" >&2
-
 # List all inode objects (named as {inode}.{index}) in the data pool
 # and accumulate collected inode information in {inode}.0 object
 # attributes:
@@ -454,14 +505,11 @@ echo "SCANNING EXTENTS" >&2
 # highest ID seen), and the inode mtime
 #
 # NOTE: this logic doesn't take account of striping.
+set_recovery_step scan_extents
 for worker in `seq 0 $((NWORKERS - 1))`; do
     scan_extents ${worker} &
 done
 wait_scan_extents_complete
-
-echo "SCANNING EXTENTS DONE" >&2
-
-echo "SCANNING INODES" >&2
 
 # Scan all {inode}.0 objects in the data pool, fetching previously
 # accumulated data ("scan_ceiling", "scan_max_size", and
@@ -469,14 +517,11 @@ echo "SCANNING INODES" >&2
 # "parent" xattrs). Using this information rebuild (create or update)
 # inode metadata in the metadata pool. Put strays and inodes without
 # backtrace in lost+found.
+set_recovery_step scan_inodes
 for worker in `seq 0 $((NWORKERS - 1))`; do
     scan_inodes ${worker} &
 done
 wait_scan_inodes_complete
-
-echo "SCANNING INODES DONE" >&2
-
-echo "SCANNING LINKS" >&2
 
 # Check inode linkages and fix found error. On the first step
 # (SCAN_INOS) all inodes in metadata pool are scanned. If it is a
@@ -484,15 +529,15 @@ echo "SCANNING LINKS" >&2
 # inode, the ref count is increased for the inode it reffers to.  On
 # the second step (CHECK_LINK) it resolves found dups and other
 # inconsitencies.
+set_recovery_step scan_links
 scan_links &
 wait_scan_links_complete
 
-echo "SCANNING LINKS DONE" >&2
-
-echo "CLEANUP" >&2
-
 # Delete ancillary data generated during recovery (xattrs).
-cleanup &
+set_recovery_step cleanup
+for worker in `seq 0 $((NWORKERS - 1))`; do
+    cleanup ${worker} &
+done
 wait_cleanup_complete
 
-echo "OK" >&2
+set_recovery_step end
