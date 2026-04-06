@@ -43,7 +43,7 @@ jobs:
       - name: Install git 
         run: |
           apk add git
-          git config --global --add safe.directory .
+          git config --global --add safe.directory '*' # disable safe directory check
 
       - name: Checkout code
         uses: actions/checkout@v4
