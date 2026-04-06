@@ -22,7 +22,7 @@ CephBaseModel which has extra="allow" to accept unknown fields gracefully.
 from __future__ import annotations
 
 import pathlib
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
@@ -1655,6 +1655,7 @@ class CephfsSession(CephBaseModel):
     num_completed_requests: int = Field(default=0)
     num_completed_flushes: int = Field(default=0)
     reconnecting: bool = Field(default=False)
+    importing_count: int = Field(default=0)
     recall_caps: CephfsSessionMetricValue = Field(
         default_factory=CephfsSessionMetricValue
     )
@@ -1675,7 +1676,9 @@ class CephfsSession(CephBaseModel):
     )
     last_trim_completed_requests_tid: int = Field(default=0)
     last_trim_completed_flushes_tid: int = Field(default=0)
-    delegated_inos: list[int] = Field(default_factory=list)
+    delegated_inos: Union[list[int], list[CephfsSessionPreallocIno]] = Field(
+        default_factory=list
+    )
     inst: str = Field(default="")
     completed_requests: list[CephfsSessionCompletedRequest] = Field(
         default_factory=list
@@ -2495,19 +2498,6 @@ class RGWUserInfoResponse(CephBaseModel):
         return cls.loads(raw)
 
 
-# to resolve forward references
-_ = OSDTree.model_rebuild()
-_ = PGDump.model_rebuild()
-_ = OSDDFResponse.model_rebuild()
-_ = OSDDumpResponse.model_rebuild()
-_ = OSDPerfDumpResponse.model_rebuild()
-_ = CephReport.model_rebuild()
-_ = RGWZoneResponse.model_rebuild()
-_ = RGWBucketListResponse.model_rebuild()
-_ = RGWBucketObjectListResponse.model_rebuild()
-
-
-# to resolve forward references
 _ = OSDTree.model_rebuild()
 _ = PGDump.model_rebuild()
 _ = OSDDFResponse.model_rebuild()
@@ -2515,6 +2505,7 @@ _ = OSDDumpResponse.model_rebuild()
 _ = OSDPerfDumpResponse.model_rebuild()
 _ = CephfsStatusResponse.model_rebuild()
 _ = CephfsMDSStatResponse.model_rebuild()
+_ = CephfsSessionListResponse.model_rebuild()
 _ = CephReport.model_rebuild()
 _ = RGWZoneResponse.model_rebuild()
 _ = RGWBucketListResponse.model_rebuild()
