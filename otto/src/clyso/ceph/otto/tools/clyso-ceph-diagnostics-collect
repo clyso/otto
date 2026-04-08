@@ -12,7 +12,8 @@ QUERY_INACTIVE_PG="${QUERY_INACTIVE_PG:-N}"
 RADOSGW_ADMIN="${RADOSGW_ADMIN:-radosgw-admin}"
 RADOSGW_ADMIN_TIMEOUT="${RADOSGW_ADMIN_TIMEOUT:-60}"
 VERBOSE="${VERBOSE:-N}"
-COLLECT_ALL_OSD_ASOK_STATS="${COLLECT_ALL_OSD_ASOK_STATS:-N}"
+ASOK_STATS_MAX_OSDS="${ASOK_STATS_MAX_OSDS:-100}"
+CRASH_LAST_DAYS="${CRASH_LAST_DAYS:-10}"
 RESET_MDS_PERF_AND_SLEEP="${RESET_MDS_PERF_AND_SLEEP:-0}"
 RESET_MGR_PERF_AND_SLEEP="${RESET_MGR_PERF_AND_SLEEP:-0}"
 RESET_MON_PERF_AND_SLEEP="${RESET_MON_PERF_AND_SLEEP:-0}"
@@ -29,20 +30,24 @@ usage()
     echo
     echo "Options:"
     echo
-    echo "  -h | --help                            print this help and exit"
+    echo "  -a | --archive-name <name>             name of the result archive"
     echo "  -c | --ceph-config-file <file>         ceph configuration file"
+    echo "  -d | --archive-dir <dir>               directory to store result archive"
+    echo "  -h | --help                            print this help and exit"
+    echo "  -m | --asok-stats-max-osds <N>         get data via admin socket (tell) for"
+    echo "                                         not more than N osds (default ${ASOK_STATS_MAX_OSDS})"
     echo "  -q | --query-inactive-pg               query inactive pg"
     echo "  -r | --results-dir <dir>               directory to store result"
+    echo "                                         (deprecated, use -d and -a instead)"
     echo "  -t | --timeout <sec>                   timeout for ceph operations"
-    echo "  -T | --radosgw-admin-timeout <sec>     timeout radosgw-admin operations"
     echo "  -u | --uncensored                      don't hide sensitive data"
     echo "  -v | --verbose                         be verbose"
-    echo "  -a | --all-osd-asok-stats              get data via admin socket (tell)"
-    echo "                                         for all osds"
+    echo "  -C | --crash-last-days <days>          number of days to look for crash logs"
     echo "  -D | --mds-perf-reset-and-sleep <sec>  reset mds perf counters and sleep"
     echo "  -G | --mgr-perf-reset-and-sleep <sec>  reset mgr perf counters and sleep"
     echo "  -M | --mon-perf-reset-and-sleep <sec>  reset mon perf counters and sleep"
     echo "  -O | --osd-perf-reset-and-sleep <sec>  reset osd perf counters and sleep"
+    echo "  -T | --radosgw-admin-timeout <sec>     timeout radosgw-admin operations"
     echo
 }
 
@@ -114,9 +119,21 @@ censor_auth_json() {
     "$@" | jq '.auth_dump |= map(.key = "'"${CENSORED}"'")'
 }
 
+prettyfy_command() {
+    echo "$*" | sed -Ee 's/  +/ /g' \
+                    -Ee 's/--conf[= ][^ ]+ //g' \
+                    -Ee 's/--cluster[= ][^ ]+ //g' \
+                    -Ee 's/--connect-timeout[= ][^ ]+ //g' \
+                    -Ee 's/--timeout[= ][^ ]+ //g' \
+                    -Ee 's/timeout (-v:?)* *[0-9]+ //g' \
+		    -Ee 's/censor_[^ ]+ //g' \
+                    -Ee 's|/|_|g'
+}
+
 store() {
     local skip_json=0
     local json_file_compat=0
+    local cmd
 
     while true; do
         case "$1" in
@@ -154,6 +171,22 @@ store() {
     if [ $json_file_compat -eq 1 ]; then
         ln -sr "${RESULTS_DIR}/${name}.json" "${RESULTS_DIR}/${name}_json"
     fi
+
+    cmd=$(prettyfy_command "$@")
+    ln -sr "${RESULTS_DIR}/${name}" "${RESULTS_DIR}/COMMANDS/${cmd}"
+}
+
+store_tell() {
+    local opt="$1"; shift
+    local daemons="$1"; shift
+    local t="$1"; shift
+    local name="$1"; shift
+    local d
+
+    for d in ${daemons}; do
+	store ${opt} ${t}-${d}-${name} ${CEPH} tell ${d} "$@" &
+    done
+    wait
 }
 
 show_stored() {
@@ -199,7 +232,7 @@ get_ceph_info() {
 
 get_health_info() {
     local t=cluster_health
-    local id
+    local id oldest
 
     info "collecting cluster health info ..."
 
@@ -210,15 +243,23 @@ get_health_info() {
     store -s ${t}-report          ${CEPH} report
     store    ${t}-crash_ls        ${CEPH} crash ls
     store    ${t}-balancer-status ${CEPH} balancer status
+    store -s ${t}-service-status  ${CEPH} service status
 
+    if [ "${CRASH_LAST_DAYS}" -gt 0 ]; then
+        oldest=$(date -d "-${CRASH_LAST_DAYS} days" +%F)
+    else
+        oldest=''
+    fi
     show_stored ${t}-crash_ls | grep -o '^[0-9][^ ]*' |
     while read id; do
+        test "${id}" '<' "${oldest}" && continue
         store -s ${t}-crash_info_${id} ${CEPH} crash info ${id}
     done
 }
 
 get_monitor_info() {
     local t=monitor_info
+    local mons
 
     info "collecting monitor info ..."
 
@@ -227,25 +268,23 @@ get_monitor_info() {
     store -s ${t}-map      ${CEPH} mon getmap
     store -s ${t}-metadata ${CEPH} mon metadata
 
+    mons=$(show_stored ${t}-dump | sed -nEe 's/^.* (mon\..*)$/\1/p')
+
     if [ "${RESET_MON_PERF_AND_SLEEP}" -gt 0 ]; then
-        store -S ${t}-perf_reset ${CEPH} tell mon.\* perf reset all
+        store_tell -S "${mons}" ${t} perf_reset perf reset all
         info "sleeping for ${RESET_MON_PERF_AND_SLEEP} sec after reseting mon perf counters ..."
         sleep ${RESET_MON_PERF_AND_SLEEP}
     fi
 
-    show_stored ${t}-dump |
-    sed -nEe 's/^.* (mon\..*)$/\1/p' |
-    while read mon; do
-        store -s ${t}-${mon}-config_diff            ${CEPH} tell ${mon} config diff
-        store -s ${t}-${mon}-config_show            ${CEPH} tell ${mon} config show
-        store -s ${t}-${mon}-dump_historic_ops      ${CEPH} tell ${mon} dump_historic_ops
-        store -s ${t}-${mon}-dump_historic_slow_ops ${CEPH} tell ${mon} dump_historic_slow_ops
-        store -s ${t}-${mon}-dump_mempools          ${CEPH} tell ${mon} dump_mempools
-        store -s ${t}-${mon}-mon_status             ${CEPH} tell ${mon} mon_status
-        store -s ${t}-${mon}-ops                    ${CEPH} tell ${mon} ops
-        store -s ${t}-${mon}-perf_dump              ${CEPH} tell ${mon} perf dump
-        store -s ${t}-${mon}-sessions               ${CEPH} tell ${mon} sessions
-    done
+    store_tell -s "${mons}" ${t} config_diff            config diff
+    store_tell -s "${mons}" ${t} config_show            config show
+    store_tell -s "${mons}" ${t} dump_historic_ops      dump_historic_ops
+    store_tell -s "${mons}" ${t} dump_historic_slow_ops dump_historic_slow_ops
+    store_tell -s "${mons}" ${t} dump_mempools          dump_mempools
+    store_tell -s "${mons}" ${t} mon_status             mon_status
+    store_tell -s "${mons}" ${t} ops                    ops
+    store_tell -s "${mons}" ${t} perf_dump              perf dump
+    store_tell -s "${mons}" ${t} sessions               sessions
 }
 
 get_device_info() {
@@ -258,6 +297,7 @@ get_device_info() {
 
 get_manager_info() {
     local t=manager_info
+    local mgrs
 
     info "collecting manager info ..."
 
@@ -265,28 +305,28 @@ get_manager_info() {
     store -s ${t}-dump    ${CEPH} mgr dump
     store -s ${t}-metadata   ${CEPH} mgr metadata
 
+    mgrs=$(show_stored ${t}-dump |
+           sed -nEe 's/^.*"active_name": "([^"]*)".*$/mgr.\1/p')
+
     if [ "${RESET_MGR_PERF_AND_SLEEP}" -gt 0 ]; then
-        store -S ${t}-perf_reset ${CEPH} tell mgr.\* perf reset all
+        store_tell -S "${mgrs}" ${t} perf_reset perf reset all
         info "sleeping for ${RESET_MGR_PERF_AND_SLEEP} sec after reseting mgr perf counters ..."
         sleep ${RESET_MGR_PERF_AND_SLEEP}
     fi
 
-    show_stored ${t}-dump |
-    sed -nEe 's/^.*"active_name": "([^"]*)".*$/mgr.\1/p' |
-    while read mgr; do
-        store -s ${t}-${mgr}-mds_requests  ${CEPH} tell ${mgr} mds_requests
-        store -s ${t}-${mgr}-config_diff   ${CEPH} tell ${mgr} config diff
-        store -s ${t}-${mgr}-config_show   ${CEPH} tell ${mgr} config show
-        store -s ${t}-${mgr}-dump_cache    ${CEPH} tell ${mgr} dump_cache
-        store -s ${t}-${mgr}-dump_mempools ${CEPH} tell ${mgr} dump_mempools
-        store -s ${t}-${mgr}-mgr_status    ${CEPH} tell ${mgr} mgr_status
-        store -s ${t}-${mgr}-perf_dump     ${CEPH} tell ${mgr} perf dump
-        store -s ${t}-${mgr}-status        ${CEPH} tell ${mgr} status
-    done
+    store_tell -s "${mgrs}" ${t} mds_requests  mds_requests
+    store_tell -s "${mgrs}" ${t} config_diff   config diff
+    store_tell -s "${mgrs}" ${t} config_show   config show
+    store_tell -s "${mgrs}" ${t} dump_cache    dump_cache
+    store_tell -s "${mgrs}" ${t} dump_mempools dump_mempools
+    store_tell -s "${mgrs}" ${t} mgr_status    mgr_status
+    store_tell -s "${mgrs}" ${t} perf_dump     perf dump
+    store_tell -s "${mgrs}" ${t} status        status
 }
 
 get_osd_info() {
     local t=osd_info
+    local osds
 
     info "collecting osd info ..."
 
@@ -302,43 +342,39 @@ get_osd_info() {
 
     show_stored ${t}-crushmap | store ${t}-crushmap.txt crushtool -d -
 
-    if [ "${RESET_OSD_PERF_AND_SLEEP}" -gt 0 ]; then
-        store -S ${t}-perf_reset ${CEPH} tell osd.\* perf reset all
-        info "sleeping for ${RESET_OSD_PERF_AND_SLEEP} sec after reseting osd perf counters ..."
-        sleep ${RESET_OSD_PERF_AND_SLEEP}
-    fi
-
-    # Sort osds by weight and collect stats for one of every class
-    # with highest weight, unless COLLECT_ALL_OSD_ASOK_STATS is set,
-    # in which case stats for all osds are collected.
+    # Sort osds by weight and collect stats for up to ASOK_STATS_MAX_OSDS
+    # of every class with highest weight.
     # The sort and awk commands below parse lines like this:
     #
     #   99    ssd     0.21799          osd.99               up   1.00000  1.00000
     #
-    show_stored ${t}-tree | sort -n -k 3 |
-    awk -v a=$(test "${COLLECT_ALL_OSD_ASOK_STATS}" = Y && echo 1) '
-        $5 == "up" && $6 > 0.8 {
-            if (a) {print $4} else {o[$2] = $4}
-        }
-        END {
-            if (!a) {
-                for (c in o) print o[c]
-             }
-        }' |
-    while read osd; do
-        store -s ${t}-${osd}-cache_status            ${CEPH} tell ${osd} cache status
-        store -s ${t}-${osd}-config_diff             ${CEPH} tell ${osd} config diff
-        store -s ${t}-${osd}-config_show             ${CEPH} tell ${osd} config show
-        store -s ${t}-${osd}-dump_historic_ops       ${CEPH} tell ${osd} dump_historic_ops
-        store -s ${t}-${osd}-dump_historic_slow_ops  ${CEPH} tell ${osd} dump_historic_slow_ops
-        store -s ${t}-${osd}-dump_mempools           ${CEPH} tell ${osd} dump_mempools
-        store -s ${t}-${osd}-dump_ops_in_flight      ${CEPH} tell ${osd} dump_ops_in_flight
-        store -s ${t}-${osd}-dump_osd_network        ${CEPH} tell ${osd} dump_osd_network
-        store -s ${t}-${osd}-dump_scrub_reservations ${CEPH} tell ${osd} dump_scrub_reservations
-        store -s ${t}-${osd}-dump_scrubs             ${CEPH} tell ${osd} dump_scrubs
-        store -s ${t}-${osd}-perf_dump               ${CEPH} tell ${osd} perf dump
-        store -s ${t}-${osd}-status                  ${CEPH} tell ${osd} status
-    done
+    osds=$(show_stored ${t}-tree | sort -nrk 3 |
+           awk -v max_osds=${ASOK_STATS_MAX_OSDS} '
+               n[$2] < max_osds && $5 == "up" && $6 > 0.1 {
+                   print $4;
+                   n[$2]++;
+               }'
+         )
+
+    if [ "${RESET_OSD_PERF_AND_SLEEP}" -gt 0 ]; then
+        store_tell -S "${osds}" ${t} perf_reset perf reset all
+        info "sleeping for ${RESET_OSD_PERF_AND_SLEEP} sec after reseting osd perf counters ..."
+        sleep ${RESET_OSD_PERF_AND_SLEEP}
+    fi
+
+    store_tell -s "${osds}" ${t} cache_status                      cache status
+    store_tell -s "${osds}" ${t} config_diff                       config diff
+    store_tell -s "${osds}" ${t} config_show                       config show
+    store_tell -s "${osds}" ${t} dump_historic_ops                 dump_historic_ops
+    store_tell -s "${osds}" ${t} dump_historic_slow_ops            dump_historic_slow_ops
+    store_tell -s "${osds}" ${t} dump_mempools                     dump_mempools
+    store_tell -s "${osds}" ${t} dump_ops_in_flight                dump_ops_in_flight
+    store_tell -s "${osds}" ${t} dump_osd_network                  dump_osd_network
+    store_tell -s "${osds}" ${t} dump_scrub_reservations           dump_scrub_reservations
+    store_tell -s "${osds}" ${t} dump_scrubs                       dump_scrubs
+    store_tell -s "${osds}" ${t} perf_dump                         perf dump
+    store_tell -s "${osds}" ${t} status                            status
+    store_tell -s "${osds}" ${t} bluestore_allocator_fragmentation bluestore allocator fragmentation block
 }
 
 get_pg_info() {
@@ -371,7 +407,7 @@ get_mds_info() {
 
 get_fs_info() {
     local t=fs_info
-    local mds
+    local mdss
 
     info "collecting fs info ..."
 
@@ -379,29 +415,28 @@ get_fs_info() {
     store ${t}-status ${CEPH} fs status
     store ${t}-dump   ${CEPH} fs dump
 
+    mdss=$(show_stored ${t}-dump |
+           sed -nEe 's/^\[(mds\.[^{]*).*state up:active.*/\1/p')
+
     if [ "${RESET_MDS_PERF_AND_SLEEP}" -gt 0 ]; then
-        store -S ${t}-perf_reset ${CEPH} tell mds.\* perf reset all
+        store_tell -S "${mdss}" ${t} perf_reset perf reset all
         info "sleeping for ${RESET_MDS_PERF_AND_SLEEP} sec after reseting mds perf counters ..."
         sleep ${RESET_MDS_PERF_AND_SLEEP}
     fi
 
-    show_stored ${t}-dump |
-    sed -nEe 's/^\[(mds\.[^{]*).*state up:active.*/\1/p' |
-    while read mds; do
-        store -s ${t}-${mds}-cache_status       ${CEPH} tell ${mds} cache status
-        store -s ${t}-${mds}-dump_historic_ops  ${CEPH} tell ${mds} dump_historic_ops
-        store -s ${t}-${mds}-dump_loads         ${CEPH} tell ${mds} dump loads
-        store -s ${t}-${mds}-dump_mempools      ${CEPH} tell ${mds} dump_mempools
-        store -s ${t}-${mds}-dump_ops_in_flight ${CEPH} tell ${mds} dump_ops_in_flight
-        store -s ${t}-${mds}-perf_dump          ${CEPH} tell ${mds} perf dump
-        store -s ${t}-${mds}-scrub_status       ${CEPH} tell ${mds} scrub status
-        store -s ${t}-${mds}-session_ls         ${CEPH} tell ${mds} session ls
-        store -s ${t}-${mds}-status             ${CEPH} tell ${mds} status
-        store -s ${t}-${mds}-config_diff        ${CEPH} tell ${mds} config diff
-        store -s ${t}-${mds}-config_show        ${CEPH} tell ${mds} config show
-        store -s ${t}-${mds}-damage_ls          ${CEPH} tell ${mds} damage ls
-        store -s ${t}-${mds}-dump_blocked_ops   ${CEPH} tell ${mds} dump_blocked_ops
-    done
+    store_tell -s "${mdss}" ${t} cache_status       cache status
+    store_tell -s "${mdss}" ${t} dump_historic_ops  dump_historic_ops
+    store_tell -s "${mdss}" ${t} dump_loads         dump loads
+    store_tell -s "${mdss}" ${t} dump_mempools      dump_mempools
+    store_tell -s "${mdss}" ${t} dump_ops_in_flight dump_ops_in_flight
+    store_tell -s "${mdss}" ${t} perf_dump          perf dump
+    store_tell -s "${mdss}" ${t} scrub_status       scrub status
+    store_tell -s "${mdss}" ${t} session_ls         session ls
+    store_tell -s "${mdss}" ${t} status             status
+    store_tell -s "${mdss}" ${t} config_diff        config diff
+    store_tell -s "${mdss}" ${t} config_show        config show
+    store_tell -s "${mdss}" ${t} damage_ls          damage ls
+    store_tell -s "${mdss}" ${t} dump_blocked_ops   dump_blocked_ops
 }
 
 get_radosgw_admin_info() {
@@ -439,6 +474,21 @@ get_orch_info() {
     store -S ${t}-ls_yaml ${CEPH} orch ls --format yaml
     store    ${t}-ps ${CEPH} orch ps
     store    ${t}-host ${CEPH} orch host ls
+}
+
+get_prometheus_info() {
+    local t=prometheus_info
+    local target
+
+    info "collecting prometheus info ..."
+
+    store    ${t}-healthcheck_history_ls ${CEPH} healthcheck history ls
+    store -s ${t}-file_sd_config         ${CEPH} prometheus file_sd_config
+
+    show_stored ${t}-file_sd_config | jq -r '.[].targets[]' | sort -u |
+    while read target; do
+        store -S ${t}-${target}-metrics curl http://${target}/metrics
+    done
 }
 
 archive_result() {
@@ -484,7 +534,7 @@ archive_result() {
 # Main
 #
 
-OPTIONS=$(getopt -o ac:hqr:t:uvD:G:M:O:T:V --long all-osd-asok-stats,ceph-config-file:,help,query-inactive-pg,results-dir:,timeout:,uncensored,verbose,mds-perf-reset-and-sleep:,mgr-perf-reset-and-sleep:,mon-perf-reset-and-sleep:,osd-perf-reset-and-sleep:,radosgw-admin-timeout:,version -- "$@")
+OPTIONS=$(getopt -o a:c:d:hm:qr:t:uvC:D:G:M:O:T:V --long archive-name:,archive-dir:,asok-stats-max-osds:,ceph-config-file:,crash-last-days:,help,query-inactive-pg,results-dir:,timeout:,uncensored,verbose,mds-perf-reset-and-sleep:,mgr-perf-reset-and-sleep:,mon-perf-reset-and-sleep:,osd-perf-reset-and-sleep:,radosgw-admin-timeout:,version -- "$@")
 if [ $? -ne 0 ]; then
     usage >&2
     exit 1
@@ -497,13 +547,21 @@ while true; do
             usage
             exit 0
             ;;
+	-a|--archive-name)
+	    ARCHIVE_NAME="$2"
+	    shift 2
+	    ;;
         -c|--ceph-config-file)
             CEPH_CONFIG_FILE="$2"
             shift 2
             ;;
-        -a|--all-osd-asok-stats)
-            COLLECT_ALL_OSD_ASOK_STATS=Y
-            shift
+	-d|--archive-dir)
+	    ARCHIVE_DIR="$2"
+	    shift 2
+	    ;;
+        -m|--asok-stats-max-osds)
+            ASOK_STATS_MAX_OSDS="$2"
+            shift 2
             ;;
         -q|--query-inactive-pg)
             QUERY_INACTIVE_PG=Y
@@ -517,10 +575,6 @@ while true; do
             CEPH_TIMEOUT="$2"
             shift 2
             ;;
-        -T|--radosgw-admin-timeout)
-            RADOSGW_ADMIN_TIMEOUT="$2"
-            shift 2
-            ;;
         -u|--uncensored)
             CENSORED=
             shift
@@ -528,6 +582,10 @@ while true; do
         -v|--verbose)
             VERBOSE=Y
             shift
+            ;;
+        -C|--crash-last-days)
+            CRASH_LAST_DAYS="$2"
+            shift 2
             ;;
         -D|--mds-perf-reset-and-sleep)
             RESET_MDS_PERF_AND_SLEEP="$2"
@@ -545,10 +603,14 @@ while true; do
             RESET_OSD_PERF_AND_SLEEP="$2"
             shift 2
             ;;
-	-V|--version)
-	    version
-	    exit 0
-	    ;;
+        -T|--radosgw-admin-timeout)
+            RADOSGW_ADMIN_TIMEOUT="$2"
+            shift 2
+            ;;
+        -V|--version)
+            version
+            exit 0
+            ;;
         --)
             shift
             break
@@ -571,6 +633,12 @@ if [ "${VERBOSE}" = Y ]; then
     set -x
 fi
 
+# check `jq` is available
+if ! which jq > /dev/null 2>&1; then
+    echo "jq command not found, please install jq package" >&2
+    exit 1
+fi
+
 CEPH="${CEPH} --conf=${CEPH_CONFIG_FILE} --connect-timeout=${CEPH_TIMEOUT}"
 RADOSGW_ADMIN="${RADOSGW_ADMIN} --conf=${CEPH_CONFIG_FILE}"
 
@@ -585,11 +653,39 @@ if `which timeout > /dev/null 2>&1`; then
     RADOSGW_ADMIN="timeout ${verbose_opt} ${RADOSGW_ADMIN_TIMEOUT} ${RADOSGW_ADMIN}"
 fi
 
-if [ -n "${RESULTS_DIR}" ]; then
-    mkdir -p "${RESULTS_DIR}"
+if [ -n "${ARCHIVE_NAME}" -o -n "${ARCHIVE_DIR}" ]; then
+    if [ -n "${RESULTS_DIR}" ]; then
+        echo "Cannot use both --results-dir and --archive-name|dir" \
+             "options simultaneously" >&2
+        exit 1
+    fi
+    if [ -z "${ARCHIVE_DIR}" ]; then
+        ARCHIVE_DIR="/tmp"
+    fi
+    if [ -n "${ARCHIVE_NAME}" ]; then
+        RESULTS_DIR="${ARCHIVE_DIR}/${ARCHIVE_NAME}"
+        if [ -e "${RESULTS_DIR}" ]; then
+            echo "Cannot use ${RESULTS_DIR} as directory for storing results:" \
+                 "already exists" >&2
+            exit 1
+        fi
+        mkdir "${RESULTS_DIR}"
+    else
+        RESULTS_DIR=$(mktemp -d "${ARCHIVE_DIR}/ceph-collect_$(date +%Y%m%d_%H%I%S)-XXX")
+    fi
+elif [ -n "${RESULTS_DIR}" ]; then
+    echo "WARNING: --results-dir option is deprecated, please use" \
+         "--archive-name and --archive-dir options instead" >&2
+    if [ -e "${RESULTS_DIR}" ]; then
+        echo "Cannot use ${RESULTS_DIR} as directory for storing results:" \
+             "already exists" >&2
+        exit 1
+    fi
+    mkdir "${RESULTS_DIR}"
 else
     RESULTS_DIR=$(mktemp -d /tmp/ceph-collect_$(date +%Y%m%d_%H%I%S)-XXX)
 fi
+mkdir  "${RESULTS_DIR}"/COMMANDS
 
 trap cleanup INT TERM EXIT
 
@@ -606,5 +702,6 @@ get_mds_info
 get_fs_info
 get_radosgw_admin_info
 get_orch_info
+get_prometheus_info
 
 archive_result
