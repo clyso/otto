@@ -28,7 +28,7 @@ For more information on how this gets built see the [Development Guide - Binary 
 
 ```bash
 ceph report > report.json
-otto cluster checkup --ceph_report_json=report.json
+otto checkup --ceph_report_json=report.json
 ```
 
 Example output:
