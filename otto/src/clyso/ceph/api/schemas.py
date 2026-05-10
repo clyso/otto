@@ -1772,7 +1772,7 @@ class MonInfo(CephBaseModel):
     addr: str = Field(default="")
     priority: int = Field(default=0)
     weight: int = Field(default=0)
-    crush_location: str = Field(default="")
+    crush_location: str | list[Any] = Field(default_factory=list)
 
 
 class MonMap(CephBaseModel):
