@@ -130,8 +130,8 @@ class CephFacts:
             return False
 
         first_osd = osds[0]
-        public_ip: str = first_osd.get("public_addr", "").split(":")[0]
-        cluster_ip: str = first_osd.get("cluster_addr", "").split(":")[0]
+        public_ip: str = first_osd.public_addr.split(":")[0]
+        cluster_ip: str = first_osd.cluster_addr.split(":")[0]
         return public_ip != cluster_ip
 
 
