@@ -1,9 +1,8 @@
 ---
 
-# versions: x.y.z are supportable ceph version clyso recommends
-# a version is marked old if there is no 'version' key
-# recommended: is default to false, put true if the version is recommended
-# IMPORTANT: Don't forget to update the Customer Support Portal FAQ article at: https://support.clyso.com/otrs/index.pl?Action=AgentFAQZoom;ItemID=35
+# A Ceph release is flagged as 'old' if the 'version' key is missing.
+# The 'recommended' key defaults to false; it is set to true only if Clyso recommends this version for production environments.
+# IMPORTANT: If you modify this, please update the corresponding Customer Support Portal FAQ article at: https://support.clyso.com/otrs/index.pl?Action=AgentFAQZoom;ItemID=35
 
 releases:
   v9:
@@ -28,19 +27,21 @@ releases:
   v17:
     name: quincy
     version: 17.2.7
-    recommended: true
   v18:
     name: reef
-    version: 18.2.7
+    version: 18.2.8
     recommended: true
   v19:
     name: squid
     version: 19.2.3
+    recommended: true
+    caveats:
+        - See https://docs.clyso.com/docs/kb/known-bugs/squid/#squid-deployed-osds-are-crashing    
   v20:
     name: tentacle
-    version: 20.2.0
+    version: 20.2.1
   v21:
-    name: u
+    name: umbrella
   v22:
     name: v
   v23:
