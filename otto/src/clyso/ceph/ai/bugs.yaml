@@ -1,5 +1,8 @@
 ---
-last_updated: '1 May 2025'
+# NOTE: affected_versions entries are matched with fnmatch, where [...] is a
+# single-character class. Ranges like [0-10] or [11-12] will NOT expand as
+# expected — list multi-digit versions explicitly (e.g. 16.2.10, 16.2.11).
+last_updated: '14 April 2026'
 bugs:
   - name: PG Splitting/Merging Causes OSD Out-Of-Memory
     description: A bug in the PG splitting and merging code can cause the OSD to go out-of-memory, a condition which persists even after restart. Offline tools are available in fixed releases to workaround the issue. See https://tracker.ceph.com/issues/53729.
@@ -7,20 +10,37 @@ bugs:
     severity: high
     affected_versions:
       - 15.2.*
-      - 16.2.[0-10]
-      - 17.2.[0-3]
+      - 16.2.0
+      - 16.2.1
+      - 16.2.2
+      - 16.2.3
+      - 16.2.4
+      - 16.2.5
+      - 16.2.6
+      - 16.2.7
+      - 16.2.8
+      - 16.2.9
+      - 16.2.10
+      - 17.2.0
+      - 17.2.1
+      - 17.2.2
+      - 17.2.3
   - name: Pacific Broken Hotfixes
     description: Version 16.2.11 has a bug in ceph-volume osd activation, which was meant to be hotfixed in 16.2.12 but that release was built incorrectly, including changes which did not pass the rigorous QA testing.
     severity: high
     recommendation: It is recommended to upgrade to version 16.2.13 or later.
     affected_versions:
-      - 16.2.[11-12]
+      - 16.2.11
+      - 16.2.12
   - name: Squid deployed OSDs are crashing
-    description: OSDs created in v19 may crash. See https://tracker.ceph.com/issues/70390. The issue affects only newly deployed OSDs using Squid, while previously deployed OSDs run fine. It is likely caused by the Elastic Shared Blob implementation introduced in this PR https://github.com/ceph/ceph/pull/53178, and ceph-bluestore-tool repair cannot fix it.
+    description: OSDs created in v19 may crash. See https://tracker.ceph.com/issues/70390. The issue affects only newly deployed OSDs using Squid, while previously deployed OSDs run fine. It is likely caused by the Elastic Shared Blob implementation introduced in this PR https://github.com/ceph/ceph/pull/53178, and ceph-bluestore-tool repair cannot fix it. In rare cases, can lead to silent data corruption in the OSD.
     severity: critical
-    recommendation: For now, run "ceph config set osd bluestore_elastic_shared_blobs 0" on any Squid cluster before adding new OSDs. Unfortunately, this will not help OSDs already deployed in Squid—the only known fix for them is redeployment.
+    recommendation: Run "ceph config set osd bluestore_elastic_shared_blobs 0" on any Squid cluster before adding new OSDs. If you created any OSDs using v19.2.0-v19.2.3 with bluestore_elastic_shared_blobs enabled (default), completely recreate those specific OSDs to ensure data integrity. Ceph v19.2.4 contains a patch that prevents new corruptions but cannot detect or repair existing silent corruptions on OSDs created during the affected release window.
     affected_versions:
-      - 19.2.*
+      - 19.2.0
+      - 19.2.1
+      - 19.2.2
+      - 19.2.3
   - name: BlueStore Potential Corruption
     description: Some versions of Ceph were released with a bug that may cause OSDs to crash and corrupt the on-disk data. Upstream ticket https://tracker.ceph.com/issues/69764
     severity: critical
@@ -39,5 +59,48 @@ bugs:
     recommendation:
       Upgrade to a fixed version when available, or avoid using
       DeleteBucketLifecycle API in affected versions.
+    affected_versions:
+      - 19.2.3
+  - name: RadosGW --bypass-gc Data Loss Bug
+    description: A long-standing data loss bug with "--bypass-gc" causes deletion of copied object data. If any of the deleted objects had been copied to/from other buckets, --bypass-gc deletes the data of those copies too. As a result, the copies are still visible to ListObjects requests but GetObject requests fail with NoSuchKey. See https://tracker.ceph.com/issues/73348.
+    severity: critical
+    recommendation: Use "radosgw-admin bucket rm" without --bypass-gc, which correctly handles copied objects. Fixed in 18.2.8 and 20.2.1. If --bypass-gc has been used in the past, audit buckets for objects with missing data.
+    affected_versions:
+      - 17.2.*
+      - 18.2.*
+      - 19.2.0
+      - 19.2.1
+      - 19.2.2
+      - 19.2.3
+  - name: OSD Crash When Enabling EC Optimizations on CephFS
+    description: OSDs crash when "allow_ec_optimizations" is enabled on an existing CephFS Erasure Coded (EC) data pool that does not have "allow_ec_overwrites" explicitly enabled. The crash occurs in ECTransaction::WritePlanObj when accessing a non-existent transaction key. See https://tracker.ceph.com/issues/71642.
+    severity: high
+    recommendation: Wait for future tentacle releases. See the Clyso blog post "tentacle-v20.2.0-ec-bug" for details.
+    affected_versions:
+      - 20.2.0
+  - name: FastEC Scrub Errors After Recovery
+    description: After recovering from the EC optimization crash, clusters may experience excessive scrub errors with messages like "candidate size X info size Y mismatch". This is a secondary issue related to the FastEC code path. See https://tracker.ceph.com/issues/73184.
+    severity: medium
+    recommendation: Wait for future tentacle releases. Apply patches from https://github.com/ceph/ceph/pull/65872 and https://github.com/ceph/ceph/pull/65788.
+    affected_versions:
+      - 20.2.0
+  - name: New or Recreated OSD Missing DB Device with Hybrid Spec
+    description: 'When using a hybrid OSD spec (HDDs for data, SSDs/NVMe for DB devices), newly created or recreated OSDs are deployed without a DB device. The "ceph-volume lvm batch" command issued by the orchestrator omits the "--db-device" argument. The root cause is a regression introduced by the fix for tracker #68576 - the "ceph_device" attribute in ceph-volume inventory JSON output was renamed to "ceph_device_lvm", causing the selector to treat all existing RocksDB volumes as unavailable. See https://tracker.ceph.com/issues/72696.'
+    severity: medium
+    recommendation: A patch is available in https://github.com/ceph/ceph/pull/65986. Follow the bug tracker for fix and backport updates.
+    affected_versions:
+      - 19.2.3
+      - 20.2.0
+      - 20.2.1
+  - name: Reading from clone snapshot after concurrent flattening returns zeros
+    description: When an RBD image with an object map is created and filled with non-zero data, a clone is created, a snapshot is created on the clone and remains open, and then the clone is flattened - data read from the cloned snapshot that was opened before flattening returns zeros instead of the expected data from the parent image. See https://tracker.ceph.com/issues/74554.
+    severity: medium
+    recommendation: TBD.
+    affected_versions:
+      - 19.2.*
+  - name: cephadm Changes Ownership of Crash Directories When Deploying Monitoring Daemons
+    description: When deploying monitoring daemons (e.g., Grafana) to a host that already has Ceph daemons running, cephadm incorrectly changes the ownership of the /var/lib/ceph/<fsid>/crash and /var/lib/ceph/<fsid>/crash/posted directories to match the monitoring daemon's UID/GID. This prevents the ceph-crash daemon and other Ceph daemons from posting crash reports, as they run as user 'ceph' and can no longer access these directories. See https://github.com/ceph/ceph/pull/66559.
+    severity: high
+    recommendation: As a workaround, create a cron job or systemd timer that periodically fixes ownership, e.g., "chown -R 167:167 /var/lib/ceph/<fsid>/crash/" and "chown 167:167 /var/lib/ceph/<fsid>". A patch is pending review upstream.
     affected_versions:
       - 19.2.3
