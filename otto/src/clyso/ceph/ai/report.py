@@ -69,7 +69,7 @@ def check_report_version(result: AIResult, data: CephData) -> None:
         return _handle_very_old_version(result, ver, recommended_versions())
 
     if release_info.get("version") == ver and release_info.get("recommended", False):
-        return _handle_recommended_version(result, ver)
+        return _handle_recommended_version(result, ver, release_info.get("caveats"))
 
     return _handle_non_recommended_version(
         result, ver, recommended_versions(), release_info.get("version")
@@ -86,7 +86,21 @@ def _handle_very_old_version(result, ver, rec_versions) -> None:
     result.add_check_result("Version", "Release", "FAIL", summary, detail, recommend)
 
 
-def _handle_recommended_version(result, ver) -> None:
+def _handle_recommended_version(result, ver, caveats=None) -> None:
+    if caveats:
+        summary = f"Running recommended stable release {ver}, but with caveats"
+        detail = [
+            f"Cluster is running {ver}. This is one of the recommended stable releases, however the following caveats apply:"
+        ]
+        recommend = []
+        for caveat in caveats:
+            detail.append(f"- {caveat}")
+            recommend.append(caveat)
+        result.add_check_result(
+            "Version", "Release", "WARN", summary, detail, recommend
+        )
+        return
+
     summary = f"Running a recommended stable release {ver}"
     detail = [
         f"Cluster is running {ver}. This is one of the recommended stable releases."
