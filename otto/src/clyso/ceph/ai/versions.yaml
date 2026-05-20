@@ -7,36 +7,46 @@
 releases:
   v9:
     name: infernalis
+    eol: true
   v10:
     name: jewel
+    eol: true
   v11:
     name: kraken
+    eol: true
   v12:
     name: luminous
+    eol: true
   v13:
     name: mimic
+    eol: true
   v14:
     name: nautilus
     version: 14.2.22
+    eol: true
   v15:
     name: octopus
     version: 15.2.17
+    eol: true
   v16:
     name: pacific
     version: 16.2.15
+    eol: true
   v17:
     name: quincy
     version: 17.2.7
+    eol: true
   v18:
     name: reef
     version: 18.2.8
+    eol: true
     recommended: true
   v19:
     name: squid
     version: 19.2.3
     recommended: true
     caveats:
-        - See https://docs.clyso.com/docs/kb/known-bugs/squid/#squid-deployed-osds-are-crashing    
+        - See https://docs.clyso.com/docs/kb/known-bugs/squid/#squid-deployed-osds-are-crashing
   v20:
     name: tentacle
     version: 20.2.1

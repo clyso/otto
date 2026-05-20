@@ -152,28 +152,35 @@ def check_report_known_bugs(result: AIResult, data: CephData) -> None:
 
     summary = "No known severe bugs in running release"
 
-    (last_updated, bugs) = known_bugs(report.version, "low")
-    for bug in bugs:
-        passfail = "WARN"
-        summary = f"Info: Found {len(bugs)} low severity issue(s) in running version {report.version}"
-        detail.append(
-            f"{bug['name']} (severity: {bug['severity']}): {bug['description']}"
-        )
-        recommend.append(
-            f"{bug['name']} (severity: {bug['severity']}): {bug['recommendation']}"
-        )
-
-    (last_updated, bugs) = known_bugs(report.version, "high")
+    # Check for critical severity bugs (trigger FAIL)
+    (last_updated, bugs) = known_bugs(report.version, "critical")
     for bug in bugs:
         passfail = "FAIL"
-        summary = f"CRITICAL: Found {len(bugs)} high severity bugs(s) in running version {report.version}"
+        summary = f"CRITICAL: Found {len(bugs)} critical severity bug(s) in running version {report.version}"
+        tracker_info = f" (Tracker: {bug['tracker']})" if bug.get("tracker") else ""
         detail.append(
-            f"{bug['name']} (severity: {bug['severity']}): {bug['description']}"
+            f"{bug['name']} (severity: {bug['severity']}){tracker_info}: {bug['description']}"
         )
         recommend.append(
             f"{bug['name']} (severity: {bug['severity']}): {bug['recommendation']}"
         )
         result.force_fail = True
+
+    # Check for medium and low severity bugs (both trigger WARN)
+    for severity_level in ["medium", "low"]:
+        (last_updated, bugs) = known_bugs(report.version, severity_level)
+        for bug in bugs:
+            if passfail == "PASS":
+                passfail = "WARN"
+            severity_label = "Warning" if severity_level == "medium" else "Info"
+            summary = f"{severity_label}: Found {len(bugs)} {severity_level} severity issue(s) in running version {report.version}"
+            tracker_info = f" (Tracker: {bug['tracker']})" if bug.get("tracker") else ""
+            detail.append(
+                f"{bug['name']} (severity: {bug['severity']}){tracker_info}: {bug['description']}"
+            )
+            recommend.append(
+                f"{bug['name']} (severity: {bug['severity']}): {bug['recommendation']}"
+            )
 
     result.add_check_result(section, check, passfail, summary, detail, recommend)
 

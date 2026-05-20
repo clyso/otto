@@ -61,12 +61,12 @@
         {
           "id": "Check for Known Issues in Running Version",
           "result": "FAIL",
-          "summary": "CRITICAL: Found 1 high severity bugs(s) in running version 16.2.9-2",
+          "summary": "CRITICAL: Found 1 critical severity bug(s) in running version 16.2.9-2",
           "detail": [
-            "PG Splitting/Merging Causes OSD Out-Of-Memory (severity: high): A bug in the PG splitting and merging code can cause the OSD to go out-of-memory, a condition which persists even after restart. Offline tools are available in fixed releases to workaround the issue. See https://tracker.ceph.com/issues/53729."
+            "PG Splitting/Merging Causes OSD Out-Of-Memory (severity: critical) (Tracker: https://tracker.ceph.com/issues/53729): A bug in the PG splitting and merging code can cause the OSD to go out-of-memory, a condition which persists even after restart. Offline tools are available in fixed releases to workaround the issue."
           ],
           "recommend": [
-            "PG Splitting/Merging Causes OSD Out-Of-Memory (severity: high): Do not change pg_num for any pool until after upgrade to a fixed release. Disable the pg autoscaler. Fixed in v16.2.11 and v17.2.4."
+            "PG Splitting/Merging Causes OSD Out-Of-Memory (severity: critical): Do not change pg_num for any pool until after upgrade to a fixed release. Disable the pg autoscaler. Fixed in v16.2.11 and v17.2.4."
           ]
         },
         {
