@@ -752,7 +752,7 @@ def simulate(args, domains=None):
     vprint(f"MTTDL/Durability Estimates:")
     vprint(f"    Mean time to {num_osds_to_fail}x failure: {format_time(mtt_multi_failure)}")
     vprint(f"    Probability that {num_osds_to_fail}x failures causes data loss: {loss_rate*100:.3g}% (1 in {format_int(inv_loss_rate)})")
-    vprint(f"       95% CI: {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}% (1 in {format_int(inv_max_loss_rate)} to 1 in {format_int(inv_min_loss_rate)})")
+    vprint(f"       99.9% CI: {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}% (1 in {format_int(inv_max_loss_rate)} to 1 in {format_int(inv_min_loss_rate)})")
 
     vprint("")
     vprint(f"Combining the above to estimate annual data loss:")
@@ -772,11 +772,11 @@ def simulate(args, domains=None):
     try:
         max_mttdl_sec = 31536000/min_expected_losses_per_year
         print(f"    MTTDL: {format_time(mttdl_sec)}")
-        vprint(f"    (95% CI: {format_time(min_mttdl_sec)} - {format_time(max_mttdl_sec)})")
+        vprint(f"    (99.9% CI: {format_time(min_mttdl_sec)} - {format_time(max_mttdl_sec)})")
     except ZeroDivisionError:
         max_mttdl_sec = float('inf')
         print(f"    MTTDL: {format_time(mttdl_sec)}")
-        vprint(f"    (95% CI: {format_time(min_mttdl_sec)} - ∞)")
+        vprint(f"    (99.9% CI: {format_time(min_mttdl_sec)} - ∞)")
 
     # Compute Nines Durability Number
     expected_pgs_lost_per_year = expected_losses_per_year * pgs_lost_per_event
@@ -786,14 +786,14 @@ def simulate(args, domains=None):
     min_expected_durability = max(0, 1 - (max_expected_pgs_lost_per_year / num_pgs))
     max_expected_durability = max(0, 1 - (min_expected_pgs_lost_per_year / num_pgs))
     print(f"    Durability: {count_nines(expected_durability)}")
-    vprint(f"    (95% CI: {count_nines(min_expected_durability)} to {count_nines(max_expected_durability)})")
+    vprint(f"    (99.9% CI: {count_nines(min_expected_durability)} to {count_nines(max_expected_durability)})")
 
     expected_bytes_lost_per_year = expected_pgs_lost_per_year * bytes_per_pg
     min_expected_bytes_lost_per_year = min_expected_pgs_lost_per_year * bytes_per_pg
     max_expected_bytes_lost_per_year = max_expected_pgs_lost_per_year * bytes_per_pg
 
     vprint(f"Expected annual data loss: {format_bytes(expected_bytes_lost_per_year)}")
-    vprint(f"    (95% CI: {format_bytes(min_expected_bytes_lost_per_year)} - {format_bytes(max_expected_bytes_lost_per_year)})")
+    vprint(f"    (99.9% CI: {format_bytes(min_expected_bytes_lost_per_year)} - {format_bytes(max_expected_bytes_lost_per_year)})")
 
     return {
         'mttdl': format_time(mttdl_sec),
@@ -833,7 +833,7 @@ def simulate(args, domains=None):
         # Per-incident blast radius
         'pgs_lost_per_event': pgs_lost_per_event,
         'pct_data_loss': pct_data_loss,
-        # Confidence intervals (95% CI)
+        # Confidence intervals (99.9% CI)
         'monte_carlo_enabled': not args.skip_monte_carlo,
         'min_mttdl_sec': min_mttdl_sec if min_mttdl_sec != float('inf') else None,
         'max_mttdl_sec': max_mttdl_sec if max_mttdl_sec != float('inf') else None,
