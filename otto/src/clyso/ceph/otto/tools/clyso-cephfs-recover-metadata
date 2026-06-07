@@ -13,7 +13,7 @@ set -eo pipefail
 #
 CEPHFS=
 METADATAPOOL=
-DATAPOOL=
+DATAPOOL=${CEPHFS_RECOVER_METADATA_DATAPOOL:-}
 EXTRA_DATAPOOLS=
 NRANKS=
 NWORKERS=16
@@ -21,6 +21,9 @@ WAIT_SLEEP_INTERVAL=10
 LOGDIR=recover_metadata_logs
 : ${PROCESS_SCAN_LINK_LOG:=YES}
 JOURNAL_RESET_COMPAT_FLAGS=
+: ${FORCE_INIT:=}
+: ${FORCE_CORRUPT:=}
+: ${FORCE_POOL:=}
 
 #
 # Uncomment for NOP testing:
@@ -147,12 +150,12 @@ get_datapools() {
 
 cephfs_data_scan() {
     test -n "$1"
-    local cmd="$1"
+    local cmd="$1"; shift
     local datapools="${DATAPOOL}"
     local debug_mds=10
 
-    test -n "$2"
-    local worker="$2"
+    test -n "$1"
+    local worker="$1"; shift
 
     if [ "${cmd}" = "scan_extents" -a -n "${EXTRA_DATAPOOLS}" ]; then
 	datapools="${datapools} ${EXTRA_DATAPOOLS}"
@@ -163,7 +166,8 @@ cephfs_data_scan() {
     fi
 
     cephfs-data-scan "${cmd}" --worker_n "${worker}" --worker_m "${NWORKERS}" \
-		     --filesystem "${CEPHFS}" --debug-mds ${debug_mds} ${datapools} 2>&1 |
+		     --filesystem "${CEPHFS}" --debug-mds ${debug_mds} \
+		     "$@" ${datapools} 2>&1 |
 	tee "${LOGDIR}"/cephfs-data-scan."${cmd}"."${worker}".log
     echo "${cmd} ${worker} complete" >&2
 }
@@ -171,9 +175,9 @@ cephfs_data_scan() {
 scan_extents() {
     test -n "$1"
 
-    local worker="$1"
+    local worker="$1"; shift
 
-    cephfs_data_scan scan_extents "${worker}" |
+    cephfs_data_scan scan_extents "${worker}" "$@" |
     awk -v f=${LOGDIR}/num_scan_extents.${worker}.dat \
 	-v f0=${LOGDIR}/num_0_scan_extents.${worker}.dat \
     '
@@ -206,9 +210,9 @@ scan_extents() {
 scan_inodes() {
     test -n "$1"
 
-    local worker="$1"
+    local worker="$1"; shift
 
-    cephfs_data_scan scan_inodes "${worker}" |
+    cephfs_data_scan scan_inodes "${worker}" "$@" |
     awk -v f=${LOGDIR}/num_scan_inodes.${worker}.dat \
     '
         BEGIN {
@@ -231,7 +235,7 @@ scan_inodes() {
 }
 
 scan_links() {
-    cephfs-data-scan scan_links --filesystem "${CEPHFS}" --debug-mds 10 2>&1 |
+    cephfs-data-scan scan_links --filesystem "${CEPHFS}" --debug-mds 10 "$@" 2>&1 |
     tee "${LOGDIR}"/cephfs-data-scan.scan_links.0.log |
     awk -v f=${LOGDIR}/num_scan_links.0.dat \
 	-v d=${LOGDIR}/num_scan_links_dups.dat \
@@ -278,9 +282,9 @@ scan_links() {
 cleanup() {
     test -n "$1"
 
-    local worker="$1"
+    local worker="$1"; shift
 
-    cephfs_data_scan cleanup "${worker}" |
+    cephfs_data_scan cleanup "${worker}" "$@" |
     awk -v f=${LOGDIR}/num_cleanup."${worker}".dat \
 	'
 		BEGIN {
@@ -490,7 +494,12 @@ for rank in `seq 0 $((NRANKS - 1))`; do
 done
 
 # Regenareate root inodes ("/" and MDS directory) if missing
-cephfs-data-scan init --filesystem "${CEPHFS}"
+extra_args=
+if [ "${FORCE_INIT}" = "YES" ]; then
+    echo "force-init enabled: will overrite root inodes" >&2
+    extra_args="--force-init"
+fi
+cephfs-data-scan init --filesystem "${CEPHFS}" ${extra_args}
 
 # List all inode objects (named as {inode}.{index}) in the data pool
 # and accumulate collected inode information in {inode}.0 object
@@ -506,8 +515,12 @@ cephfs-data-scan init --filesystem "${CEPHFS}"
 #
 # NOTE: this logic doesn't take account of striping.
 set_recovery_step scan_extents
+extra_args=
+if [ "${FORCE_POOL}" = "YES" ]; then
+    extra_args="--force-pool"
+fi
 for worker in `seq 0 $((NWORKERS - 1))`; do
-    scan_extents ${worker} &
+    scan_extents ${worker} ${extra_args} &
 done
 wait_scan_extents_complete
 
@@ -518,8 +531,16 @@ wait_scan_extents_complete
 # inode metadata in the metadata pool. Put strays and inodes without
 # backtrace in lost+found.
 set_recovery_step scan_inodes
+extra_args=
+if [ "${FORCE_CORRUPT}" = "YES" ]; then
+    echo "force-corrupt enabled: will overrite corrupt structures" >&2
+    extra_args="--force-corrupt"
+fi
+if [ "${FORCE_POOL}" = "YES" ]; then
+    extra_args="--force-pool ${extra_args}"
+fi
 for worker in `seq 0 $((NWORKERS - 1))`; do
-    scan_inodes ${worker} &
+    scan_inodes ${worker} ${extra_args} &
 done
 wait_scan_inodes_complete
 
