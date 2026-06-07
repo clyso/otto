@@ -512,6 +512,7 @@ def simulate(args, domains=None):
     # specific list of OSDs from your previous lines
     counts = [osd_counts.get(osd, 0) for osd in osds]
 
+    min_pgs = max_pgs = mean_pgs = std_dev = None
     if counts:
         min_pgs = min(counts)
         max_pgs = max(counts)
@@ -650,6 +651,19 @@ def simulate(args, domains=None):
     pct_data_loss = total_pg_losses / (num_simulations * num_pgs)
     vprint(f"    Expected Data Loss Per Incident: {pgs_lost_per_event:.3g} PGs, {format_bytes(pgs_lost_per_event*bytes_per_pg)} ({pct_data_loss * 100:.3g}%)")
 
+    # Store whether we have OSD distribution stats (only available when counts exists)
+    has_osd_distribution = len(counts) > 0
+    if has_osd_distribution:
+        osd_min_pgs = min_pgs
+        osd_max_pgs = max_pgs
+        osd_mean_pgs = mean_pgs
+        osd_std_dev = std_dev
+    else:
+        osd_min_pgs = None
+        osd_max_pgs = None
+        osd_mean_pgs = None
+        osd_std_dev = None
+
     # Try to compute a meaningful MTTDL and Nines Durability Number
     vprint("")
     vprint("---------------------------")
@@ -715,6 +729,13 @@ def simulate(args, domains=None):
         expected_annual_events = num_osds * afr
         mtt_multi_failure = 31536000 / expected_annual_events
         vprint(f"    Expected annual failure events: {expected_annual_events:.3g} (1 every {format_time(31536000/expected_annual_events)})")
+        recovery_rate = None
+        recovery_time_per_pg = None
+        max_osd_load = None
+        recovery_time = None
+        critical_windows_per_year = None
+        failure_prob_per_disk = None
+        failure_prob = None
 
 
 
@@ -753,6 +774,7 @@ def simulate(args, domains=None):
         print(f"    MTTDL: {format_time(mttdl_sec)}")
         vprint(f"    (95% CI: {format_time(min_mttdl_sec)} - {format_time(max_mttdl_sec)})")
     except ZeroDivisionError:
+        max_mttdl_sec = float('inf')
         print(f"    MTTDL: {format_time(mttdl_sec)}")
         vprint(f"    (95% CI: {format_time(min_mttdl_sec)} - ∞)")
 
@@ -773,7 +795,53 @@ def simulate(args, domains=None):
     vprint(f"Expected annual data loss: {format_bytes(expected_bytes_lost_per_year)}")
     vprint(f"    (95% CI: {format_bytes(min_expected_bytes_lost_per_year)} - {format_bytes(max_expected_bytes_lost_per_year)})")
 
-    return (format_time(mttdl_sec), count_nines(expected_durability))
+    return {
+        'mttdl': format_time(mttdl_sec),
+        'nines': count_nines(expected_durability),
+        'mttdl_sec': mttdl_sec if mttdl_sec != float('inf') else None,
+        'loss_rate': loss_rate,
+        'expected_bytes_lost_per_year': expected_bytes_lost_per_year,
+        'profile': profile,
+        'num_osds': num_osds,
+        'num_pgs': num_pgs,
+        'num_domains': num_domains,
+        # Pool layout
+        'pg_size': pg_size,
+        'k_fail': num_failures_for_data_loss,
+        'failures_needed': num_osds_to_fail,
+        'raw_to_stored': raw_to_stored_factor,
+        'bytes_per_pg': bytes_per_pg,
+        'total_bytes': total_bytes,
+        'objects_per_pg': objects_per_pg,
+        # Recovery model (None for pg_size == 1)
+        'recovery_rate_bps': recovery_rate,
+        'recovery_time_per_pg_sec': recovery_time_per_pg,
+        'max_osd_load_pgs': max_osd_load,
+        'critical_window_sec': recovery_time,
+        'critical_windows_per_year': critical_windows_per_year,
+        'failure_prob_per_disk': failure_prob_per_disk,
+        'failure_prob': failure_prob,
+        # Annual loss
+        'expected_annual_events': expected_annual_events,
+        'expected_pgs_lost_per_year': expected_pgs_lost_per_year,
+        'durability': expected_durability,
+        # OSD distribution stats (optional, only for real pools)
+        'osd_min_pgs': min_pgs,
+        'osd_max_pgs': max_pgs,
+        'osd_mean_pgs': mean_pgs,
+        'osd_std_dev': std_dev,
+        # Per-incident blast radius
+        'pgs_lost_per_event': pgs_lost_per_event,
+        'pct_data_loss': pct_data_loss,
+        # Confidence intervals (95% CI)
+        'monte_carlo_enabled': not args.skip_monte_carlo,
+        'min_mttdl_sec': min_mttdl_sec if min_mttdl_sec != float('inf') else None,
+        'max_mttdl_sec': max_mttdl_sec if max_mttdl_sec != float('inf') else None,
+        'min_durability': min_expected_durability,
+        'max_durability': max_expected_durability,
+        'min_expected_bytes_lost_per_year': min_expected_bytes_lost_per_year,
+        'max_expected_bytes_lost_per_year': max_expected_bytes_lost_per_year,
+    }
 
 
 # ---------------------------- Analyze Subcommand ----------------------------
@@ -866,7 +934,8 @@ def analyze_pool(args, pool, pg_dump):
     vprint(f"    Data per OSD: {format_bytes(args.tb_per_osd * 1024**4)} ({format_int(objects_raw / len(osds))} objects)")
     vprint(f"    Average object size: {format_bytes(args.object_size)}")
     vprint("")
-    [mttdl, nines] = simulate(args, domains=domains)
+    r = simulate(args, domains=domains)
+    mttdl, nines = r['mttdl'], r['nines']
 
 
 def analyze(args):
@@ -1094,7 +1163,8 @@ def run_tests(args):
         test_arg[0].command = 'simulate'
         cmdline = reconstruct_command_line(parser, test_arg[0])
         print(f"Command line: {cmdline}")
-        (mttdl, nines) = simulate(test_arg[0])
+        r = simulate(test_arg[0])
+        mttdl, nines = r['mttdl'], r['nines']
         assert test_arg[1][0] == mttdl, f"MTTDL test case {i+1} failed! {mttdl} != {test_arg[1][0]}"
         assert test_arg[1][1] == nines, f"Durability test case {i+1} failed! {nines} != {test_arg[1][1]}"
         print(f"\nTest case {i+1} completed.")
@@ -1146,7 +1216,7 @@ def main():
     an.add_argument('--seed', type=int, default=int(time.time()), help='random seed (default: current time)')
     an.add_argument('--fudge', type=int, default=100, help='correlation "fudge" factor (default: 100)')
     an.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
-    an.add_argument('--recovery-rate', type=int, default=50, help='Per-OSD data recovery rate (default: 50MBps)')
+    an.add_argument('--recovery-rate', type=float, default=50, help='Per-OSD data recovery rate (default: 50MBps)')
     an.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
     an.add_argument('--osd-recovery-max-active', type=int, default=1, help='OSD Recovery Max Active (default: 1)')
     an.add_argument('--domains-down', type=int, default=0, help='number of failure domains to take down in simulation (default: 0)')
