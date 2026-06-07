@@ -15,8 +15,8 @@ CEPHFS=
 METADATAPOOL=
 DATAPOOL=${CEPHFS_RECOVER_METADATA_DATAPOOL:-}
 EXTRA_DATAPOOLS=
-NRANKS=
-NWORKERS=16
+NRANKS=${CEPHFS_RECOVER_METADATA_NRANKS:-}
+NWORKERS=${CEPHFS_RECOVER_METADATA_NWORKERS:16}
 WAIT_SLEEP_INTERVAL=10
 LOGDIR=recover_metadata_logs
 : ${PROCESS_SCAN_LINK_LOG:=YES}
@@ -24,13 +24,7 @@ JOURNAL_RESET_COMPAT_FLAGS=
 : ${FORCE_INIT:=}
 : ${FORCE_CORRUPT:=}
 : ${FORCE_POOL:=}
-
-#
-# Uncomment for NOP testing:
-#
-# alias cephfs-table-tool="echo cephfs-table-tool"
-# alias cephfs-journal-tool="echo cephfs-journal-tool"
-# alias cephfs-data-scan="echo cephfs-data-scan"
+: ${DRY_RUN:=}
 
 declare -A RECOVERY_STEPS=(
   [init]="INITIALIZING METADATA"
@@ -47,7 +41,20 @@ CURRENT_RECOVERY_STEP=""
 # Functions
 #
 usage() {
-    echo "$0 <cephfs> [nranks [nworkers]]"
+    echo "$0 [options] <cephfs> [nranks [nworkers]]"
+    echo
+    echo "Options:"
+    echo
+    echo "  -d | --log-dir <dir>          directory to store logs (default: ${LOGDIR})"
+    echo "  -h | --help                   show this help message and exit"
+    echo "  -n | --dry-run                log recovery commands without executing them"
+    echo "  -r | --ranks <N>              number of MDS ranks (get from FSMAp if not set)"
+    echo "  -s | --wait-sleep <seconds>   wait sleep interval (default: ${WAIT_SLEEP_INTERVAL})"
+    echo "  -w | --workers <N>            number of worker processes (default: ${NWORKERS})"
+    echo "  -C | --force-corrupt          overrite apparently corrupt structures"
+    echo "  -I | --force-init             write root inodes even if they exist"
+    echo "  -P | --force-pool <datapool>  use data pool even if it is not in FSMap"
+    echo
 }
 
 set_recovery_step() {
@@ -91,6 +98,8 @@ prepare_log_dir() {
 
     mkdir -p "${LOGDIR}"
     rm -f "${LOGDIR}"/*.log "${LOGDIR}"/*.dat
+
+    echo "logs will be stored in ${LOGDIR}" >&2
 }
 
 get_nranks() {
@@ -150,10 +159,15 @@ get_datapools() {
 
 run() {
     local name="$1"; shift
+    local dry=
 
-    echo "running: $@" >&2
+    test "${DRY_RUN}" = "YES" && dry="dry-"
+
+    echo "${dry}running: $@" >&2
 
     echo $(date "+%F %T") "$@" >> "${LOGDIR}"/run.log
+
+    test "${DRY_RUN}" = "YES" && return
 
     "$@" 2>&1 | tee -a "${LOGDIR}/${name}.log"
 }
@@ -289,6 +303,15 @@ scan_links() {
 	    sub(/^.*datascan.scan_links: /, "")
 	    print > i; close(i)
 	}
+
+        END {
+            # ensure all files are created even if no matches
+            printf("") > f; close(f)
+            printf("") > d; close(d)
+            printf("") > r; close(r)
+            printf("") > b; close(b)
+            printf("") > i; close(i)
+        }
     '
 }
 
@@ -368,6 +391,7 @@ wait_scan_inodes_complete() {
 wait_scan_links_complete() {
     local objnum sobjnum
     local scan_done dup_done rem_dup_done bad_done
+    local sleep_interval=${WAIT_SLEEP_INTERVAL}
 
     test -n "${PROCESS_SCAN_LINK_LOG}" &&
     objnum=$(ceph df --format json |
@@ -381,7 +405,7 @@ wait_scan_links_complete() {
     # scan_links scans metadata objects twice
     objnum=$((objnum * 2))
 
-    while sleep ${WAIT_SLEEP_INTERVAL}; do
+    while sleep ${sleep_interval}; do
 	if [ -n "${bad_done}" ]; then
 	    test -f ${LOGDIR}/num_scan_links_injected.dat || continue
 	    cat ${LOGDIR}/num_scan_links_injected.dat >&2
@@ -417,6 +441,7 @@ wait_scan_links_complete() {
 
 	if [ -f ${LOGDIR}/num_scan_links_dups.dat ]; then
 	    scan_done=1
+	    sleep_interval=1
 	fi
     done
 }
@@ -449,36 +474,101 @@ wait_cleanup_complete() {
 # Main
 #
 
-check_deps
-set_compat_flags
 
-case $1 in
-    --help|-h)
-	usage
-	exit 0
-        ;;
-    "")
-	usage >&2
-	exit 1
-        ;;
-    *)
-        CEPHFS=$1
-        ;;
-esac
+OPTIONS=$(getopt -o d:hnr:s:w:CIP: --long log-dir:,help,dry-run,ranks:,wait-sleep:,workers:,force-corrupt,force-init,force-pool: -- "$@")
 
-test -n "$2" && NRANKS="$2"
+eval set -- "$OPTIONS"
+while true; do
+    case "$1" in
+	-d|--log-dir)
+	    if [ -d "$2" ]; then
+		echo "Log directory $2 already exists" >&2
+		exit 1
+	    fi
+            LOGDIR="$2"
+	    shift 2
+	    ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+	-n|--dry-run)
+	    DRY_RUN=YES
+	    shift
+	    ;;
+        -r|--ranks)
+	    NRANKS="$2"
+            shift 2
+            ;;
+        -s|--wait-sleep)
+	    WAIT_SLEEP_INTERVAL="$2"
+            shift 2
+            ;;
+        -w|--workers)
+	    NWORKERS="$2"
+            shift 2
+            ;;
+        -C|--force-corrupt)
+	    FORCE_CORRUPT=YES
+	    shift
+            ;;
+        -I|--force-init)
+            FORCE_INIT=YES
+            shift
+            ;;
+        -P|--force-pool)
+	    DATAPOOL="$2"
+            FORCE_POOL=YES
+            shift 2
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            echo "Invalid option: $1" >&1
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [ -n "$1" ]; then
+    CEPHFS=$1
+    shift
+fi
+if [ -n "$1" ]; then
+    NRANKS="$1"
+    shift
+fi
+if [ -n "$1" ]; then
+    NWORKERS="$1"
+    shift
+fi
+if [ $? -ne 0 ]; then
+    usage >&2
+    exit 1
+fi
+
+if [ -z "${CEPHFS}" ]; then
+    echo "cephfs name is required" 2>&2
+    usage >&2
+    exit 1
+fi
+
 if [ -n "${NRANKS}" ] && ! [ ${NRANKS} -ge 0 ]; then
     echo "invalid nranks: ${NRANKS}" 2>&2
     usage >&2
     exit 1
 fi
-
-test -n "$3" && NWORKERS="$3"
 if ! [ ${NWORKERS} -gt 0 -a ${NWORKERS} -le 512 ]; then
     echo "invalid nworkers: ${NWORKERS}" 2>&2
     usage >&2
     exit 1
 fi
+
+check_deps
+set_compat_flags
 
 get_nranks
 get_metadatapool
