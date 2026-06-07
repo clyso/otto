@@ -148,6 +148,16 @@ get_datapools() {
     done
 }
 
+run() {
+    local name="$1"; shift
+
+    echo "running: $@" >&2
+
+    echo $(date "+%F %T") "$@" >> "${LOGDIR}"/run.log
+
+    "$@" 2>&1 | tee -a "${LOGDIR}/${name}.log"
+}
+
 cephfs_data_scan() {
     test -n "$1"
     local cmd="$1"; shift
@@ -165,10 +175,13 @@ cephfs_data_scan() {
 	debug_mds=20
     fi
 
-    cephfs-data-scan "${cmd}" --worker_n "${worker}" --worker_m "${NWORKERS}" \
-		     --filesystem "${CEPHFS}" --debug-mds ${debug_mds} \
-		     "$@" ${datapools} 2>&1 |
-	tee "${LOGDIR}"/cephfs-data-scan."${cmd}"."${worker}".log
+    echo "${cmd} ${worker} running" >&2
+
+    run cephfs-data-scan."${cmd}"."${worker}" \
+	cephfs-data-scan "${cmd}" --worker_n "${worker}" \
+	--worker_m "${NWORKERS}" --filesystem "${CEPHFS}" \
+	--debug-mds ${debug_mds} "$@" ${datapools}
+
     echo "${cmd} ${worker} complete" >&2
 }
 
@@ -235,8 +248,8 @@ scan_inodes() {
 }
 
 scan_links() {
-    cephfs-data-scan scan_links --filesystem "${CEPHFS}" --debug-mds 10 "$@" 2>&1 |
-    tee "${LOGDIR}"/cephfs-data-scan.scan_links.0.log |
+    run cephfs-data-scan.scan_links.0 \
+	cephfs-data-scan scan_links --filesystem "${CEPHFS}" --debug-mds 10 "$@" |
     awk -v f=${LOGDIR}/num_scan_links.0.dat \
 	-v d=${LOGDIR}/num_scan_links_dups.dat \
 	-v r=${LOGDIR}/num_scan_links_rem_dups.dat \
@@ -478,18 +491,24 @@ set_recovery_step init
 
 for rank in `seq 0 $((NRANKS - 1))`; do
     # try to recover whatever is possible from journal and reset it
-    cephfs-journal-tool --rank=${CEPHFS}:${rank} event recover_dentries summary || true
-    cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
-                        ${JOURNAL_RESET_COMPAT_FLAGS}
+    run journal_recover_dentries.${rank} \
+	cephfs-journal-tool --rank=${CEPHFS}:${rank} event \
+	recover_dentries summary || true
+    run journal_reset.${rank}.log \
+	cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
+        ${JOURNAL_RESET_COMPAT_FLAGS}
 
     # reset session table
-    cephfs-table-tool ${CEPHFS}:${rank} reset session
+    run table_reset_session.${rank} \
+	cephfs-table-tool ${CEPHFS}:${rank} reset session
 
     # reset SnapServer
-    cephfs-table-tool ${CEPHFS}:${rank} reset snap
+    run table_reset_snap.${rank} \
+	cephfs-table-tool ${CEPHFS}:${rank} reset snap
 
     # reset InoTable
-    cephfs-table-tool ${CEPHFS}:${rank} reset inode
+    run table_reset_inode.${rank} \
+	cephfs-table-tool ${CEPHFS}:${rank} reset inode
 
 done
 
@@ -499,7 +518,8 @@ if [ "${FORCE_INIT}" = "YES" ]; then
     echo "force-init enabled: will overrite root inodes" >&2
     extra_args="--force-init"
 fi
-cephfs-data-scan init --filesystem "${CEPHFS}" ${extra_args}
+run data_scan_init \
+    cephfs-data-scan init --filesystem "${CEPHFS}" ${extra_args}
 
 # List all inode objects (named as {inode}.{index}) in the data pool
 # and accumulate collected inode information in {inode}.0 object
