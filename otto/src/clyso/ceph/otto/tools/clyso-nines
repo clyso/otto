@@ -933,6 +933,24 @@ def analyze_pool(args, pool, pg_dump):
     vprint(f"    Total raw data: {format_bytes(bytes_raw)} ({format_int(objects_raw)} objects)")
     vprint(f"    Data per OSD: {format_bytes(args.tb_per_osd * 1024**4)} ({format_int(objects_raw / len(osds))} objects)")
     vprint(f"    Average object size: {format_bytes(args.object_size)}")
+    
+    # Try to fetch recovery tunables from cluster
+    try:
+        ceph_cmd = ['ceph', f'--cluster={args.cluster}', 'config', 'get', 'osd', 'osd_recovery_sleep', '--format=json']
+        result = subprocess.check_output(ceph_cmd, stderr=subprocess.DEVNULL)
+        args.osd_recovery_sleep = float(json.loads(result))
+        vprint(f"    Using cluster osd_recovery_sleep: {args.osd_recovery_sleep}s")
+    except Exception:
+        vprint(f"    Using default osd_recovery_sleep: {args.osd_recovery_sleep}s")
+
+    try:
+        ceph_cmd = ['ceph', f'--cluster={args.cluster}', 'config', 'get', 'osd', 'osd_recovery_max_active', '--format=json']
+        result = subprocess.check_output(ceph_cmd, stderr=subprocess.DEVNULL)
+        args.osd_recovery_max_active = int(json.loads(result))
+        vprint(f"    Using cluster osd_recovery_max_active: {args.osd_recovery_max_active}")
+    except Exception:
+        vprint(f"    Using default osd_recovery_max_active: {args.osd_recovery_max_active}")
+    
     vprint("")
     r = simulate(args, domains=domains)
     mttdl, nines = r['mttdl'], r['nines']
