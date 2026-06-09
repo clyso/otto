@@ -2,9 +2,11 @@
 # NOTE: affected_versions entries are matched with fnmatch, where [...] is a
 # single-character class. Ranges like [0-10] or [11-12] will NOT expand as
 # expected — list multi-digit versions explicitly (e.g. 16.2.10, 16.2.11).
+# If a bug is updated, increment the rev field.
 last_updated: '20 May 2026'
 bugs:
   - name: PG Splitting/Merging Causes OSD Out-Of-Memory
+    rev: 1
     description: A bug in the PG splitting and merging code can cause the OSD to go out-of-memory, a condition which persists even after restart. Offline tools are available in fixed releases to workaround the issue.
     recommendation: Do not change pg_num for any pool until after upgrade to a fixed release. Disable the pg autoscaler. Fixed in v16.2.11 and v17.2.4.
     severity: critical
@@ -27,6 +29,7 @@ bugs:
       - 17.2.2
       - 17.2.3
   - name: Pacific Broken Hotfixes
+    rev: 1
     description: Version 16.2.11 has a bug in ceph-volume osd activation, which was meant to be hotfixed in 16.2.12 but that release was built incorrectly, including changes which did not pass the rigorous QA testing.
     severity: critical
     recommendation: It is recommended to upgrade to version 16.2.13 or later.
@@ -34,6 +37,7 @@ bugs:
       - 16.2.11
       - 16.2.12
   - name: Squid deployed OSDs are crashing
+    rev: 1
     description: OSDs created in v19 may crash. The issue affects only newly deployed OSDs using Squid, while previously deployed OSDs run fine. It is likely caused by the Elastic Shared Blob implementation introduced in this PR https://github.com/ceph/ceph/pull/53178, and ceph-bluestore-tool repair cannot fix it. In rare cases, can lead to silent data corruption in the OSD.
     severity: critical
     tracker: https://tracker.ceph.com/issues/70390
@@ -44,6 +48,7 @@ bugs:
       - 19.2.2
       - 19.2.3
   - name: BlueStore Potential Corruption
+    rev: 1
     description: Some versions of Ceph were released with a bug that may cause OSDs to crash and corrupt the on-disk data.
     severity: critical
     tracker: https://tracker.ceph.com/issues/69764
@@ -53,6 +58,7 @@ bugs:
       - 18.2.5
       - 18.2.6
   - name: S3 DeleteBucketLifecycle Does Not Delete Config
+    rev: 1
     description:
       The S3 DeleteBucketLifecycle API call fails to actually delete the
       lifecycle configuration from the bucket, causing S3 compatibility issues.
@@ -65,6 +71,7 @@ bugs:
     affected_versions:
       - 19.2.3
   - name: RadosGW --bypass-gc Data Loss Bug
+    rev: 1
     description: A long-standing data loss bug with "--bypass-gc" causes deletion of copied object data. If any of the deleted objects had been copied to/from other buckets, --bypass-gc deletes the data of those copies too. As a result, the copies are still visible to ListObjects requests but GetObject requests fail with NoSuchKey.
     severity: critical
     tracker: https://tracker.ceph.com/issues/73348
@@ -77,6 +84,7 @@ bugs:
       - 19.2.2
       - 19.2.3
   - name: OSD Crash When Enabling EC Optimizations on CephFS
+    rev: 1
     description: OSDs crash when "allow_ec_optimizations" is enabled on an existing CephFS Erasure Coded (EC) data pool that does not have "allow_ec_overwrites" explicitly enabled. The crash occurs in ECTransaction::WritePlanObj when accessing a non-existent transaction key.
     severity: critical
     tracker: https://tracker.ceph.com/issues/71642
@@ -84,6 +92,7 @@ bugs:
     affected_versions:
       - 20.2.0
   - name: FastEC Scrub Errors After Recovery
+    rev: 1
     description: After recovering from the EC optimization crash, clusters may experience excessive scrub errors with messages like "candidate size X info size Y mismatch". This is a secondary issue related to the FastEC code path.
     severity: medium
     tracker: https://tracker.ceph.com/issues/73184
@@ -91,6 +100,7 @@ bugs:
     affected_versions:
       - 20.2.0
   - name: New or Recreated OSD Missing DB Device with Hybrid Spec
+    rev: 1
     description: 'When using a hybrid OSD spec (HDDs for data, SSDs/NVMe for DB devices), newly created or recreated OSDs are deployed without a DB device. The "ceph-volume lvm batch" command issued by the orchestrator omits the "--db-device" argument. The root cause is a regression introduced by the fix for tracker #68576 - the "ceph_device" attribute in ceph-volume inventory JSON output was renamed to "ceph_device_lvm", causing the selector to treat all existing RocksDB volumes as unavailable.'
     severity: medium
     tracker: https://tracker.ceph.com/issues/72696
@@ -100,6 +110,7 @@ bugs:
       - 20.2.0
       - 20.2.1
   - name: Reading from clone snapshot after concurrent flattening returns zeros
+    rev: 1
     description: When an RBD image with an object map is created and filled with non-zero data, a clone is created, a snapshot is created on the clone and remains open, and then the clone is flattened - data read from the cloned snapshot that was opened before flattening returns zeros instead of the expected data from the parent image.
     severity: medium
     tracker: https://tracker.ceph.com/issues/74554
@@ -107,6 +118,7 @@ bugs:
     affected_versions:
       - 19.2.*
   - name: Cephadm Changes Ownership of Crash Directories When Deploying Monitoring Daemons
+    rev: 1
     description: When deploying monitoring daemons (e.g., Grafana) to a host that already has Ceph daemons running, cephadm incorrectly changes the ownership of the /var/lib/ceph/<fsid>/crash and /var/lib/ceph/<fsid>/crash/posted directories to match the monitoring daemon's UID/GID. This prevents the ceph-crash daemon and other Ceph daemons from posting crash reports, as they run as user 'ceph' and can no longer access these directories.
     severity: critical
     tracker: https://tracker.ceph.com/issues/69590
@@ -114,6 +126,7 @@ bugs:
     affected_versions:
       - 19.2.3
   - name: After a host reboot, cephadm refuses to exit maintenance mode
+    rev: 1
     description: Under certain circumstances, SSH throws an error to the user and drops its connection. When attempting to use cephadm to exit maintenance mode, a TypeError occurs with message "__init__() missing 2 required positional arguments 'hostname' and 'addr'".
     severity: low
     tracker: https://tracker.ceph.com/issues/67905
