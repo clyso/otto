@@ -222,12 +222,15 @@ def subcommand_checkup(args: argparse.Namespace) -> None:
         warnings.append("Config dump analysis skipped - using static report")
 
     if args.verbose or args.summary:
+        warning_stream = sys.stderr if args.format == "json" else None
         for warning in warnings:
-            print(f"Warning: {warning}")
+            print(f"Warning: {warning}", file=warning_stream)
 
     result = generate_result(ceph_data=data)
 
-    if args.summary:
+    if args.format == "json":
+        print(result.dump())
+    elif args.summary:
         compact_result_summary(result.dump())
     elif args.verbose:
         verbose_result(result.dump())
@@ -521,6 +524,13 @@ def main():
     )
     parser_checkup.add_argument("--summary", action="store_true", help="Summary output")
     parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
+    parser_checkup.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: 'text' (default, honors --summary/--verbose) "
+        "or 'json' (machine-readable, full result document)",
+    )
     parser_checkup.set_defaults(func=subcommand_checkup)
 
     # TODO: add back once we start collecting for this
