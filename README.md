@@ -63,6 +63,26 @@ otto cluster checkup --ceph_report_json=report.json --format json
 stdout stays valid JSON). The document has the shape
 `{"summary": {...}, "sections": [...]}`.
 
+### Monitoring integration
+
+If you already run Prometheus + node_exporter on your Ceph hosts (the standard
+monitoring stack), `--format prometheus` emits the checkup result in Prometheus
+text exposition format, ready for node_exporter's
+[textfile collector](https://github.com/prometheus/node_exporter#textfile-collector).
+Point a cron job at the collector directory and checkup regressions show up in
+your existing dashboards and alerts:
+
+```bash
+# /etc/cron.d/otto-checkup — refresh metrics every 15 minutes
+*/15 * * * * root otto cluster checkup --format prometheus > /var/lib/node_exporter/otto.prom.$$ && mv /var/lib/node_exporter/otto.prom.$$ /var/lib/node_exporter/otto.prom
+```
+
+The write-then-rename keeps node_exporter from ever reading a half-written file.
+Metrics exported: `otto_checkup_score`, `otto_checkup_max_score`,
+`otto_checkup_section_score{section=...}`, and
+`otto_checkup_check_status{section=...,check=...}` (0=PASS, 1=WARN, 2=UNKNOWN,
+3=FAIL).
+
 ## Requirements
 
 - Python 3.11+
