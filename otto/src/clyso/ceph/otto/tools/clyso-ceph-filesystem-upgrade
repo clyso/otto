@@ -70,17 +70,18 @@ $PROG - per-filesystem CephFS MDS upgrade helper
 Author: Frédéric Nass (Clyso)
 
 USAGE:
-  $PROG [-i IMAGE | -t TARGET_VERSION] [options] [FILESYSTEM] [METHOD]
+  $PROG [-i IMAGE | -t TARGET_VERSION] [options] [FILESYSTEM ...]
 
 DESCRIPTION:
   Upgrades the MDS daemons of a single CephFS filesystem without disturbing the
   other filesystems. By default the script is argument-driven and performs no
   prompting. Run with -I/--interactive for a guided flow.
 
-  The filesystem and method may be given either as options (-f/--filesystem,
-  -m/--method) or as trailing positional arguments, in the order
-  [FILESYSTEM] [METHOD]. A positional value takes precedence over the matching
-  option. The method defaults to 'fail_fs' when none is given.
+  The filesystem(s) may be given either with -f/--filesystem or as trailing
+  positional arguments. Both accept one or more filesystems, as separate
+  arguments and/or comma-separated (e.g. "cephfs cephfs2" or "cephfs,cephfs2").
+  Positional filesystems take precedence over -f. The upgrade method is given
+  only with -m/--method and defaults to 'fail_fs'.
 
 OPTIONS:
   -i, --image IMAGE         Container image to deploy, e.g.
@@ -96,12 +97,13 @@ OPTIONS:
   -f, --filesystem NAME     Filesystem(s) to act on. May be a comma-separated
                             list (-f a,b,c) and/or repeated (-f a -f b). With
                             more than one, they are upgraded one after the other.
+                            Filesystems may also be given as positional
+                            arguments (see USAGE), which take precedence over -f.
   -a, --all                 Upgrade every filesystem that needs it, one after
-                            the other. Mutually exclusive with --filesystem.
-                            Requires --method.
+                            the other. Mutually exclusive with a filesystem
+                            selection. Uses --method (default 'fail_fs').
   -m, --method METHOD       Upgrade method: 'fail_fs' or 'max_mds'.
-                            Defaults to 'fail_fs' when not given. May also be
-                            supplied as a trailing positional argument.
+                            Defaults to 'fail_fs' when not given.
   -I, --interactive         Guided interactive mode (lists, prompts for the
                             filesystem and method, then upgrades).
   --force-downgrade         Allow moving MDS to an OLDER version than they
@@ -130,8 +132,10 @@ BEHAVIOR:
         Upgrade cephfs2's MDS to 18.2.8 using the default 'fail_fs' method.
   $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs2
         Same as above, with cephfs2 given as a positional argument.
-  $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs2 fail_fs
-        Upgrade cephfs2's MDS to 18.2.8 using 'ceph fs fail' (positional method).
+  $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs cephfs2
+        Upgrade cephfs then cephfs2 (positional filesystems), 'fail_fs' method.
+  $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs,cephfs2 -m max_mds
+        Same two filesystems (comma-separated), using the max_mds method.
   $PROG -i quay.io/ceph/ceph:v18.2.8 -f cephfs2 -m max_mds
         Upgrade cephfs2's MDS to 18.2.8 by scaling to max_mds 1.
   $PROG -i quay.io/ceph/ceph:v18.2.8 --all -m fail_fs
@@ -149,10 +153,11 @@ METHODS:
 EXAMPLES:
   $PROG -i quay.io/ceph/ceph:v18.2.8
   $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs2
-  $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs2 fail_fs
+  $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs cephfs2
+  $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs,cephfs2 -m fail_fs
   $PROG -i quay.io/ceph/ceph:v18.2.8 -f cephfs2 -m fail_fs
   $PROG -i my.registry.local/ceph/ceph:v18.2.8 -f cephfs,cephfs2 -m max_mds
-  $PROG -i my.registry.local/ceph/ceph:custom -t 18.2.8 cephfs2 fail_fs
+  $PROG -i my.registry.local/ceph/ceph:custom -t 18.2.8 cephfs2 -m fail_fs
   $PROG -R
   $PROG -J --filesystem cephfs2
 EOF
@@ -183,10 +188,12 @@ add_filesystems() {
 
 # Positional arguments (after the options): [FILESYSTEM] [METHOD].
 # They are a convenience equivalent to -f FILESYSTEM and -m METHOD; when given
-# they take precedence over the corresponding flag. METHOD must be one of the
-# known methods so we can tell a filesystem positional from a method positional.
+# Positional arguments (after the options) are filesystem name(s): one or more
+# filesystems, given as separate arguments and/or comma-separated, exactly like
+# repeated/comma-separated -f. They are a convenience equivalent to -f and, when
+# given, take precedence over any -f selection. The upgrade method is specified
+# only via -m/--method (it defaults to fail_fs).
 declare -a POSITIONAL=()
-is_method() { [[ "$1" == "fail_fs" || "$1" == "max_mds" ]]; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -206,21 +213,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Interpret positional arguments: [FILESYSTEM] [METHOD], in that order.
-# A positional that matches a known method is taken as the method even if it
-# comes first; this lets either "FS METHOD" or just "METHOD" be given.
-if [[ ${#POSITIONAL[@]} -gt 2 ]]; then
-    die "too many positional arguments: ${POSITIONAL[*]} (expected at most [FILESYSTEM] [METHOD]; see --help)"
+# Positional filesystem(s) take precedence over -f: if any positional argument
+# is given, it replaces the -f selection. Each positional may itself be a
+# comma-separated list, so "cephfs cephfs2", "cephfs,cephfs2" and a mix both work.
+if [[ ${#POSITIONAL[@]} -gt 0 ]]; then
+    FS_LIST_ARG=()
+    for _arg in "${POSITIONAL[@]}"; do
+        [[ -z "$_arg" ]] && continue
+        add_filesystems "$_arg"
+    done
 fi
-for _arg in "${POSITIONAL[@]:-}"; do
-    [[ -z "$_arg" ]] && continue
-    if is_method "$_arg"; then
-        METHOD="$_arg"            # positional method wins over -m
-    else
-        # positional filesystem wins over -f: replace any -f selection
-        FS_LIST_ARG=("$_arg")
-    fi
-done
 
 # For backward compatibility, FS holds the single selected filesystem when
 # exactly one is given (used by the apply_* / single-upgrade paths).
@@ -840,9 +842,9 @@ if [[ ${#FS_LIST_ARG[@]} -eq 0 ]] && ! $ALL; then
     recommend_settings
     echo
     echo "----------------------------------------------------------"
-    echo "To upgrade one filesystem, re-run with:"
-    echo "    ./$PROG -t $TARGET_VERSION <fs_name> [fail_fs|max_mds]"
-    echo "    (method defaults to fail_fs; you may also use -f <fs_name> -m <method>)"
+    echo "To upgrade one or more filesystems, re-run with:"
+    echo "    ./$PROG -t $TARGET_VERSION <fs_name> [<fs_name> ...] [-m fail_fs|max_mds]"
+    echo "    (method defaults to fail_fs; filesystems may also be given with -f)"
     echo "To upgrade all filesystems one after the other, re-run with:"
     echo "    ./$PROG -t $TARGET_VERSION --all [-m fail_fs|max_mds]"
     echo "----------------------------------------------------------"
