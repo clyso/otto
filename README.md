@@ -51,6 +51,18 @@ Overall score: 28 out of 35 (F)
 Use --verbose or --summary for details and recommendations
 ```
 
+### Machine-readable output
+
+For cron, CI, or monitoring, emit the full result document as JSON:
+
+```bash
+otto cluster checkup --ceph_report_json=report.json --format json
+```
+
+`--format json` writes the complete result to stdout (warnings go to stderr, so
+stdout stays valid JSON). The document has the shape
+`{"summary": {...}, "sections": [...]}`.
+
 ## Requirements
 
 - Python 3.11+
