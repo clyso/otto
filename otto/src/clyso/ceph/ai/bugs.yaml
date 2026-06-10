@@ -2,7 +2,7 @@
 # NOTE: affected_versions entries are matched with fnmatch, where [...] is a
 # single-character class. Ranges like [0-10] or [11-12] will NOT expand as
 # expected — list multi-digit versions explicitly (e.g. 16.2.10, 16.2.11).
-last_updated: '20 May 2026'
+last_updated: '10 June 2026'
 bugs:
   - name: PG Splitting/Merging Causes OSD Out-Of-Memory
     description: A bug in the PG splitting and merging code can cause the OSD to go out-of-memory, a condition which persists even after restart. Offline tools are available in fixed releases to workaround the issue.
@@ -33,16 +33,17 @@ bugs:
     affected_versions:
       - 16.2.11
       - 16.2.12
-  - name: Squid deployed OSDs are crashing
-    description: OSDs created in v19 may crash. The issue affects only newly deployed OSDs using Squid, while previously deployed OSDs run fine. It is likely caused by the Elastic Shared Blob implementation introduced in this PR https://github.com/ceph/ceph/pull/53178, and ceph-bluestore-tool repair cannot fix it. In rare cases, can lead to silent data corruption in the OSD.
+  - name: Potential OSD Data Corruption
+    description: A bug has been identified in Ceph versions v19.2.0 through v19.2.3 and Ceph version v20.2.0 that, in rare cases, can lead to silent data corruption in the OSD. This issue impacts any OSD created on these versions while bluestore_elastic_shared_blobs is enabled (which is the default setting). Ceph versions v19.2.4 and v20.2.1 contain a patch for this issue; however, this fix only prevents new corruptions from occurring. It cannot detect or repair existing silent corruptions on OSDs that were created with elastic shared blobs enabled during the affected release window.
     severity: critical
     tracker: https://tracker.ceph.com/issues/70390
-    recommendation: Run "ceph config set osd bluestore_elastic_shared_blobs 0" on any Squid cluster before adding new OSDs. If you created any OSDs using v19.2.0-v19.2.3 with bluestore_elastic_shared_blobs enabled (default), completely recreate those specific OSDs to ensure data integrity. Ceph v19.2.4 contains a patch that prevents new corruptions but cannot detect or repair existing silent corruptions on OSDs created during the affected release window.
+    recommendation: If you created any OSDs using versions v19.2.0, v19.2.1, v19.2.2, v19.2.3, or v20.2.0 and bluestore_elastic_shared_blobs was enabled, we strongly recommend completely recreating those specific OSDs to ensure data integrity. If all of your OSDs were created prior to the v19 release series, your cluster is not affected.
     affected_versions:
       - 19.2.0
       - 19.2.1
       - 19.2.2
       - 19.2.3
+      - 20.2.0
   - name: BlueStore Potential Corruption
     description: Some versions of Ceph were released with a bug that may cause OSDs to crash and corrupt the on-disk data.
     severity: critical
