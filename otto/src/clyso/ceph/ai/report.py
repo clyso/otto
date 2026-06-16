@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import sys
 import traceback
-from math import ceil, fsum, log2
+from math import ceil, fsum, log2, floor
 
 import humanize
 from packaging import version
@@ -359,7 +359,7 @@ def check_even_num_mons(result: AIResult, data: CephData) -> None:
     if num_mons % 2 == 0:
         summary = "Even number of Monitors"
         detail = [
-            f"Cluster has an even number of ceph-mon daemons ({num_mons}). This is not a problem however operators should be aware that the {ceil(num_mons / 2 + 1)} of the monitors must be up to maintain quorum."
+            f"Cluster has an even number of ceph-mon daemons ({num_mons}). This is not a problem however operators should be aware that the {floor(num_mons / 2 + 1)} of the monitors must be up to maintain quorum."
         ]
         recommend = ["Run an odd number of ceph-mon daemons"]
         passfail = "WARN"
@@ -367,7 +367,7 @@ def check_even_num_mons(result: AIResult, data: CephData) -> None:
     else:
         summary = "Odd number of Monitors"
         detail = [
-            f"Cluster has an odd number of ceph-mon daemons ({num_mons}). This is ideal for the underlying Monitor PAXOS quorum algorithm. Quorum will be maintained as long as {ceil(num_mons / 2 + 1)} ceph-mon daemons are up and healthy."
+            f"Cluster has an odd number of ceph-mon daemons ({num_mons}). This is ideal for the underlying Monitor PAXOS quorum algorithm. Quorum will be maintained as long as {floor(num_mons / 2 + 1)} ceph-mon daemons are up and healthy."
         ]
         recommend = []
         passfail = "PASS"
