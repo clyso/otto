@@ -229,6 +229,63 @@ class TestClysoCephAI(unittest.TestCase):
                     current_version,
                 )
 
+    def test_newer_than_curated_release_is_not_flagged_old(self) -> None:
+        # A release newer than anything curated in versions.yaml (e.g. a freshly
+        # shipped Ceph release) must NOT be reported as "very old". It should
+        # WARN, not force a critical FAIL. Regression test for tentacle/future
+        # releases being mislabeled "CRITICAL: Running very old release".
+        test_path = Path(__file__).parent
+        report_json = json.loads((test_path / "report-reef.json").read_text())
+
+        for newer_version in ["21.0.0", "26.9.9"]:
+            with self.subTest(version=newer_version):
+                report_json["version"] = newer_version
+                data = CephData()
+                data.ceph_report = CephReport.model_validate(report_json)
+                result = ai_module.generate_result(ceph_data=data)
+                result_json = json.loads(result.dump())
+
+                version_section = next(
+                    s for s in result_json["sections"] if s["id"] == "Version"
+                )
+                release_check = next(
+                    c for c in version_section["checks"] if c["id"] == "Release"
+                )
+
+                assert release_check["result"] == "WARN", (
+                    f"{newer_version} should WARN, not "
+                    f"{release_check['result']}: {release_check['summary']}"
+                )
+                assert "very old" not in release_check["summary"].lower(), (
+                    f"{newer_version} must not be labeled 'very old': "
+                    f"{release_check['summary']}"
+                )
+
+    def test_require_osd_release_not_flagged_for_unknown_name(self) -> None:
+        test_path = Path(__file__).parent
+        report_json = json.loads((test_path / "report-reef.json").read_text())
+        report_json["version"] = "24.1.0"  # v24 -> placeholder name "x"
+        report_json["osdmap"]["require_osd_release"] = "wombat"
+
+        data = CephData()
+        data.ceph_report = CephReport.model_validate(report_json)
+        result_json = json.loads(ai_module.generate_result(ceph_data=data).dump())
+
+        osd_check = next(
+            c
+            for section in result_json["sections"]
+            for c in section.get("checks", [])
+            if c["id"] == "Check require_osd_release flag"
+        )
+        assert osd_check["result"] == "WARN", (
+            f"placeholder release name should WARN, not {osd_check['result']}: "
+            f"{osd_check['summary']}"
+        )
+        assert "CRITICAL" not in osd_check["summary"], osd_check["summary"]
+        assert not any("require-osd-release x" in r for r in osd_check["recommend"]), (
+            f"must not recommend a placeholder name: {osd_check['recommend']}"
+        )
+
     def _check_version_release(
         self,
         test_path,

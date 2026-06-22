@@ -65,7 +65,9 @@ def check_report_version(result: AIResult, data: CephData) -> None:
     major = to_major(ver)
     release_info = versiondb["releases"].get(major, {})
 
-    if release_info.get("version", "old") == "old":
+    if "version" not in release_info:
+        if _is_newer_than_curated(major):
+            return _handle_newer_than_curated(result, ver, recommended_versions())
         return _handle_very_old_version(result, ver, recommended_versions())
 
     if release_info.get("version") == ver and release_info.get("recommended", False):
@@ -74,6 +76,35 @@ def check_report_version(result: AIResult, data: CephData) -> None:
     return _handle_non_recommended_version(
         result, ver, recommended_versions(), release_info.get("version")
     )
+
+
+def _max_curated_major() -> int:
+    """Highest major (e.g. 20 for v20) that has a curated stable version."""
+    majors = [
+        int(major.lstrip("v"))
+        for major, info in versiondb["releases"].items()
+        if "version" in info
+    ]
+    return max(majors) if majors else 0
+
+
+def _is_newer_than_curated(major: str) -> bool:
+    """True if `major` (e.g. 'v21') is newer than any curated release."""
+    return int(major.lstrip("v")) > _max_curated_major()
+
+
+def _handle_newer_than_curated(result, ver, rec_versions) -> None:
+    summary = f"Running {ver}, newer than our recommended versions"
+    detail = [
+        f"Cluster is running {ver}, which is newer than the most recent release "
+        f"Clyso has reviewed. Clyso currently recommends one of the stable "
+        f"releases: {', '.join(rec_versions)}."
+    ]
+    recommend = [
+        "Confirm this release is suitable for production; it has not yet been "
+        "reviewed by Clyso."
+    ]
+    result.add_check_result("Version", "Release", "WARN", summary, detail, recommend)
 
 
 def _handle_very_old_version(result, ver, rec_versions) -> None:
@@ -432,7 +463,15 @@ def check_report_osdmap(result: AIResult, data: CephData) -> None:
     major = to_major(report.version)
     r_o_r = osdmap.require_osd_release
     running_release = to_release(major)
-    if r_o_r != running_release:
+    if not running_release or len(running_release) <= 1:
+        # in the event versions.yaml carries no real release name for this major yet
+        summary = "Unable to verify require_osd_release"
+        detail = [
+            f"require_osd_release is set to {r_o_r!r}, but Clyso does not have a "
+            f"release name on file for {major} to compare against."
+        ]
+        result.add_check_result(section, check, "WARN", summary, detail, recommend)
+    elif r_o_r.strip().lower() != running_release.strip().lower():
         summary = "CRITICAL: require_osd_release is incorrect!"
         detail = [
             f"require_osd_release {r_o_r} does not match running release {running_release}"

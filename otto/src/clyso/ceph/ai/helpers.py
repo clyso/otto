@@ -27,9 +27,10 @@ def to_major(version: str) -> str:
     return "v" + x
 
 
-def to_release(version: str) -> str:
+def to_release(version: str) -> str | None:
     major = to_major(version)
-    return versiondb["releases"][major].get("name")
+    release = versiondb["releases"].get(major)
+    return release.get("name") if release else None
 
 
 def recommended_versions():
