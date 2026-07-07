@@ -37,12 +37,14 @@ usage() {
     echo
     echo "Options:"
     echo
-    echo "  -b | --backup-journal <path>               export journals to <path>.<rank>"
-    echo "  -d | --log-dir <dir>                       directory to store logs (default: ${LOGDIR})"
-    echo "  -n | --dry-run                             log recovery commands without executing them"
-    echo "  -f | --proceed-on-recover-dentries-failure   continue to journal reset if"
-    echo "                                               recover_dentries fails"
-    echo "  -h | --help                                  show this help message and exit"
+    echo "  -b | --backup-journal <path>  export journals to <path>.<rank>"
+    echo "  -d | --log-dir <dir>          directory to store logs"
+    echo "                                (default: ${LOGDIR})"
+    echo "  -f | --proceed-on-recover-dentries-failure"
+    echo "                                continue to journal reset even if"
+    echo "                                recover_dentries fails"
+    echo "  -h | --help                   show this help message and exit"
+    echo "  -n | --dry-run                log recovery commands without executing them"
     echo
 }
 
