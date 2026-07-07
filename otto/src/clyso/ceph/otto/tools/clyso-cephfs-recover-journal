@@ -16,6 +16,7 @@ RANKS=
 LOGDIR=recover_journal_logs
 BACKUP_JOURNAL="${BACKUP_JOURNAL:-}"
 JOURNAL_RESET_COMPAT_FLAGS=
+: ${PROCEED_ON_RECOVER_DENTRIES_FAILURE:=}
 
 declare -A RECOVERY_STEPS=(
   [backup]="BACKING JOURNAL UP TO ${BACKUP_JOURNAL}"
@@ -31,7 +32,14 @@ CURRENT_RECOVERY_STEP=""
 #
 
 usage() {
-    echo "$0 <cephfs> [ranks ...]"
+    echo "$0 [options] <cephfs> [ranks ...]"
+    echo
+    echo "Options:"
+    echo
+    echo "  -f | --proceed-on-recover-dentries-failure   continue to journal reset if"
+    echo "                                               recover_dentries fails"
+    echo "  -h | --help                                  show this help message and exit"
+    echo
 }
 
 set_recovery_step() {
@@ -83,25 +91,63 @@ set_ranks() {
     RANKS=$(seq 0 $((nranks - 1)))
 }
 
+recover_dentries() {
+    local rank="$1"
+
+    if cephfs-journal-tool --rank=${CEPHFS}:${rank} event recover_dentries summary; then
+        return 0
+    fi
+
+    if [ "${PROCEED_ON_RECOVER_DENTRIES_FAILURE}" = "YES" ]; then
+        echo "recover_dentries failed for rank ${rank}, proceeding with journal reset" >&2
+        return 0
+    fi
+
+    echo "recover_dentries failed for rank ${rank}" >&2
+    echo "re-run with --proceed-on-recover-dentries-failure to continue anyway" >&2
+    return 1
+}
+
 
 #
 # Main
 #
 
-case $1 in
-    --help|-h)
-	usage
-	exit 0
-        ;;
-    "")
-	usage >&2
-	exit 1
-        ;;
-    *)
-        CEPHFS=$1
-	shift
-        ;;
-esac
+OPTIONS=$(getopt -o fh --long proceed-on-recover-dentries-failure,help -- "$@")
+
+eval set -- "$OPTIONS"
+while true; do
+    case "$1" in
+        -f|--proceed-on-recover-dentries-failure)
+            PROCEED_ON_RECOVER_DENTRIES_FAILURE=YES
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            echo "Invalid option: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [ -n "$1" ]; then
+    CEPHFS=$1
+    shift
+fi
+
+if [ -z "${CEPHFS}" ]; then
+    echo "cephfs name is required" >&2
+    usage >&2
+    exit 1
+fi
 
 RANKS="$@"
 set_ranks
@@ -123,7 +169,7 @@ set_recovery_step recover_journal_dentries
 for rank in ${RANKS}; do
 
     # try to recover whatever is possible from journal and reset it
-    cephfs-journal-tool --rank=${CEPHFS}:${rank} event recover_dentries summary || true
+    recover_dentries "${rank}"
 done
 
 set_recovery_step reset_journal
