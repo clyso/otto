@@ -124,7 +124,7 @@ run() {
     local name="$1"; shift
 
     echo "running: $@" >&2
-    "$@" 2>&1 | tee -a "${LOGDIR}/${name}.log"
+    "$@" 2>&1 | tee -a "${LOGDIR}/${name}.log" >&2
 }
 
 
