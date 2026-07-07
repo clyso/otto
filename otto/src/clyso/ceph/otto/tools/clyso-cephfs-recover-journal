@@ -36,6 +36,8 @@ usage() {
     echo
     echo "Options:"
     echo
+    echo "  -b | --backup-journal <path>               export journals to <path>.<rank>"
+    echo "  -d | --log-dir <dir>                       directory to store logs (default: ${LOGDIR})"
     echo "  -f | --proceed-on-recover-dentries-failure   continue to journal reset if"
     echo "                                               recover_dentries fails"
     echo "  -h | --help                                  show this help message and exit"
@@ -71,6 +73,15 @@ set_compat_flags() {
     fi
 }
 
+prepare_log_dir() {
+    test -n "${LOGDIR}"
+
+    mkdir -p "${LOGDIR}"
+    rm -f "${LOGDIR}"/*.log
+
+    echo "logs will be stored in ${LOGDIR}" >&2
+}
+
 set_ranks() {
     local nranks rank
 
@@ -94,7 +105,8 @@ set_ranks() {
 recover_dentries() {
     local rank="$1"
 
-    if cephfs-journal-tool --rank=${CEPHFS}:${rank} event recover_dentries summary; then
+    if run recover_dentries.${rank} \
+        cephfs-journal-tool --rank=${CEPHFS}:${rank} event recover_dentries summary; then
         return 0
     fi
 
@@ -108,16 +120,35 @@ recover_dentries() {
     return 1
 }
 
+run() {
+    local name="$1"; shift
+
+    echo "running: $@" >&2
+    "$@" 2>&1 | tee -a "${LOGDIR}/${name}.log"
+}
+
 
 #
 # Main
 #
 
-OPTIONS=$(getopt -o fh --long proceed-on-recover-dentries-failure,help -- "$@")
+OPTIONS=$(getopt -o b:d:fh --long backup-journal:,log-dir:,proceed-on-recover-dentries-failure,help -- "$@")
 
 eval set -- "$OPTIONS"
 while true; do
     case "$1" in
+        -b|--backup-journal)
+            BACKUP_JOURNAL="$2"
+            shift 2
+            ;;
+        -d|--log-dir)
+            if [ -d "$2" ]; then
+                echo "Log directory $2 already exists" >&2
+                exit 1
+            fi
+            LOGDIR="$2"
+            shift 2
+            ;;
         -f|--proceed-on-recover-dentries-failure)
             PROCEED_ON_RECOVER_DENTRIES_FAILURE=YES
             shift
@@ -138,6 +169,8 @@ while true; do
     esac
 done
 
+RECOVERY_STEPS[backup]="BACKING JOURNAL UP TO ${BACKUP_JOURNAL}"
+
 if [ -n "$1" ]; then
     CEPHFS=$1
     shift
@@ -153,6 +186,7 @@ RANKS="$@"
 set_ranks
 
 set_compat_flags
+prepare_log_dir
 
 trap on_exit EXIT
 
@@ -160,8 +194,9 @@ if [ -n "${BACKUP_JOURNAL}" ]; then
     set_recovery_step backup
     for rank in ${RANKS}; do
 	echo "Backing journal up for rank ${rank}" 2>&2
-        cephfs-journal-tool --rank=${CEPHFS}:${rank} journal export \
-			    "${BACKUP_JOURNAL}".${rank}
+        run journal_export.${rank} \
+            cephfs-journal-tool --rank=${CEPHFS}:${rank} journal export \
+                "${BACKUP_JOURNAL}".${rank}
     done
 fi
 
@@ -174,8 +209,9 @@ done
 
 set_recovery_step reset_journal
 for rank in ${RANKS}; do
-    cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
-                        ${JOURNAL_RESET_COMPAT_FLAGS}
+    run journal_reset.${rank} \
+        cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
+            ${JOURNAL_RESET_COMPAT_FLAGS}
 done
 
 set_recovery_step end
