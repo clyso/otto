@@ -16,6 +16,7 @@ RANKS=
 LOGDIR=recover_journal_logs
 BACKUP_JOURNAL="${BACKUP_JOURNAL:-}"
 JOURNAL_RESET_COMPAT_FLAGS=
+: ${DRY_RUN:=}
 : ${PROCEED_ON_RECOVER_DENTRIES_FAILURE:=}
 
 declare -A RECOVERY_STEPS=(
@@ -38,6 +39,7 @@ usage() {
     echo
     echo "  -b | --backup-journal <path>               export journals to <path>.<rank>"
     echo "  -d | --log-dir <dir>                       directory to store logs (default: ${LOGDIR})"
+    echo "  -n | --dry-run                             log recovery commands without executing them"
     echo "  -f | --proceed-on-recover-dentries-failure   continue to journal reset if"
     echo "                                               recover_dentries fails"
     echo "  -h | --help                                  show this help message and exit"
@@ -122,8 +124,15 @@ recover_dentries() {
 
 run() {
     local name="$1"; shift
+    local dry=
 
-    echo "running: $@" >&2
+    test "${DRY_RUN}" = "YES" && dry="dry-"
+
+    echo "${dry}running: $@" >&2
+    echo $(date "+%F %T") "$@" >> "${LOGDIR}/${name}.log"
+
+    test "${DRY_RUN}" = "YES" && return
+
     "$@" 2>&1 | tee -a "${LOGDIR}/${name}.log" >&2
 }
 
@@ -132,7 +141,7 @@ run() {
 # Main
 #
 
-OPTIONS=$(getopt -o b:d:fh --long backup-journal:,log-dir:,proceed-on-recover-dentries-failure,help -- "$@")
+OPTIONS=$(getopt -o b:d:fhn --long backup-journal:,log-dir:,proceed-on-recover-dentries-failure,help,dry-run -- "$@")
 
 eval set -- "$OPTIONS"
 while true; do
@@ -148,6 +157,10 @@ while true; do
             fi
             LOGDIR="$2"
             shift 2
+            ;;
+        -n|--dry-run)
+            DRY_RUN=YES
+            shift
             ;;
         -f|--proceed-on-recover-dentries-failure)
             PROCEED_ON_RECOVER_DENTRIES_FAILURE=YES
