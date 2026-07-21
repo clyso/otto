@@ -35,6 +35,7 @@ JOURNAL_RESET_COMPAT_FLAGS=
 : ${SCAN_FRAGS:=}
 RESET_FS_COUNT=0
 : ${ACTIVATE_AND_SCRUB:=}
+: ${ACTIVATE_TIMEOUT:=}
 : ${PROCEED_ON_JOURNAL_RECOVER_FAILURE:=}
 
 declare -A RECOVERY_STEPS=(
@@ -84,6 +85,9 @@ usage() {
     echo "  -n | --dry-run                log recovery commands without executing them"
     echo "  -r | --ranks <N>              number of MDS ranks (get from FSMap if not set)"
     echo "  -s | --wait-sleep <seconds>   wait sleep interval (default: ${WAIT_SLEEP_INTERVAL})"
+    echo "  -t | --activate-timeout <s>   give up waiting for mds active / scrub"
+    echo "                                completion after <s> seconds with"
+    echo "                                --activate-and-scrub (default: wait forever)"
     echo "  -w | --workers <N>            number of worker processes (default: ${NWORKERS})"
     echo "  -C | --force-corrupt          overrite apparently corrupt structures"
     echo "  -I | --force-init             write root inodes even if they exist"
@@ -616,13 +620,13 @@ wait_cleanup_complete() {
     done
 }
 
-# Poll until mds.<fs>:0 reports state "active". Loops indefinitely (no
-# timeout) since a legitimately large recovery can take a long time to
-# replay/rejoin -- interrupt the script if you believe it's truly stuck
-# (see the perf-counter / rados-object-count journal-size estimation
-# techniques for gauging that before you start).
+# Poll until mds.<fs>:0 reports state "active". Loops indefinitely unless
+# ACTIVATE_TIMEOUT is set, since a legitimately large recovery can take a
+# long time to replay/rejoin (see the perf-counter / rados-object-count
+# journal-size estimation techniques for gauging that before you start).
 wait_mds_active() {
     local state
+    local elapsed=0
 
     while true; do
         state=$(ceph fs status "${CEPHFS}" --format json 2>/dev/null |
@@ -639,18 +643,33 @@ wait_mds_active() {
         fi
 
         echo "waiting for mds.${CEPHFS}:0 to become active (current state: ${state:-unknown})" >&2
+
+        if [ -n "${ACTIVATE_TIMEOUT}" ] && [ "${elapsed}" -ge "${ACTIVATE_TIMEOUT}" ]; then
+            echo "timed out after ${elapsed}s waiting for mds.${CEPHFS}:0 to become active" >&2
+            return 1
+        fi
+
         sleep "${WAIT_SLEEP_INTERVAL}"
+        elapsed=$((elapsed + WAIT_SLEEP_INTERVAL))
     done
 }
 
 wait_scrub_complete() {
     local tag="$1"
+    local elapsed=0
 
     while run_capture ceph tell mds."${CEPHFS}":0 scrub status --format json |
               jq -e --arg tag "${tag}" 'has("scrubs") and (.scrubs | has($tag))' \
               >/dev/null 2>&1; do
         echo "waiting for scrub ${tag} to complete" >&2
+
+        if [ -n "${ACTIVATE_TIMEOUT}" ] && [ "${elapsed}" -ge "${ACTIVATE_TIMEOUT}" ]; then
+            echo "timed out after ${elapsed}s waiting for scrub ${tag} to complete" >&2
+            return 1
+        fi
+
         sleep "${WAIT_SLEEP_INTERVAL}"
+        elapsed=$((elapsed + WAIT_SLEEP_INTERVAL))
     done
 }
 
@@ -686,7 +705,10 @@ activate_and_scrub() {
     echo "started scrub ${scrub_tag}" >&2
     echo "${scrub_tag}" > "${LOGDIR}"/scrub_tag
 
-    wait_scrub_complete "${scrub_tag}"
+    if ! wait_scrub_complete "${scrub_tag}"; then
+        echo "leaving refuse_client_session enabled; scrub ${scrub_tag} may still be running" >&2
+        return 1
+    fi
 
     local damage
     damage=$(run_capture ceph tell mds."${CEPHFS}":0 damage ls --format json)
@@ -712,7 +734,7 @@ activate_and_scrub() {
 #
 
 
-OPTIONS=$(getopt -o ab:dfhjl:mnr:s:w:CIP: --long activate-and-scrub,backup-dir:,scan-frags,fail-fs,help,proceed-on-journal-recover-failure,log-dir:,reset-fs,dry-run,ranks:,wait-sleep:,workers:,force-corrupt,force-init,force-pool: -- "$@")
+OPTIONS=$(getopt -o ab:dfhjl:mnr:s:t:w:CIP: --long activate-and-scrub,backup-dir:,scan-frags,fail-fs,help,proceed-on-journal-recover-failure,log-dir:,reset-fs,dry-run,ranks:,wait-sleep:,activate-timeout:,workers:,force-corrupt,force-init,force-pool: -- "$@")
 
 eval set -- "$OPTIONS"
 while true; do
@@ -767,6 +789,10 @@ while true; do
             ;;
         -s|--wait-sleep)
             WAIT_SLEEP_INTERVAL="$2"
+            shift 2
+            ;;
+        -t|--activate-timeout)
+            ACTIVATE_TIMEOUT="$2"
             shift 2
             ;;
         -w|--workers)
@@ -828,6 +854,12 @@ if [ -n "${NRANKS}" ] && ! [ ${NRANKS} -ge 0 ]; then
 fi
 if ! [ ${NWORKERS} -gt 0 -a ${NWORKERS} -le 512 ]; then
     echo "invalid nworkers: ${NWORKERS}" 2>&2
+    usage >&2
+    exit 1
+fi
+
+if [ -n "${ACTIVATE_TIMEOUT}" ] && ! [ "${ACTIVATE_TIMEOUT}" -gt 0 ] 2>/dev/null; then
+    echo "invalid activate-timeout: ${ACTIVATE_TIMEOUT}" 2>&2
     usage >&2
     exit 1
 fi
