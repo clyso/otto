@@ -5,6 +5,11 @@
 #
 # https://docs.ceph.com/en/quincy/cephfs/disaster-recovery-experts/#recovery-from-missing-metadata-objects
 #
+# Optionally, it can also drive the steps around that procedure: failing
+# the filesystem before recovery, resetting the FSMap to a single rank,
+# scanning for orphaned directory fragments, and activating the MDS +
+# running a forward scrub afterward.
+#
 
 set -eo pipefail
 
@@ -25,14 +30,25 @@ JOURNAL_RESET_COMPAT_FLAGS=
 : ${FORCE_CORRUPT:=}
 : ${FORCE_POOL:=}
 : ${DRY_RUN:=}
+: ${FAIL_FS:=}
+: ${SCAN_FRAGS:=}
+RESET_FS_COUNT=0
+: ${ACTIVATE_AND_SCRUB:=}
+: ${PROCEED_ON_JOURNAL_RECOVER_FAILURE:=}
 
 declare -A RECOVERY_STEPS=(
-  [init]="INITIALIZING METADATA"
-  [scan_extents]="SCANNING EXTENTS"
-  [scan_inodes]="SCANNING INODES"
-  [scan_links]="SCANNING LINKS"
-  [cleanup]="CLEANUP"
-  [end]="RECOVERY COMPLETE"
+    [fail_fs]="MARKING FILESYSTEM FAILED"
+    [init]="INITIALIZING METADATA"
+    [reset_fs]="RESETTING FS MAP TO A SINGLE RANK"
+    [data_scan_init]="REGENERATING ROOT INODES"
+    [scan_extents]="SCANNING EXTENTS"
+    [scan_inodes]="SCANNING INODES"
+    [scan_links]="SCANNING LINKS"
+    [scan_frags]="SCANNING FRAGS"
+    [scan_links_2]="RE-SCANNING LINKS AFTER SCAN_FRAGS"
+    [cleanup]="CLEANUP"
+    [activate_and_scrub]="ACTIVATING MDS AND SCRUBBING"
+    [end]="RECOVERY COMPLETE"
 )
 CURRENT_RECOVERY_STEP=""
 
@@ -45,10 +61,24 @@ usage() {
     echo
     echo "Options:"
     echo
-    echo "  -d | --log-dir <dir>          directory to store logs (default: ${LOGDIR})"
+    echo "  -a | --activate-and-scrub     forbid client sessions, activate the mds,"
+    echo "                                run a forward scrub, check for damage, and"
+    echo "                                re-allow client sessions if none is found"
+    echo "  -d | --scan-frags             also run 'cephfs-data-scan scan_frags' and"
+    echo "                                re-run scan_links afterwards"
+    echo "  -f | --fail-fs                mark the filesystem failed before recovery"
     echo "  -h | --help                   show this help message and exit"
+    echo "  -j | --proceed-on-journal-recover-failure"
+    echo "                                continue to journal reset even if a rank's"
+    echo "                                recover_dentries fails"
+    echo "  -l | --log-dir <dir>          directory to store logs (default: ${LOGDIR})"
+    echo "  -m | --reset-fs               reset the FSMap to a single rank (ceph fs"
+    echo "                                reset) after per-rank journal/table recovery;"
+    echo "                                requires --scan-frags (stray directories under"
+    echo "                                retired ranks otherwise leak); pass twice to"
+    echo "                                proceed without --scan-frags anyway"
     echo "  -n | --dry-run                log recovery commands without executing them"
-    echo "  -r | --ranks <N>              number of MDS ranks (get from FSMAp if not set)"
+    echo "  -r | --ranks <N>              number of MDS ranks (get from FSMap if not set)"
     echo "  -s | --wait-sleep <seconds>   wait sleep interval (default: ${WAIT_SLEEP_INTERVAL})"
     echo "  -w | --workers <N>            number of worker processes (default: ${NWORKERS})"
     echo "  -C | --force-corrupt          overrite apparently corrupt structures"
@@ -81,8 +111,8 @@ on_exit() {
 
 check_deps() {
     if ! which jq >/dev/null 2>&1; then
-	echo 'jq is not installed' >&2
-	return 1
+        echo 'jq is not installed' >&2
+        return 1
     fi
 }
 
@@ -106,25 +136,25 @@ get_nranks() {
     test -n "${NRANKS}" && test "${NRANKS}" -gt 0 && return
 
     NRANKS=$(ceph fs get ${CEPHFS} --format json |
-		 jq '.mdsmap.max_mds')
+                 jq '.mdsmap.max_mds')
     if [ -z "${NRANKS}" ] || [ "${NRANKS}" -le 0 ]; then
-	echo "failed to get nranks for fs ${CEPHFS}" 2>&2
-	return 1
+        echo "failed to get nranks for fs ${CEPHFS}" 2>&2
+        return 1
     fi
 }
 
 get_metadatapool() {
     METADATAPOOLID=$(ceph fs get ${CEPHFS} --format json |
-			 jq '.mdsmap.metadata_pool')
+                          jq '.mdsmap.metadata_pool')
     if [ -z "${METADATAPOOLID}" ] || [ "${METADATAPOOLID}" -le 0 ]; then
-	echo "failed to get metadatapoolid for fs ${CEPHFS}" 2>&2
-	return 1
+        echo "failed to get metadatapoolid for fs ${CEPHFS}" 2>&2
+        return 1
     fi
 
     METADATAPOOL=$(ceph df | awk '$2 == '${METADATAPOOLID}' {print $1}')
     if ! [ -n "${METADATAPOOL}" ]; then
-	echo "failed to get datapool for datapoolid ${METADATAPOOLID}" 2>&2
-	return 1
+        echo "failed to get datapool for datapoolid ${METADATAPOOLID}" 2>&2
+        return 1
     fi
 }
 
@@ -133,27 +163,27 @@ get_datapools() {
 
     DATAPOOLIDS="$(ceph fs get ${CEPHFS} --format json | jq '.mdsmap.data_pools[]')"
     if [ -z "${DATAPOOLIDS}" ]; then
-	echo "failed to get datapoolid for fs ${CEPHFS}: ${DATAPOOLIDS}" 2>&2
-	return 1
+        echo "failed to get datapoolid for fs ${CEPHFS}: ${DATAPOOLIDS}" 2>&2
+        return 1
     fi
 
     for id in ${DATAPOOLIDS}; do
-	if [ ${id} -le 0 ]; then
-	    echo "invalid datapool id for fs ${CEPHFS}: ${id}" 2>&2
-	    return 1
-	fi
-	datapool=$(ceph df | awk '$2 == '${id}' {print $1}')
-	if [ -z "${datapool}" ]; then
-	    echo "failed to get datapool for datapoolid ${id}" 2>&2
-	    return 1
-	fi
-	if [ -z "${DATAPOOL}" ]; then
-	    DATAPOOL=${datapool}
-	elif [ -z "${EXTRA_DATAPOOLS}" ]; then
-	    EXTRA_DATAPOOLS=${datapool}
-	else
-	    EXTRA_DATAPOOLS="${EXTRA_DATAPOOLS} ${datapool}"
-	fi
+        if [ ${id} -le 0 ]; then
+            echo "invalid datapool id for fs ${CEPHFS}: ${id}" 2>&2
+            return 1
+        fi
+        datapool=$(ceph df | awk '$2 == '${id}' {print $1}')
+        if [ -z "${datapool}" ]; then
+            echo "failed to get datapool for datapoolid ${id}" 2>&2
+            return 1
+        fi
+        if [ -z "${DATAPOOL}" ]; then
+            DATAPOOL=${datapool}
+        elif [ -z "${EXTRA_DATAPOOLS}" ]; then
+            EXTRA_DATAPOOLS=${datapool}
+        else
+            EXTRA_DATAPOOLS="${EXTRA_DATAPOOLS} ${datapool}"
+        fi
     done
 }
 
@@ -172,6 +202,40 @@ run() {
     "$@" 2>&1 | tee -a "${LOGDIR}/${name}.log" >&2
 }
 
+# Run $@ and print its stdout, honoring --dry-run the same way run() does,
+# but without teeing to a log file -- used for commands whose output we
+# need to parse (e.g. jq'ing a JSON reply), not just log.
+run_capture() {
+    local dry=
+
+    test "${DRY_RUN}" = "YES" && dry="dry-"
+
+    echo "${dry}running: $@" >&2
+    echo $(date "+%F %T") "$@" >> "${LOGDIR}"/run.log
+
+    test "${DRY_RUN}" = "YES" && return
+
+    "$@"
+}
+
+journal_recover_dentries() {
+    local rank="$1"
+
+    if run journal_recover_dentries.${rank} \
+        cephfs-journal-tool --rank=${CEPHFS}:${rank} event recover_dentries summary; then
+        return 0
+    fi
+
+    if [ "${PROCEED_ON_JOURNAL_RECOVER_FAILURE}" = "YES" ]; then
+        echo "recover_dentries failed for rank ${rank}, proceeding with journal reset" >&2
+        return 0
+    fi
+
+    echo "recover_dentries failed for rank ${rank}" >&2
+    echo "re-run with --proceed-on-journal-recover-failure to continue anyway" >&2
+    return 1
+}
+
 cephfs_data_scan() {
     test -n "$1"
     local cmd="$1"; shift
@@ -182,19 +246,19 @@ cephfs_data_scan() {
     local worker="$1"; shift
 
     if [ "${cmd}" = "scan_extents" -a -n "${EXTRA_DATAPOOLS}" ]; then
-	datapools="${datapools} ${EXTRA_DATAPOOLS}"
+        datapools="${datapools} ${EXTRA_DATAPOOLS}"
     fi
 
     if [ "${cmd}" = "cleanup" ]; then
-	debug_mds=20
+        debug_mds=20
     fi
 
     echo "${cmd} ${worker} running" >&2
 
     run cephfs-data-scan."${cmd}"."${worker}" \
-	cephfs-data-scan "${cmd}" --worker_n "${worker}" \
-	--worker_m "${NWORKERS}" --filesystem "${CEPHFS}" \
-	--debug-mds ${debug_mds} "$@" ${datapools}
+        cephfs-data-scan "${cmd}" --worker_n "${worker}" \
+        --worker_m "${NWORKERS}" --filesystem "${CEPHFS}" \
+        --debug-mds ${debug_mds} "$@" ${datapools}
 
     echo "${cmd} ${worker} complete" >&2
 }
@@ -206,7 +270,7 @@ scan_extents() {
 
     cephfs_data_scan scan_extents "${worker}" "$@" |
     awk -v f=${LOGDIR}/num_scan_extents.${worker}.dat \
-	-v f0=${LOGDIR}/num_0_scan_extents.${worker}.dat \
+        -v f0=${LOGDIR}/num_0_scan_extents.${worker}.dat \
     '
         BEGIN {
             n = n0 = 0
@@ -261,14 +325,20 @@ scan_inodes() {
     '
 }
 
+# scan_links may be run twice: once in its normal pipeline position, and
+# again after scan_frags (which can itself introduce duplicate-primary /
+# bad-nlink dentries that only a follow-up scan_links pass resolves). The
+# "tag" argument keeps each pass's run/log/dat files distinct.
 scan_links() {
-    run cephfs-data-scan.scan_links.0 \
-	cephfs-data-scan scan_links --filesystem "${CEPHFS}" --debug-mds 10 "$@" |
-    awk -v f=${LOGDIR}/num_scan_links.0.dat \
-	-v d=${LOGDIR}/num_scan_links_dups.dat \
-	-v r=${LOGDIR}/num_scan_links_rem_dups.dat \
-	-v b=${LOGDIR}/num_scan_links_bad.dat \
-	-v i=${LOGDIR}/num_scan_links_injected.dat \
+    local tag="${1:-1}"; shift || true
+
+    run cephfs-data-scan.scan_links.${tag} \
+        cephfs-data-scan scan_links --filesystem "${CEPHFS}" --debug-mds 10 "$@" |
+    awk -v f=${LOGDIR}/num_scan_links.${tag}.dat \
+        -v d=${LOGDIR}/num_scan_links_dups.${tag}.dat \
+        -v r=${LOGDIR}/num_scan_links_rem_dups.${tag}.dat \
+        -v b=${LOGDIR}/num_scan_links_bad.${tag}.dat \
+        -v i=${LOGDIR}/num_scan_links_injected.${tag}.dat \
     '
         BEGIN {
             n = 0
@@ -285,24 +355,24 @@ scan_links() {
 
         /processing .* dup_primaries/ {
             print(n) > f; close(f)
-	    sub(/^.*datascan.scan_links: /, "")
-	    print > d; close(d)
+            sub(/^.*datascan.scan_links: /, "")
+            print > d; close(d)
         }
 
-	/removing dup dentries/ {
-	    sub(/^.*datascan.scan_links: /, "")
-	    print > r; close(r)
-	}
+        /removing dup dentries/ {
+            sub(/^.*datascan.scan_links: /, "")
+            print > r; close(r)
+        }
 
-	/processing .* bad_nlink_inos/ {
-	    sub(/^.*datascan.scan_links: /, "")
-	    print > b; close(b)
-	}
+        /processing .* bad_nlink_inos/ {
+            sub(/^.*datascan.scan_links: /, "")
+            print > b; close(b)
+        }
 
-	/processing .* injected_inos/ {
-	    sub(/^.*datascan.scan_links: /, "")
-	    print > i; close(i)
-	}
+        /processing .* injected_inos/ {
+            sub(/^.*datascan.scan_links: /, "")
+            print > i; close(i)
+        }
 
         END {
             # ensure all files are created even if no matches
@@ -315,6 +385,47 @@ scan_links() {
     '
 }
 
+# scan_frags, like scan_links, processes every metadata object in a single
+# (non-worker-sharded) pass -- cephfs-data-scan has no --worker_n/--worker_m
+# support for it.
+scan_frags() {
+    local extra_args=
+
+    if [ "${FORCE_CORRUPT}" = "YES" ]; then
+        extra_args="--force-corrupt"
+    fi
+
+    # Unlike the other cephfs-data-scan commands, scan_frags does not
+    # log a "handling object" message for every object it processes, so
+    # the objects are counted using the messages of the object iterator,
+    # which are logged at debug_mds 20 ("OSD matched oid" when the
+    # objects are filtered by the OSD, "Applying filter to" when the
+    # filtering is done by the client). Note that the objects filtered
+    # out by the OSD are not counted, so the reported progress may stop
+    # short of 100%.
+    run cephfs-data-scan.scan_frags \
+        cephfs-data-scan scan_frags --filesystem "${CEPHFS}" --debug-mds 20 ${extra_args} |
+    awk -v f=${LOGDIR}/num_scan_frags.dat \
+    '
+        BEGIN {
+            n = 0
+            print(n) > f; close(f)
+        }
+
+        /OSD matched oid|Applying filter to/ {
+            n++
+        }
+
+        n % 1000 == 0 {
+            print(n) > f; close(f)
+        }
+
+        END {
+            print(n) > f; close(f)
+        }
+    '
+}
+
 cleanup() {
     test -n "$1"
 
@@ -322,24 +433,24 @@ cleanup() {
 
     cephfs_data_scan cleanup "${worker}" "$@" |
     awk -v f=${LOGDIR}/num_cleanup."${worker}".dat \
-	'
-		BEGIN {
-			n = 0
-			print(n) > f; close(f)
-		}
+        '
+            BEGIN {
+                n = 0
+                print(n) > f; close(f)
+            }
 
-		/match|Non-zeroth object|skipping|read/ {
-			n++
-		}
+            /match|Non-zeroth object|skipping|read/ {
+                n++
+            }
 
-		n % 1000 == 0 {
-			print(n) > f; close(f)
-		}
+            n % 1000 == 0 {
+                print(n) > f; close(f)
+            }
 
-		END {
-			print(n) > f; close(f)
-		}
-	'
+            END {
+                print(n) > f; close(f)
+            }
+        '
 }
 
 wait_scan_extents_complete() {
@@ -350,21 +461,21 @@ wait_scan_extents_complete() {
     for pool in ${EXTRA_DATAPOOLS}; do
         eobjnum=$(ceph df --format json |
                       jq -r '.pools[] | select(.name == "'${pool}'").stats.objects')
-	objnum=$((objnum + eobjnum))
+        objnum=$((objnum + eobjnum))
     done
 
     if [ -z "${objnum}" ] || [ "${objnum}" -eq 0 ]; then
-	wait
-	return
+        wait
+        return
     fi
 
     while sleep ${WAIT_SLEEP_INTERVAL}; do
-	sobjnum=$(awk '{s += $1} END{print s}' "${LOGDIR}"/num_scan_extents.*.dat)
-	test -n "${sobjnum}" || sobjnum=0
-	echo "${sobjnum}/${objnum} objects ($((100 * sobjnum / objnum))%) processed" >&2
+        sobjnum=$(awk '{s += $1} END{print s}' "${LOGDIR}"/num_scan_extents.*.dat)
+        test -n "${sobjnum}" || sobjnum=0
+        echo "${sobjnum}/${objnum} objects ($((100 * sobjnum / objnum))%) processed" >&2
 
-	jobs > "${LOGDIR}"/jobs
-	test $(wc -l < "${LOGDIR}"/jobs) -eq 0 && break
+        jobs > "${LOGDIR}"/jobs
+        test $(wc -l < "${LOGDIR}"/jobs) -eq 0 && break
     done
 }
 
@@ -374,75 +485,97 @@ wait_scan_inodes_complete() {
     objnum=$(awk '{s += $1} END{print s}' "${LOGDIR}"/num_0_scan_extents.*.dat)
 
     if [ -z "${objnum}" ] || [ "${objnum}" -eq 0 ]; then
-	wait
-	return
+        wait
+        return
     fi
 
     while sleep ${WAIT_SLEEP_INTERVAL}; do
-	sobjnum=$(awk '{s += $1} END{print s}' "${LOGDIR}"/num_scan_inodes.*.dat)
-	test -n "${sobjnum}" || sobjnum=0
-	echo "${sobjnum}/${objnum} objects ($((100 * sobjnum / objnum))%) processed" >&2
+        sobjnum=$(awk '{s += $1} END{print s}' "${LOGDIR}"/num_scan_inodes.*.dat)
+        test -n "${sobjnum}" || sobjnum=0
+        echo "${sobjnum}/${objnum} objects ($((100 * sobjnum / objnum))%) processed" >&2
 
-	jobs > "${LOGDIR}"/jobs
-	test $(wc -l < "${LOGDIR}"/jobs) -eq 0 && break
+        jobs > "${LOGDIR}"/jobs
+        test $(wc -l < "${LOGDIR}"/jobs) -eq 0 && break
     done
 }
 
 wait_scan_links_complete() {
+    local tag="${1:-1}"
     local objnum sobjnum
     local scan_done dup_done rem_dup_done bad_done
     local sleep_interval=${WAIT_SLEEP_INTERVAL}
 
     test -n "${PROCESS_SCAN_LINK_LOG}" &&
     objnum=$(ceph df --format json |
-		 jq -r '.pools[] | select(.name == "'${METADATAPOOL}'").stats.objects')
+                 jq -r '.pools[] | select(.name == "'${METADATAPOOL}'").stats.objects')
 
     if [ -z "${objnum}" ] || [ "${objnum}" -eq 0 ]; then
-	wait
-	return
+        wait
+        return
     fi
 
     # scan_links scans metadata objects twice
     objnum=$((objnum * 2))
 
     while sleep ${sleep_interval}; do
-	if [ -n "${bad_done}" ]; then
-	    test -f ${LOGDIR}/num_scan_links_injected.dat || continue
-	    cat ${LOGDIR}/num_scan_links_injected.dat >&2
-	    wait
-	    break
-	fi
+        if [ -n "${bad_done}" ]; then
+            test -f ${LOGDIR}/num_scan_links_injected.${tag}.dat || continue
+            cat ${LOGDIR}/num_scan_links_injected.${tag}.dat >&2
+            wait
+            break
+        fi
 
-	if [ -n "${rem_dup_done}" ]; then
-	    if [ -f ${LOGDIR}/num_scan_links_bad.dat ]; then
-		cat ${LOGDIR}/num_scan_links_bad.dat >&2
-		bad_done=1
-	    fi
-	    continue
-	fi
+        if [ -n "${rem_dup_done}" ]; then
+            if [ -f ${LOGDIR}/num_scan_links_bad.${tag}.dat ]; then
+                cat ${LOGDIR}/num_scan_links_bad.${tag}.dat >&2
+                bad_done=1
+            fi
+            continue
+        fi
 
-	if [ -n "${dup_done}" ]; then
-	    if [ -f ${LOGDIR}/num_scan_links_rem_dups.dat ]; then
-		cat ${LOGDIR}/num_scan_links_rem_dups.dat >&2
-		rem_dup_done=1
-	    fi
-	    continue
-	fi
+        if [ -n "${dup_done}" ]; then
+            if [ -f ${LOGDIR}/num_scan_links_rem_dups.${tag}.dat ]; then
+                cat ${LOGDIR}/num_scan_links_rem_dups.${tag}.dat >&2
+                rem_dup_done=1
+            fi
+            continue
+        fi
 
-	if [ -n "${scan_done}" ]; then
-	    cat ${LOGDIR}/num_scan_links_dups.dat >&2
-	    dup_done=1
-	    continue
-	fi
+        if [ -n "${scan_done}" ]; then
+            cat ${LOGDIR}/num_scan_links_dups.${tag}.dat >&2
+            dup_done=1
+            continue
+        fi
 
-	sobjnum=$(awk '{s += $1} END{print s}' "${LOGDIR}"/num_scan_links.*.dat)
-	test -n "${sobjnum}" || sobjnum=0
-	echo "${sobjnum}/${objnum} objects ($((100 * sobjnum / objnum))%) processed" >&2
+        sobjnum=$(awk '{s += $1} END{print s}' "${LOGDIR}"/num_scan_links.${tag}.dat)
+        test -n "${sobjnum}" || sobjnum=0
+        echo "${sobjnum}/${objnum} objects ($((100 * sobjnum / objnum))%) processed" >&2
 
-	if [ -f ${LOGDIR}/num_scan_links_dups.dat ]; then
-	    scan_done=1
-	    sleep_interval=1
-	fi
+        if [ -f ${LOGDIR}/num_scan_links_dups.${tag}.dat ]; then
+            scan_done=1
+            sleep_interval=1
+        fi
+    done
+}
+
+wait_scan_frags_complete() {
+    local objnum sobjnum
+
+    objnum=$(ceph df --format json |
+                 jq -r '.pools[] | select(.name == "'${METADATAPOOL}'").stats.objects')
+
+    if [ -z "${objnum}" ] || [ "${objnum}" -eq 0 ]; then
+        wait
+        return
+    fi
+
+    while sleep ${WAIT_SLEEP_INTERVAL}; do
+        sobjnum=$(awk '{s += $1} END{print s}' "${LOGDIR}"/num_scan_frags.dat)
+        test -n "${sobjnum}" || sobjnum=0
+        echo "${sobjnum}/${objnum} objects ($((100 * sobjnum / objnum))%) processed" >&2
+
+        jobs > "${LOGDIR}"/jobs
+        test $(wc -l < "${LOGDIR}"/jobs) -eq 0 && break
     done
 }
 
@@ -456,18 +589,109 @@ wait_cleanup_complete() {
                  jq -r '.pools[] | select(.name == "'${DATAPOOL}'").stats.objects')
 
     if [ -z "${objnum}" ] || [ "${objnum}" -eq 0 ]; then
-	wait
-	return
+        wait
+        return
     fi
 
     while sleep ${WAIT_SLEEP_INTERVAL}; do
-	sobjnum=$(awk '{s += $1} END{print s}' "${LOGDIR}"/num_cleanup.*.dat)
-	test -n "${sobjnum}" || sobjnum=0
-	echo "${sobjnum}/${objnum} objects ($((100 * sobjnum / objnum))%) processed" >&2
+        sobjnum=$(awk '{s += $1} END{print s}' "${LOGDIR}"/num_cleanup.*.dat)
+        test -n "${sobjnum}" || sobjnum=0
+        echo "${sobjnum}/${objnum} objects ($((100 * sobjnum / objnum))%) processed" >&2
 
-	jobs > "${LOGDIR}"/jobs
-	test $(wc -l < "${LOGDIR}"/jobs) -eq 0 && break
+        jobs > "${LOGDIR}"/jobs
+        test $(wc -l < "${LOGDIR}"/jobs) -eq 0 && break
     done
+}
+
+# Poll until mds.<fs>:0 reports state "active". Loops indefinitely (no
+# timeout) since a legitimately large recovery can take a long time to
+# replay/rejoin -- interrupt the script if you believe it's truly stuck
+# (see the perf-counter / rados-object-count journal-size estimation
+# techniques for gauging that before you start).
+wait_mds_active() {
+    local state
+
+    while true; do
+        state=$(ceph fs status "${CEPHFS}" --format json 2>/dev/null |
+                    jq -r '.mdsmap[] | select(.rank == 0) | .state' 2>/dev/null)
+
+        if [ "${state}" = "active" ]; then
+            return 0
+        fi
+
+        if [ "${state}" = "damaged" ]; then
+            echo "mds.${CEPHFS}:0 reports state 'damaged' -- will not become active on its own" >&2
+            echo "check: ceph tell mds.${CEPHFS}:0 damage ls" >&2
+            return 1
+        fi
+
+        echo "waiting for mds.${CEPHFS}:0 to become active (current state: ${state:-unknown})" >&2
+        sleep "${WAIT_SLEEP_INTERVAL}"
+    done
+}
+
+wait_scrub_complete() {
+    local tag="$1"
+
+    while run_capture ceph tell mds."${CEPHFS}":0 scrub status --format json |
+              jq -e --arg tag "${tag}" 'has("scrubs") and (.scrubs | has($tag))' \
+              >/dev/null 2>&1; do
+        echo "waiting for scrub ${tag} to complete" >&2
+        sleep "${WAIT_SLEEP_INTERVAL}"
+    done
+}
+
+# Forbid new client sessions, activate the mds, run a forward+repair
+# scrub, and check the damage table. If scrub leaves nothing behind,
+# clients are allowed back in; otherwise refuse_client_session is left
+# enabled and the damage is reported for manual follow-up.
+activate_and_scrub() {
+    run refuse_client_session_on \
+        ceph fs set "${CEPHFS}" refuse_client_session true
+
+    run fs_joinable \
+        ceph fs set "${CEPHFS}" joinable true
+
+    if [ "${DRY_RUN}" = "YES" ]; then
+        echo "dry-run: skipping wait-for-active/scrub/damage-check" >&2
+        return 0
+    fi
+
+    if ! wait_mds_active; then
+        echo "mds did not become active; leaving refuse_client_session enabled" >&2
+        return 1
+    fi
+
+    local scrub_tag
+    scrub_tag=$(run_capture ceph tell mds."${CEPHFS}":0 scrub start / recursive,repair,force \
+                    --format json | jq -r '.scrub_tag // empty')
+    if [ -z "${scrub_tag}" ]; then
+        echo "failed to start scrub; leaving refuse_client_session enabled" >&2
+        return 1
+    fi
+
+    echo "started scrub ${scrub_tag}" >&2
+    echo "${scrub_tag}" > "${LOGDIR}"/scrub_tag
+
+    wait_scrub_complete "${scrub_tag}"
+
+    local damage
+    damage=$(run_capture ceph tell mds."${CEPHFS}":0 damage ls --format json)
+    echo "${damage}" | tee "${LOGDIR}"/damage_ls.json >&2
+
+    if [ "$(echo "${damage}" | jq 'length')" -eq 0 ]; then
+        echo "no damage found after scrub, re-allowing client sessions" >&2
+        run refuse_client_session_off \
+            ceph fs set "${CEPHFS}" refuse_client_session false
+        return 0
+    fi
+
+    echo "damage found after scrub -- NOT re-allowing client sessions" >&2
+    echo "review the entries above (see also ${LOGDIR}/damage_ls.json and" >&2
+    echo "'ceph tell mds.${CEPHFS}:0 damage ls'), decide how to handle each one," >&2
+    echo "then run: ceph fs set ${CEPHFS} refuse_client_session false" >&2
+    echo "once you're ready to let clients back in" >&2
+    return 1
 }
 
 #
@@ -475,49 +699,69 @@ wait_cleanup_complete() {
 #
 
 
-OPTIONS=$(getopt -o d:hnr:s:w:CIP: --long log-dir:,help,dry-run,ranks:,wait-sleep:,workers:,force-corrupt,force-init,force-pool: -- "$@")
+OPTIONS=$(getopt -o adfhjl:mnr:s:w:CIP: --long activate-and-scrub,scan-frags,fail-fs,help,proceed-on-journal-recover-failure,log-dir:,reset-fs,dry-run,ranks:,wait-sleep:,workers:,force-corrupt,force-init,force-pool: -- "$@")
 
 eval set -- "$OPTIONS"
 while true; do
     case "$1" in
-	-d|--log-dir)
-	    if [ -d "$2" ]; then
-		echo "Log directory $2 already exists" >&2
-		exit 1
-	    fi
-            LOGDIR="$2"
-	    shift 2
-	    ;;
+        -a|--activate-and-scrub)
+            ACTIVATE_AND_SCRUB=YES
+            shift
+            ;;
+        -d|--scan-frags)
+            SCAN_FRAGS=YES
+            shift
+            ;;
+        -f|--fail-fs)
+            FAIL_FS=YES
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
             ;;
-	-n|--dry-run)
-	    DRY_RUN=YES
-	    shift
-	    ;;
+        -j|--proceed-on-journal-recover-failure)
+            PROCEED_ON_JOURNAL_RECOVER_FAILURE=YES
+            shift
+            ;;
+        -l|--log-dir)
+            if [ -d "$2" ]; then
+                echo "Log directory $2 already exists" >&2
+                exit 1
+            fi
+            LOGDIR="$2"
+            shift 2
+            ;;
+        -m|--reset-fs)
+            RESET_FS_COUNT=$((RESET_FS_COUNT + 1))
+            shift
+            ;;
+        -n|--dry-run)
+            DRY_RUN=YES
+            shift
+            ;;
         -r|--ranks)
-	    NRANKS="$2"
+            NRANKS="$2"
             shift 2
             ;;
         -s|--wait-sleep)
-	    WAIT_SLEEP_INTERVAL="$2"
+            WAIT_SLEEP_INTERVAL="$2"
             shift 2
             ;;
         -w|--workers)
-	    NWORKERS="$2"
+            NWORKERS="$2"
             shift 2
             ;;
         -C|--force-corrupt)
-	    FORCE_CORRUPT=YES
-	    shift
+            FORCE_CORRUPT=YES
+            shift
             ;;
         -I|--force-init)
             FORCE_INIT=YES
             shift
             ;;
         -P|--force-pool)
-	    DATAPOOL="$2"
+            DATAPOOL="$2"
             FORCE_POOL=YES
             shift 2
             ;;
@@ -567,6 +811,14 @@ if ! [ ${NWORKERS} -gt 0 -a ${NWORKERS} -le 512 ]; then
     exit 1
 fi
 
+if [ "${RESET_FS_COUNT}" -ge 1 ] && [ "${SCAN_FRAGS}" != "YES" ] && [ "${RESET_FS_COUNT}" -lt 2 ]; then
+    echo "--reset-fs requires --scan-frags: without it, stray directories under" >&2
+    echo "any rank being retired by 'ceph fs reset' will never be revisited and" >&2
+    echo "will leak" >&2
+    echo "pass --scan-frags too, or pass --reset-fs a second time to proceed anyway" >&2
+    exit 1
+fi
+
 check_deps
 set_compat_flags
 
@@ -577,32 +829,47 @@ prepare_log_dir
 
 trap on_exit EXIT
 
+if [ "${FAIL_FS}" = "YES" ]; then
+    set_recovery_step fail_fs
+    run fs_fail \
+        ceph fs fail "${CEPHFS}" --yes-i-really-mean-it
+fi
+
 set_recovery_step init
 
 for rank in `seq 0 $((NRANKS - 1))`; do
     # try to recover whatever is possible from journal and reset it
-    run journal_recover_dentries.${rank} \
-	cephfs-journal-tool --rank=${CEPHFS}:${rank} event \
-	recover_dentries summary || true
+    journal_recover_dentries "${rank}"
     run journal_reset.${rank}.log \
-	cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
+        cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
         ${JOURNAL_RESET_COMPAT_FLAGS}
 
     # reset session table
     run table_reset_session.${rank} \
-	cephfs-table-tool ${CEPHFS}:${rank} reset session
+        cephfs-table-tool ${CEPHFS}:${rank} reset session
 
     # reset SnapServer
     run table_reset_snap.${rank} \
-	cephfs-table-tool ${CEPHFS}:${rank} reset snap
+        cephfs-table-tool ${CEPHFS}:${rank} reset snap
 
     # reset InoTable
     run table_reset_inode.${rank} \
-	cephfs-table-tool ${CEPHFS}:${rank} reset inode
+        cephfs-table-tool ${CEPHFS}:${rank} reset inode
 
 done
 
+if [ "${RESET_FS_COUNT}" -ge 1 ]; then
+    # Collapse the FSMap to a single rank. This only rewrites monitor
+    # state (never touches the metadata pool), so it's safe to do this
+    # before the cephfs-data-scan pipeline below -- that pipeline finds
+    # the same RADOS objects regardless of FSMap rank state.
+    set_recovery_step reset_fs
+    run fs_reset \
+        ceph fs reset "${CEPHFS}" --yes-i-really-mean-it
+fi
+
 # Regenareate root inodes ("/" and MDS directory) if missing
+set_recovery_step data_scan_init
 extra_args=
 if [ "${FORCE_INIT}" = "YES" ]; then
     echo "force-init enabled: will overrite root inodes" >&2
@@ -661,8 +928,28 @@ wait_scan_inodes_complete
 # the second step (CHECK_LINK) it resolves found dups and other
 # inconsitencies.
 set_recovery_step scan_links
-scan_links &
-wait_scan_links_complete
+scan_links 1 &
+wait_scan_links_complete 1
+
+if [ "${SCAN_FRAGS}" = "YES" ]; then
+    # Relink orphaned directory inodes whose own dirfrag object survived
+    # with a usable backtrace but which scan_inodes couldn't reach (e.g.
+    # directories with no recoverable files anywhere underneath them,
+    # including directories that were themselves strays). This can
+    # reintroduce duplicate-primary / bad-nlink dentries, so scan_links
+    # is run again afterwards to resolve them.
+    set_recovery_step scan_frags
+    extra_args=
+    if [ "${FORCE_CORRUPT}" = "YES" ]; then
+        extra_args="--force-corrupt"
+    fi
+    scan_frags ${extra_args} &
+    wait_scan_frags_complete
+
+    set_recovery_step scan_links_2
+    scan_links 2 &
+    wait_scan_links_complete 2
+fi
 
 # Delete ancillary data generated during recovery (xattrs).
 set_recovery_step cleanup
@@ -670,5 +957,10 @@ for worker in `seq 0 $((NWORKERS - 1))`; do
     cleanup ${worker} &
 done
 wait_cleanup_complete
+
+if [ "${ACTIVATE_AND_SCRUB}" = "YES" ]; then
+    set_recovery_step activate_and_scrub
+    activate_and_scrub
+fi
 
 set_recovery_step end
