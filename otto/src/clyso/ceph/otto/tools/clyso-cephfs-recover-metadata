@@ -31,6 +31,7 @@ JOURNAL_RESET_COMPAT_FLAGS=
 : ${FORCE_POOL:=}
 : ${DRY_RUN:=}
 : ${FAIL_FS:=}
+: ${BACKUP_DIR:=}
 : ${SCAN_FRAGS:=}
 RESET_FS_COUNT=0
 : ${ACTIVATE_AND_SCRUB:=}
@@ -38,6 +39,7 @@ RESET_FS_COUNT=0
 
 declare -A RECOVERY_STEPS=(
     [fail_fs]="MARKING FILESYSTEM FAILED"
+    [backup]="BACKING UP METADATA POOL"
     [init]="INITIALIZING METADATA"
     [reset_fs]="RESETTING FS MAP TO A SINGLE RANK"
     [data_scan_init]="REGENERATING ROOT INODES"
@@ -64,6 +66,8 @@ usage() {
     echo "  -a | --activate-and-scrub     forbid client sessions, activate the mds,"
     echo "                                run a forward scrub, check for damage, and"
     echo "                                re-allow client sessions if none is found"
+    echo "  -b | --backup-dir <dir>       export the metadata pool to <dir> before any"
+    echo "                                destructive step (table resets, data-scan)"
     echo "  -d | --scan-frags             also run 'cephfs-data-scan scan_frags' and"
     echo "                                re-run scan_links afterwards"
     echo "  -f | --fail-fs                mark the filesystem failed before recovery"
@@ -130,6 +134,15 @@ prepare_log_dir() {
     rm -f "${LOGDIR}"/*.log "${LOGDIR}"/*.dat
 
     echo "logs will be stored in ${LOGDIR}" >&2
+}
+
+backup_metadata_pool() {
+    test -n "${BACKUP_DIR}"
+
+    mkdir -p "${BACKUP_DIR}"
+
+    run backup_metadata_pool \
+        rados -p "${METADATAPOOL}" export "${BACKUP_DIR}/${METADATAPOOL}.export"
 }
 
 get_nranks() {
@@ -699,7 +712,7 @@ activate_and_scrub() {
 #
 
 
-OPTIONS=$(getopt -o adfhjl:mnr:s:w:CIP: --long activate-and-scrub,scan-frags,fail-fs,help,proceed-on-journal-recover-failure,log-dir:,reset-fs,dry-run,ranks:,wait-sleep:,workers:,force-corrupt,force-init,force-pool: -- "$@")
+OPTIONS=$(getopt -o ab:dfhjl:mnr:s:w:CIP: --long activate-and-scrub,backup-dir:,scan-frags,fail-fs,help,proceed-on-journal-recover-failure,log-dir:,reset-fs,dry-run,ranks:,wait-sleep:,workers:,force-corrupt,force-init,force-pool: -- "$@")
 
 eval set -- "$OPTIONS"
 while true; do
@@ -707,6 +720,14 @@ while true; do
         -a|--activate-and-scrub)
             ACTIVATE_AND_SCRUB=YES
             shift
+            ;;
+        -b|--backup-dir)
+            if [ -d "$2" ]; then
+                echo "Backup directory $2 already exists" >&2
+                exit 1
+            fi
+            BACKUP_DIR="$2"
+            shift 2
             ;;
         -d|--scan-frags)
             SCAN_FRAGS=YES
@@ -833,6 +854,11 @@ if [ "${FAIL_FS}" = "YES" ]; then
     set_recovery_step fail_fs
     run fs_fail \
         ceph fs fail "${CEPHFS}" --yes-i-really-mean-it
+fi
+
+if [ -n "${BACKUP_DIR}" ]; then
+    set_recovery_step backup
+    backup_metadata_pool
 fi
 
 set_recovery_step init
