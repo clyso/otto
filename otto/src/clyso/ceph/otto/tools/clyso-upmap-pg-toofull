@@ -177,14 +177,14 @@ def main():
                 f"# WARNING: No {fd_type} nodes found in OSD tree! This failure domain may not exist."
             )
 
-    # --- OSDs flagged nearfull/backfillfull from osd.state ---
+    # TODO: take account osd capacity instead of relying on flags (since admin can increase this) OSDs flagged nearfull/backfillfull/full from osd.state ---
     osd_up, osd_in, flagged = {}, {}, set()
     for o in osd_dump.get("osds", []):
         oid = int(o["osd"])
         osd_up[oid] = bool(o.get("up", 0))
         osd_in[oid] = bool(o.get("in", 0))
         st = set(o.get("state", []))
-        if ("nearfull" in st) or ("backfillfull" in st):
+        if ("nearfull" in st) or ("backfillfull" in st) or ("full" in st):
             flagged.add(oid)
 
     # --- For choosing a target: least-used eligible OSD from osd df ---
