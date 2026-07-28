@@ -50,11 +50,11 @@
           "result": "WARN",
           "summary": "Not running a recommended stable release",
           "detail": [
-            "Cluster is running 16.2.9. Clyso highly recommends one of the stable releases: 18.2.8, 19.2.3.",
+            "Cluster is running 16.2.9. Clyso highly recommends one of the stable releases: 18.2.8, 19.2.4.",
             "16.2.15 is the recommended bugfix release for your current version."
           ],
           "recommend": [
-            "Upgrade to one of the stable releases: 18.2.8, 19.2.3.",
+            "Upgrade to one of the stable releases: 18.2.8, 19.2.4.",
             "Alternatively, upgrade to 16.2.15."
           ]
         },
