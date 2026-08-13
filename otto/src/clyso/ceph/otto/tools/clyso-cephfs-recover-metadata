@@ -169,7 +169,7 @@ run() {
 
     test "${DRY_RUN}" = "YES" && return
 
-    "$@" 2>&1 | tee -a "${LOGDIR}/${name}.log"
+    "$@" 2>&1 | tee -a "${LOGDIR}/${name}.log" >&2
 }
 
 cephfs_data_scan() {

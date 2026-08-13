@@ -16,6 +16,8 @@ RANKS=
 LOGDIR=recover_journal_logs
 BACKUP_JOURNAL="${BACKUP_JOURNAL:-}"
 JOURNAL_RESET_COMPAT_FLAGS=
+: ${DRY_RUN:=}
+: ${PROCEED_ON_RECOVER_DENTRIES_FAILURE:=}
 
 declare -A RECOVERY_STEPS=(
   [backup]="BACKING JOURNAL UP TO ${BACKUP_JOURNAL}"
@@ -31,7 +33,19 @@ CURRENT_RECOVERY_STEP=""
 #
 
 usage() {
-    echo "$0 <cephfs> [ranks ...]"
+    echo "$0 [options] <cephfs> [ranks ...]"
+    echo
+    echo "Options:"
+    echo
+    echo "  -b | --backup-journal <path>  export journals to <path>.<rank>"
+    echo "  -d | --log-dir <dir>          directory to store logs"
+    echo "                                (default: ${LOGDIR})"
+    echo "  -f | --proceed-on-recover-dentries-failure"
+    echo "                                continue to journal reset even if"
+    echo "                                recover_dentries fails"
+    echo "  -h | --help                   show this help message and exit"
+    echo "  -n | --dry-run                log recovery commands without executing them"
+    echo
 }
 
 set_recovery_step() {
@@ -63,6 +77,15 @@ set_compat_flags() {
     fi
 }
 
+prepare_log_dir() {
+    test -n "${LOGDIR}"
+
+    mkdir -p "${LOGDIR}"
+    rm -f "${LOGDIR}"/*.log
+
+    echo "logs will be stored in ${LOGDIR}" >&2
+}
+
 set_ranks() {
     local nranks rank
 
@@ -83,30 +106,102 @@ set_ranks() {
     RANKS=$(seq 0 $((nranks - 1)))
 }
 
+recover_dentries() {
+    local rank="$1"
+
+    if run recover_dentries.${rank} \
+        cephfs-journal-tool --rank=${CEPHFS}:${rank} event recover_dentries summary; then
+        return 0
+    fi
+
+    if [ "${PROCEED_ON_RECOVER_DENTRIES_FAILURE}" = "YES" ]; then
+        echo "recover_dentries failed for rank ${rank}, proceeding with journal reset" >&2
+        return 0
+    fi
+
+    echo "recover_dentries failed for rank ${rank}" >&2
+    echo "re-run with --proceed-on-recover-dentries-failure to continue anyway" >&2
+    return 1
+}
+
+run() {
+    local name="$1"; shift
+    local dry=
+
+    test "${DRY_RUN}" = "YES" && dry="dry-"
+
+    echo "${dry}running: $@" >&2
+    echo $(date "+%F %T") "$@" >> "${LOGDIR}/${name}.log"
+
+    test "${DRY_RUN}" = "YES" && return
+
+    "$@" 2>&1 | tee -a "${LOGDIR}/${name}.log" >&2
+}
+
 
 #
 # Main
 #
 
-case $1 in
-    --help|-h)
-	usage
-	exit 0
-        ;;
-    "")
-	usage >&2
-	exit 1
-        ;;
-    *)
-        CEPHFS=$1
-	shift
-        ;;
-esac
+OPTIONS=$(getopt -o b:d:fhn --long backup-journal:,log-dir:,proceed-on-recover-dentries-failure,help,dry-run -- "$@")
+
+eval set -- "$OPTIONS"
+while true; do
+    case "$1" in
+        -b|--backup-journal)
+            BACKUP_JOURNAL="$2"
+            shift 2
+            ;;
+        -d|--log-dir)
+            if [ -d "$2" ]; then
+                echo "Log directory $2 already exists" >&2
+                exit 1
+            fi
+            LOGDIR="$2"
+            shift 2
+            ;;
+        -n|--dry-run)
+            DRY_RUN=YES
+            shift
+            ;;
+        -f|--proceed-on-recover-dentries-failure)
+            PROCEED_ON_RECOVER_DENTRIES_FAILURE=YES
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            echo "Invalid option: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+RECOVERY_STEPS[backup]="BACKING JOURNAL UP TO ${BACKUP_JOURNAL}"
+
+if [ -n "$1" ]; then
+    CEPHFS=$1
+    shift
+fi
+
+if [ -z "${CEPHFS}" ]; then
+    echo "cephfs name is required" >&2
+    usage >&2
+    exit 1
+fi
 
 RANKS="$@"
 set_ranks
 
 set_compat_flags
+prepare_log_dir
 
 trap on_exit EXIT
 
@@ -114,8 +209,9 @@ if [ -n "${BACKUP_JOURNAL}" ]; then
     set_recovery_step backup
     for rank in ${RANKS}; do
 	echo "Backing journal up for rank ${rank}" 2>&2
-        cephfs-journal-tool --rank=${CEPHFS}:${rank} journal export \
-			    "${BACKUP_JOURNAL}".${rank}
+        run journal_export.${rank} \
+            cephfs-journal-tool --rank=${CEPHFS}:${rank} journal export \
+                "${BACKUP_JOURNAL}".${rank}
     done
 fi
 
@@ -123,13 +219,14 @@ set_recovery_step recover_journal_dentries
 for rank in ${RANKS}; do
 
     # try to recover whatever is possible from journal and reset it
-    cephfs-journal-tool --rank=${CEPHFS}:${rank} event recover_dentries summary || true
+    recover_dentries "${rank}"
 done
 
 set_recovery_step reset_journal
 for rank in ${RANKS}; do
-    cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
-                        ${JOURNAL_RESET_COMPAT_FLAGS}
+    run journal_reset.${rank} \
+        cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
+            ${JOURNAL_RESET_COMPAT_FLAGS}
 done
 
 set_recovery_step end
