@@ -29,6 +29,8 @@ import sys
 VERBOSE = False
 DEBUG = False
 
+SECONDS_PER_YEAR = 31_536_000
+
 # ---------------------------- Utilities ----------------------------
 
 def vprint(*args, **kwargs):
@@ -81,6 +83,10 @@ def count_nines(value, max_digits=20):
             break
     return f"{count}-nines" if count > 0 else "0-nines (0.0)"
 
+def inv(x):
+    """Return 1/x, or infinity for x == 0, so reporting never divides by zero."""
+    return 1.0 / x if x else float('inf')
+
 def comb(n, k):
     """Return C(n, k) with math.comb-like semantics."""
     if not (isinstance(n, int) and isinstance(k, int)):
@@ -96,9 +102,15 @@ def comb(n, k):
     return c
 
 def mttdl(N, k, afr, fudge, recovery_time_sec):
-    T_year = 31_536_000  # seconds in a year
-    p = afr * recovery_time_sec / T_year
+    p = afr * recovery_time_sec / SECONDS_PER_YEAR
     prob_k_failures = fudge*comb(N, k) * (p ** k)
+    if prob_k_failures <= 0:
+        # k > N, or a zero AFR: k concurrent failures never happen
+        return float('inf')
+    # comb(N,k)*p^k over-counts as p grows, and the correlation factor scales
+    # it further, so this can exceed 1. Clamp: at certainty the mean time to k
+    # concurrent failures is one recovery window, and never less.
+    prob_k_failures = min(1.0, prob_k_failures)
     mttdl_seconds = recovery_time_sec / prob_k_failures
     return mttdl_seconds
 
@@ -135,25 +147,43 @@ def prob_k_or_more_failures(n, p, k, cutoff=1e-30):
             if all((max_log - x) > -math.log(cutoff) for x in logs[-5:]):
                 break
 
+    if max_log == float('-inf'):
+        # every term has probability zero (e.g. p == 0 with k > 0)
+        return 0.0
+
     # log-sum-exp
     return math.exp(max_log) * sum(math.exp(x - max_log) for x in logs)
 
 def expected_max_osd_load(n_osds, n_pgs):
-    if n_pgs == 0 or n_osds == 0:
-        return float('inf')
+    """Estimate the PG count of the most loaded OSD (balls-in-bins max load)."""
+    if n_osds <= 0:
+        return float('inf')  # nowhere left to recover to
+    if n_pgs <= 0:
+        return 0
+
+    log_n = math.log(n_osds) if n_osds > 1 else 0.0
+
+    # Dense case (Raab & Steger): average load + deviation
+    avg = n_pgs / n_osds
+    dense = avg + math.sqrt(2 * avg * log_n)
+
+    # Sparse case: log(n) / log(n*log(n)/m). The log(n) factor inside the
+    # denominator matters: a plain log(n/m) diverges as m approaches n from
+    # below (e.g. 999 PGs on 1000 OSDs would estimate ~6900 PGs on one OSD).
     if n_pgs < n_osds:
-        # Sparse case: use log-ratio approximation
-        return math.ceil(math.log(n_osds) / math.log(n_osds / n_pgs))
-    else:
-        # Dense case: average load + deviation
-        avg = n_pgs / n_osds
-        deviation = math.sqrt(2 * avg * math.log(n_osds))
-        return math.ceil(avg + deviation)
+        denominator = math.log(n_osds * log_n / n_pgs) if n_osds * log_n > n_pgs else 0.0
+        if denominator > 0:
+            # both estimates are approximations here; keep the pessimistic one
+            return max(1, math.ceil(log_n / denominator), math.ceil(dense))
+
+    return max(1, math.ceil(dense))
 
 def format_bytes(val):
     units = ["B", "KB", "MB", "GB", "TB", "PB"]
     thresholds = [1, 1024, 1024**2, 1024**3, 1024**4, 1024**5]
 
+    if not math.isfinite(val):
+        return "∞" if val > 0 else "?"
     for i in reversed(range(1, len(units))):
         if val >= thresholds[i]:
             return f"~{val / thresholds[i]:.1f}{units[i]}"
@@ -163,6 +193,8 @@ def format_int(val):
     units = ["", "K", "M", "B"]
     thresholds = [1, 1000, 1000**2, 1000**3]
 
+    if not math.isfinite(val):
+        return "∞" if val > 0 else "?"
     for i in reversed(range(1, len(units))):
         if val >= thresholds[i]:
             return f"~{val / thresholds[i]:.1f}{units[i]}"
@@ -172,6 +204,8 @@ def format_time(seconds):
     units = ["s", "m", "h", "d", "y", "thousand years", "million years", "billion years"]
     thresholds = [1, 60, 3600, 86400, 86400*365, 86400*365*1000, 86400*365*10**6, 86400*365*10**9]
 
+    if not math.isfinite(seconds):
+        return "∞" if seconds > 0 else "?"
     for i in reversed(range(1, len(units))):
         if seconds >= thresholds[i]:
             return f"{round(seconds / thresholds[i], 1)} {units[i]}"
@@ -434,6 +468,9 @@ def simulate(args, domains=None):
     if args.domains_down > 0:
         args.fudge = 1
 
+    if not 0 <= args.afr <= 1:
+        raise ValueError(f"--afr must be between 0 and 1, got {args.afr}")
+
     raw_to_stored_factor = 0
     profile = ""
     # Derive PG size
@@ -529,15 +566,21 @@ def simulate(args, domains=None):
     # Re-derive the stored bytes/objects per PG from tb_per_osd
     bytes_per_osd = args.tb_per_osd * 1024**4
     total_bytes = num_osds * bytes_per_osd
+
+    # Stored (user-visible) bytes per PG: this is what is lost when a PG is lost.
     bytes_per_pg = total_bytes / num_pgs * raw_to_stored_factor
     try:
         objects_per_pg = bytes_per_pg / args.object_size
     except ZeroDivisionError:
         objects_per_pg = 0
-    if args.k is not None:
-        bytes_per_pg /= args.k
+
+    # Bytes held by one shard, i.e. what a single OSD has to recover. Each
+    # replica holds the whole PG; each of an EC PG's k+m shards holds 1/k of it.
+    shard_bytes = bytes_per_pg / args.k if args.k is not None else bytes_per_pg
 
     print(f"    Data per PG: {format_bytes(bytes_per_pg)}, {format_int(objects_per_pg)} objects")
+    if args.k is not None:
+        vprint(f"    Data per shard: {format_bytes(shard_bytes)}")
     vprint(f"    Example PG: {pgs[0]}\n")
 
 
@@ -647,9 +690,19 @@ def simulate(args, domains=None):
             vprint()
 
 
+    # Expected PGs lost per simulated incident, i.e. averaged over all
+    # incidents including those that lose nothing.
     pgs_lost_per_event = total_pg_losses / num_simulations
     pct_data_loss = total_pg_losses / (num_simulations * num_pgs)
     vprint(f"    Expected Data Loss Per Incident: {pgs_lost_per_event:.3g} PGs, {format_bytes(pgs_lost_per_event*bytes_per_pg)} ({pct_data_loss * 100:.3g}%)")
+
+    # Expected PGs lost per *data loss event*, i.e. conditional on losing at
+    # least one PG. This is the blast radius to combine with the rate of data
+    # loss events below -- using the per-incident average there would apply the
+    # loss rate twice. Falls back to one PG per event when the Monte Carlo
+    # simulation observed no losses.
+    pgs_lost_per_loss_event = total_pg_losses / simulations_with_loss if simulations_with_loss else 0.0
+    vprint(f"    Expected Data Loss Per Loss Event: {pgs_lost_per_loss_event:.3g} PGs, {format_bytes(pgs_lost_per_loss_event*bytes_per_pg)}")
 
     # Store whether we have OSD distribution stats (only available when counts exists)
     has_osd_distribution = len(counts) > 0
@@ -685,12 +738,13 @@ def simulate(args, domains=None):
         except ZeroDivisionError:
             vprint(f"    Estimated per-OSD recovery rate: {format_bytes(recovery_rate)}ps ({format_int(recovery_rate)} Bps)")
 
+        # one OSD recovers one shard, not the whole PG
         try:
-            recovery_time_per_pg = bytes_per_pg / recovery_rate
+            recovery_time_per_pg = shard_bytes / recovery_rate
         except ZeroDivisionError:
             recovery_time_per_pg = 0
 
-        vprint(f"    Expected PG recovery time ({format_bytes(bytes_per_pg)}/{format_bytes(recovery_rate)}ps): {format_time(recovery_time_per_pg)}")
+        vprint(f"    Expected PG recovery time ({format_bytes(shard_bytes)}/{format_bytes(recovery_rate)}ps): {format_time(recovery_time_per_pg)}")
 
         # Estimate max OSD load during recovery when things are critical
         # e.g. for 3x repl: how long to recover 2 OSDs failed.
@@ -700,7 +754,7 @@ def simulate(args, domains=None):
             critical_osds = args.m
         else:
             critical_osds = args.size - 1
-        num_osds_left = num_osds - args.domains_down*osds_per_domain - num_osds_to_fail + 1
+        num_osds_left = max(1, num_osds - args.domains_down*osds_per_domain - num_osds_to_fail + 1)
         # How many PGs need to be recovered 
         max_osd_load = expected_max_osd_load(num_osds_left, critical_osds*pgs_per_osd)
 
@@ -709,26 +763,34 @@ def simulate(args, domains=None):
         recovery_time = max(max_osd_load * recovery_time_per_pg, 60) # minimum 1 minutes per PG
         vprint(f"    Expected critical period ({max_osd_load} PGs * {format_time(recovery_time_per_pg)}) = {format_time(recovery_time)}")
 
-        critical_windows_per_year = 31536000 / recovery_time
+        critical_windows_per_year = SECONDS_PER_YEAR / recovery_time
         vprint(f"    Expected critical periods annually (1 yr / {format_time(recovery_time)}) = {critical_windows_per_year:.1f}")
 
-        failure_prob_per_disk = recovery_time / 31536000 * afr
-        vprint(f"    Expected per-OSD critical period failure rate = {failure_prob_per_disk:.2g} (1 in {format_int(1/failure_prob_per_disk)})")
+        failure_prob_per_disk = recovery_time / SECONDS_PER_YEAR * afr
+        vprint(f"    Expected per-OSD critical period failure rate = {failure_prob_per_disk:.2g} (1 in {format_int(inv(failure_prob_per_disk))})")
 
         vprint(f"    Failure correlation factor = {args.fudge}")
-        
-        failure_prob = args.fudge * prob_k_or_more_failures(num_osds, failure_prob_per_disk, num_osds_to_fail)
-        vprint(f"    Probability of {num_osds_to_fail}+ failures in any critical period ({format_time(recovery_time)}) = 1 in {format_int(1/failure_prob)}")
+
+        # The correlation factor scales a binomial probability, so it can push
+        # the result above 1. Anything beyond certainty is meaningless, and
+        # leaving it unclamped inflates the event rate below.
+        raw_failure_prob = args.fudge * prob_k_or_more_failures(num_osds, failure_prob_per_disk, num_osds_to_fail)
+        failure_prob = min(1.0, raw_failure_prob)
+        if raw_failure_prob > 1.0:
+            print(f"    Warning: correlated probability of {num_osds_to_fail}+ concurrent failures "
+                  f"is {raw_failure_prob:.3g}, clamped to 1. Data loss is effectively certain in "
+                  f"every critical period, so the estimates below are a floor, not a forecast.")
+        vprint(f"    Probability of {num_osds_to_fail}+ failures in any critical period ({format_time(recovery_time)}) = 1 in {format_int(inv(failure_prob))}")
 
         expected_annual_events = critical_windows_per_year * failure_prob
-        vprint(f"    Expected annual {num_osds_to_fail}+ failure events: {expected_annual_events:.3g} (1 every {format_time(31536000/expected_annual_events)})")
+        vprint(f"    Expected annual {num_osds_to_fail}+ failure events: {expected_annual_events:.3g} (1 every {format_time(inv(expected_annual_events) * SECONDS_PER_YEAR)})")
         mtt_multi_failure = mttdl(num_osds, num_failures_for_data_loss, afr, args.fudge, recovery_time)
         vprint(f"    Alternate calculation (mean time to {num_osds_to_fail}+ concurrent failures) = {format_time(mtt_multi_failure)}")
     else: # size == 1 (no redundancy)
         vprint("    No redundancy configured, data loss is certain on any failure.")
         expected_annual_events = num_osds * afr
-        mtt_multi_failure = 31536000 / expected_annual_events
-        vprint(f"    Expected annual failure events: {expected_annual_events:.3g} (1 every {format_time(31536000/expected_annual_events)})")
+        mtt_multi_failure = inv(expected_annual_events) * SECONDS_PER_YEAR
+        vprint(f"    Expected annual failure events: {expected_annual_events:.3g} (1 every {format_time(mtt_multi_failure)})")
         recovery_rate = None
         recovery_time_per_pg = None
         max_osd_load = None
@@ -745,9 +807,9 @@ def simulate(args, domains=None):
     min_loss_rate = confidence[0]
     max_loss_rate = confidence[1]
 
-    inv_loss_rate = 1/loss_rate if loss_rate > 0 else float('inf')
-    inv_min_loss_rate = 1/min_loss_rate if min_loss_rate > 0 else float('inf')
-    inv_max_loss_rate = 1/max_loss_rate if max_loss_rate > 0 else float('inf')
+    inv_loss_rate = inv(loss_rate)
+    inv_min_loss_rate = inv(min_loss_rate)
+    inv_max_loss_rate = inv(max_loss_rate)
 
     vprint(f"MTTDL/Durability Estimates:")
     vprint(f"    Mean time to {num_osds_to_fail}x failure: {format_time(mtt_multi_failure)}")
@@ -761,27 +823,18 @@ def simulate(args, domains=None):
     expected_losses_per_year = expected_annual_events * loss_rate
     min_expected_losses_per_year = expected_annual_events * min_loss_rate
     max_expected_losses_per_year = expected_annual_events * max_loss_rate
-    try:
-        mttdl_sec = 31536000/expected_losses_per_year
-    except ZeroDivisionError:
-        mttdl_sec = float('inf')
-    try:
-        min_mttdl_sec = 31536000/max_expected_losses_per_year
-    except ZeroDivisionError:
-        min_mttdl_sec = float('inf')
-    try:
-        max_mttdl_sec = 31536000/min_expected_losses_per_year
-        print(f"    MTTDL: {format_time(mttdl_sec)}")
-        vprint(f"    (99.9% CI: {format_time(min_mttdl_sec)} - {format_time(max_mttdl_sec)})")
-    except ZeroDivisionError:
-        max_mttdl_sec = float('inf')
-        print(f"    MTTDL: {format_time(mttdl_sec)}")
-        vprint(f"    (99.9% CI: {format_time(min_mttdl_sec)} - ∞)")
 
-    # Compute Nines Durability Number
-    expected_pgs_lost_per_year = expected_losses_per_year * pgs_lost_per_event
-    min_expected_pgs_lost_per_year = min_expected_losses_per_year * pgs_lost_per_event
-    max_expected_pgs_lost_per_year = max_expected_losses_per_year * pgs_lost_per_event
+    mttdl_sec = inv(expected_losses_per_year) * SECONDS_PER_YEAR
+    min_mttdl_sec = inv(max_expected_losses_per_year) * SECONDS_PER_YEAR
+    max_mttdl_sec = inv(min_expected_losses_per_year) * SECONDS_PER_YEAR
+    print(f"    MTTDL: {format_time(mttdl_sec)}")
+    vprint(f"    (99.9% CI: {format_time(min_mttdl_sec)} - {format_time(max_mttdl_sec)})")
+
+    # Compute Nines Durability Number. Data loss events per year times the
+    # number of PGs each one takes out.
+    expected_pgs_lost_per_year = expected_losses_per_year * pgs_lost_per_loss_event
+    min_expected_pgs_lost_per_year = min_expected_losses_per_year * pgs_lost_per_loss_event
+    max_expected_pgs_lost_per_year = max_expected_losses_per_year * pgs_lost_per_loss_event
     expected_durability = max(0, 1 - (expected_pgs_lost_per_year / num_pgs))
     min_expected_durability = max(0, 1 - (max_expected_pgs_lost_per_year / num_pgs))
     max_expected_durability = max(0, 1 - (min_expected_pgs_lost_per_year / num_pgs))
@@ -810,7 +863,8 @@ def simulate(args, domains=None):
         'k_fail': num_failures_for_data_loss,
         'failures_needed': num_osds_to_fail,
         'raw_to_stored': raw_to_stored_factor,
-        'bytes_per_pg': bytes_per_pg,
+        'bytes_per_pg': bytes_per_pg,      # stored bytes, i.e. lost with the PG
+        'shard_bytes': shard_bytes,        # bytes one OSD has to recover
         'total_bytes': total_bytes,
         'objects_per_pg': objects_per_pg,
         # Recovery model (None for pg_size == 1)
@@ -830,8 +884,9 @@ def simulate(args, domains=None):
         'osd_max_pgs': max_pgs,
         'osd_mean_pgs': mean_pgs,
         'osd_std_dev': std_dev,
-        # Per-incident blast radius
+        # Blast radius, per simulated incident and per actual data loss event
         'pgs_lost_per_event': pgs_lost_per_event,
+        'pgs_lost_per_loss_event': pgs_lost_per_loss_event,
         'pct_data_loss': pct_data_loss,
         # Confidence intervals (99.9% CI)
         'monte_carlo_enabled': not args.skip_monte_carlo,
@@ -1045,7 +1100,31 @@ def test_prob_k_or_more_failures():
 
     print("\nAll prob_k_or_more_failures tests passed.")
 
+def test_expected_max_osd_load():
+    # A single OSD can never hold more PGs than there are to place, and the
+    # estimate must not blow up as the PG count approaches the OSD count.
+    for n_pgs in [1, 10, 100, 500, 900, 990, 999, 1000, 1001, 2000, 100000]:
+        load = expected_max_osd_load(1000, n_pgs)
+        if load > n_pgs:
+            raise AssertionError(
+                f"max load {load} exceeds {n_pgs} PGs available on 1000 OSDs")
+        if n_pgs <= 1000 and load > 10:
+            raise AssertionError(
+                f"implausible max load {load} for {n_pgs} PGs on 1000 OSDs")
+
+    # monotonic in the number of PGs
+    loads = [expected_max_osd_load(1000, m) for m in range(1, 3000, 7)]
+    if loads != sorted(loads):
+        raise AssertionError("max load is not monotonic in the PG count")
+
+    if expected_max_osd_load(0, 100) != float('inf'):
+        raise AssertionError("no OSDs left should mean unbounded recovery")
+
+    print("All expected_max_osd_load tests passed.")
+
 def run_tests(args):
+    test_expected_max_osd_load()
+
     # run some known simulate commands
     # add all args
     test_args = [
@@ -1072,7 +1151,7 @@ def run_tests(args):
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("197.1 thousand years", "10-nines")
+            ("197.1 thousand years", "8-nines")
         ],
         [
             argparse.Namespace(
@@ -1097,7 +1176,7 @@ def run_tests(args):
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("15.4 thousand years", "10-nines")
+            ("133.5 million years", "11-nines")
         ],
         [
             argparse.Namespace(
@@ -1122,7 +1201,7 @@ def run_tests(args):
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("173.4 y", "7-nines")
+            ("3.1 million years", "10-nines")
         ],
         [
             argparse.Namespace(
@@ -1147,7 +1226,7 @@ def run_tests(args):
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("80.8 billion years", "20-nines")
+            ("80.8 billion years", "12-nines")
         ],
         [
             argparse.Namespace(
@@ -1172,7 +1251,7 @@ def run_tests(args):
                 skip_monte_carlo=True,
                 max_mc_runtime=30
             ),
-            ("11.4 thousand years", "20-nines")
+            ("853.5 thousand years", "11-nines")
         ]
     ]
     for i, test_arg in enumerate(test_args):
