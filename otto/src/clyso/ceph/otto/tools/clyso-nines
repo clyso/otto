@@ -29,6 +29,9 @@ import sys
 VERBOSE = False
 DEBUG = False
 
+# CRUSH_ITEM_NONE: placeholder used in pg 'up'/'acting' for a missing OSD
+CRUSH_ITEM_NONE = 0x7fffffff
+
 SECONDS_PER_YEAR = 31_536_000
 
 # ---------------------------- Utilities ----------------------------
@@ -901,6 +904,11 @@ def simulate(args, domains=None):
 
 # ---------------------------- Analyze Subcommand ----------------------------
 
+def valid_osds(osd_list):
+    """Drop CRUSH_ITEM_NONE placeholders left by missing shards."""
+    return [osd for osd in osd_list if 0 <= osd < CRUSH_ITEM_NONE]
+
+
 def analyze_pool(args, pool, pg_dump):
     import subprocess
     import json
@@ -946,21 +954,41 @@ def analyze_pool(args, pool, pg_dump):
         args.m = None
 
     args.pg_num = pool['pg_num']
+    pg_size = args.k + args.m if args.k is not None else args.size
 
     pg_stats = pg_dump['pg_map']['pg_stats']
-    pgs = [pg['acting'] for pg in pg_stats if pg['pgid'].startswith(f"{pool['pool_id']}.")]
-    assert len(pgs) == args.pg_num, "PG count mismatch!"
+    pgs = [valid_osds(pg['acting']) for pg in pg_stats
+           if pg['pgid'].startswith(f"{pool['pool_id']}.")]
+
+    if not pgs:
+        print(f"    Warning: no PGs for pool '{pool['pool_name']}' in the PG dump, skipping.")
+        return
+    if len(pgs) != args.pg_num:
+        print(f"    Warning: found {len(pgs)} PGs in the dump but pg_num is {args.pg_num} "
+              "(pg_num may have changed); continuing with the PGs from the dump.")
+        args.pg_num = len(pgs)
+
+    incomplete = sum(1 for pg in pgs if len(pg) != pg_size)
+    if incomplete:
+        print(f"    Warning: {incomplete} of {len(pgs)} PGs have fewer than {pg_size} "
+              "OSDs (degraded or incomplete); results assume the reported placement.")
+
     args.pgs = pgs
     args.pool_name = pool['pool_name']
 
     osds = set()
     for pg in pg_stats:
-        osds.update(pg['acting'])
-        osds.update(pg['up'])
+        osds.update(valid_osds(pg['acting']))
+        osds.update(valid_osds(pg['up']))
 
-    args.osds = list(osds)
-    args.num_osds = pg_dump['pg_map']['osd_stats_sum']['num_osds']
-    assert args.num_osds == len(osds), "OSD count mismatch!"
+    osds = sorted(osds)
+    args.osds = osds
+    args.num_osds = len(osds)
+
+    reported_osds = pg_dump['pg_map'].get('osd_stats_sum', {}).get('num_osds')
+    if reported_osds is not None and reported_osds != len(osds):
+        vprint(f"    Note: {len(osds)} OSDs hold PGs but the cluster reports "
+               f"{reported_osds}; using {len(osds)}.")
 
     # infer the number of failure domains
     domains = infer_failure_domains(pgs)
