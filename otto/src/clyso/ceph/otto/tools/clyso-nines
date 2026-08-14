@@ -18,21 +18,24 @@
 #   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
-from collections import defaultdict
-import math
-import random
-import time
-import shlex
 import itertools
+import json
+import math
+import os
+import random
+import shlex
+import subprocess
 import sys
+import time
+from collections import defaultdict
 
 VERBOSE = False
 DEBUG = False
 
+SECONDS_PER_YEAR = 31_536_000
+
 # CRUSH_ITEM_NONE: placeholder used in pg 'up'/'acting' for a missing OSD
 CRUSH_ITEM_NONE = 0x7fffffff
-
-SECONDS_PER_YEAR = 31_536_000
 
 # ---------------------------- Utilities ----------------------------
 
@@ -339,9 +342,12 @@ def calculate_pg_loss_rate(num_domains,
     # truncate so e.g. 15.8 OSDs per domain does not become 15
     n = max(1, round(osds_per_domain))
     r = int(pg_size)
-    N = int(num_osds)
 
     if H_dead >= H: return 1.0
+    if r > H:
+        # a PG cannot be spread over distinct domains at all: assume the worst
+        vprint(f"  PG size {r} exceeds {H} failure domains, assuming certain loss")
+        return 1.0
 
     H_alive = H - H_dead
     N_alive = H_alive * n
@@ -352,15 +358,17 @@ def calculate_pg_loss_rate(num_domains,
     elif f_new > H_alive:
         eligibility = 0.0
     else:
-        try:
-            eligibility = (comb(H_alive, f_new) * (n ** f_new)) / comb(N_alive, f_new)
-        except ValueError:
-            eligibility = 0.0
+        denominator = comb(N_alive, f_new)
+        eligibility = (comb(H_alive, f_new) * (n ** f_new)) / denominator if denominator else 0.0
 
     vprint(f"  1. Eligibility (New failures on distinct alive hosts): {eligibility:.3g}")
 
     # 2. Iterate through PG "Vulnerability Buckets"
     prob_pool_survives = 1.0
+
+    # number of ways a PG can pick r distinct domains out of H; non-zero
+    # because r <= H is checked above
+    pg_placements = comb(H, r)
 
     for k in range(r + 1):
         # Safety checks
@@ -368,9 +376,7 @@ def calculate_pg_loss_rate(num_domains,
         if (r - k) > H_alive: continue
 
         # Proportion of PGs in this state
-        try:
-            prob_pg_state_k = (comb(H_dead, k) * comb(H_alive, r - k)) / comb(H, r)
-        except ValueError: continue
+        prob_pg_state_k = (comb(H_dead, k) * comb(H_alive, r - k)) / pg_placements
 
         if prob_pg_state_k == 0: continue
 
@@ -437,10 +443,8 @@ def calculate_pg_loss_rate(num_domains,
         if k > H_dead: continue
         needed = max(0, f_total_threshold - k)
         if needed <= 0:
-            try:
-                p_state = (comb(H_dead, k) * comb(H_alive, r - k)) / comb(H, r)
-                prob_survive_doa *= math.exp(- (num_pgs * p_state))
-            except ValueError: continue
+            p_state = (comb(H_dead, k) * comb(H_alive, r - k)) / pg_placements
+            prob_survive_doa *= math.exp(- (num_pgs * p_state))
 
     risk_doa = 1.0 - prob_survive_doa
     total_risk = max(risk_doa, eligibility * risk_raw)
@@ -454,7 +458,9 @@ def simulate(args, domains=None):
     random.seed(args.seed)
 
     # FIXME: The math breaks without this workaround
-    if args.domains_down > 0:
+    if args.domains_down > 0 and args.fudge != 1:
+        print(f"    Note: ignoring --fudge {args.fudge}; the correlation factor is "
+              "forced to 1 when --domains-down > 0")
         args.fudge = 1
 
     if not 0 <= args.afr <= 1:
@@ -464,17 +470,22 @@ def simulate(args, domains=None):
     profile = ""
     # Derive PG size
     if args.k is not None and args.m is not None:
+        if args.size is not None:
+            print("    Note: ignoring --size; --k/--m select an erasure coded pool")
+            args.size = None
         pg_size = args.k + args.m
         raw_to_stored_factor = args.k / (args.k + args.m)
         profile = f"{args.k}+{args.m} erasure"
         num_failures_for_data_loss = args.m + 1
-    elif args.size is not None:
+    elif args.k is not None or args.m is not None:
+        raise ValueError("Specify both --k and --m for an erasure coded pool.")
+    else:
+        if args.size is None:
+            args.size = 3
         pg_size = args.size
         raw_to_stored_factor = 1 / (args.size)
         profile = f"{args.size}x replicated"
         num_failures_for_data_loss = args.size
-    else:
-        raise ValueError("Specify either --size or both --k and --m.")
 
     num_failures_for_data_loss = max(0, num_failures_for_data_loss)
 
@@ -535,7 +546,6 @@ def simulate(args, domains=None):
         for osd in pg:
             osd_counts[osd] += 1
 
-    # specific list of OSDs from your previous lines
     counts = [osd_counts.get(osd, 0) for osd in osds]
 
     min_pgs = max_pgs = mean_pgs = std_dev = None
@@ -592,7 +602,6 @@ def simulate(args, domains=None):
     vprint(f"Monte Carlo Sim: n={num_simulations} {num_failures_for_data_loss}x failures")
 
     num_batches = 50
-    batch_size = num_simulations // num_batches
     if args.skip_monte_carlo:
         vprint("    Skipping Monte Carlo simulation as per user request.")
         num_batches = 0
@@ -604,16 +613,20 @@ def simulate(args, domains=None):
         vprint(f"    │", end="", flush=True)
     else:
         num_simulations = 1000000000
+    batch_size = num_simulations // num_batches if num_batches else 0
     simulations_done = 0
     sim_runtime = args.max_mc_runtime
     start_time = time.time()
     frames = ["⣾", "⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽"]
     spinner = itertools.cycle(frames)
     spin_time = start_time
+    animate = sys.stdout.isatty()
+    all_osds = set(osds)
+    candidates = list(all_osds)  # invariant while no domain is pre-failed
     for batch in range(num_batches):
         batch_good = True
-        for _ in range(int(num_simulations/num_batches)):
-            if spin_time + 0.1 < time.time():
+        for _ in range(batch_size):
+            if animate and spin_time + 0.1 < time.time():
                 vprint(next(spinner), end="\b", flush=True)
                 spin_time = time.time()
             simulations_done += 1
@@ -621,13 +634,13 @@ def simulate(args, domains=None):
 
             if args.domains_down > 0:
                 # pre-fail args.domains_down * osds_per_domain OSDs
-                failed_osds = set()
                 failed_domains = random.sample(range(num_domains), args.domains_down)
                 for domain in failed_domains:
                     failed_osds.update(domains[domain])
+                candidates = list(all_osds - failed_osds)
 
             dprint(f"Pre-failed OSDs: {failed_osds}")
-            failed_osds.update(random.sample(list(set(osds) - failed_osds), num_osds_to_fail))
+            failed_osds.update(random.sample(candidates, num_osds_to_fail))
             dprint(f"Failed OSDs: {failed_osds}")
 
             dead_pgs = 0
@@ -692,19 +705,6 @@ def simulate(args, domains=None):
     # simulation observed no losses.
     pgs_lost_per_loss_event = total_pg_losses / simulations_with_loss if simulations_with_loss else 0.0
     vprint(f"    Expected Data Loss Per Loss Event: {pgs_lost_per_loss_event:.3g} PGs, {format_bytes(pgs_lost_per_loss_event*bytes_per_pg)}")
-
-    # Store whether we have OSD distribution stats (only available when counts exists)
-    has_osd_distribution = len(counts) > 0
-    if has_osd_distribution:
-        osd_min_pgs = min_pgs
-        osd_max_pgs = max_pgs
-        osd_mean_pgs = mean_pgs
-        osd_std_dev = std_dev
-    else:
-        osd_min_pgs = None
-        osd_max_pgs = None
-        osd_mean_pgs = None
-        osd_std_dev = None
 
     # Try to compute a meaningful MTTDL and Nines Durability Number
     vprint("")
@@ -895,10 +895,50 @@ def valid_osds(osd_list):
     return [osd for osd in osd_list if 0 <= osd < CRUSH_ITEM_NONE]
 
 
-def analyze_pool(args, pool, pg_dump):
-    import subprocess
-    import json
+def fetch_ceph_json(args, ceph_args, local_filename):
+    """Fetch JSON from the cluster, or from --from-json DIR when given.
 
+    Returns the parsed JSON, or None after reporting why it could not be read.
+    A failure to reach the cluster is never silently substituted with a local
+    file: analyzing the wrong cluster's data should not be possible by accident.
+    """
+    if args.from_json:
+        path = os.path.join(args.from_json, local_filename)
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"Error: could not read {path}: {e}")
+            return None
+        vprint(f"Reading {path} ...")
+        return data
+
+    ceph_cmd = ['ceph', f'--cluster={args.cluster}'] + ceph_args
+    try:
+        return json.loads(subprocess.check_output(ceph_cmd))
+    except Exception as e:
+        print(f"Error: '{' '.join(ceph_cmd)}' failed: {e}")
+        print(f"       (use --from-json DIR to read a saved {local_filename} instead)")
+        return None
+
+
+def fetch_ceph_config(args, option, cast, current):
+    """Return an osd config option from the cluster, or `current` as fallback."""
+    if args.from_json:
+        vprint(f"    Using default {option}: {current}")
+        return current
+
+    ceph_cmd = ['ceph', f'--cluster={args.cluster}', 'config', 'get', 'osd', option, '--format=json']
+    try:
+        value = cast(json.loads(subprocess.check_output(ceph_cmd, stderr=subprocess.DEVNULL)))
+    except Exception:
+        vprint(f"    Using default {option}: {current}")
+        return current
+    vprint(f"    Using cluster {option}: {value}")
+    return value
+
+
+def analyze_pool(args, pool, pg_dump):
     # FIXME: The math breaks without this workaround
     if args.domains_down > 0:
         args.fudge = 1
@@ -906,32 +946,18 @@ def analyze_pool(args, pool, pg_dump):
     vprint(f"Analyzing pool '{pool['pool_name']}' (id {pool['pool_id']}, size {pool['size']}) ")
     if 'erasure_code_profile' in pool and pool['erasure_code_profile']:
         vprint(f"    Type: erasure-coded ({pool['erasure_code_profile']})")
+        ec_profile_data = fetch_ceph_json(
+            args,
+            ['osd', 'erasure-code-profile', 'get', pool['erasure_code_profile'], '--format=json'],
+            'ceph-osd-erasure-code-profile-get.json')
         try:
-            # ceph osd erasure-code-profile get
-            try:
-                ceph_cmd = ['ceph', f'--cluster={args.cluster}', 'osd', 'erasure-code-profile', 'get', pool['erasure_code_profile'], '--format=json']
-                ec_profile_json = subprocess.check_output(ceph_cmd)
-                ec_profile_data = json.loads(ec_profile_json)
-                args.k = int(ec_profile_data['k'])
-                args.m = int(ec_profile_data['m'])
-            except Exception as e:
-                print(f"Error fetching EC profile data: {e}")
-                ec_profile_data = None
-
-            # Try using local copy of ceph-osd-erasure-code-profile-get.json
-            if ec_profile_data is None:
-                try:
-                    with open('ceph-osd-erasure-code-profile-get.json', 'r') as f:
-                        ec_profile_data = json.load(f)
-                    print("Reading ceph-osd-erasure-code-profile-get.json ...")
-                    args.k = int(ec_profile_data['k'])
-                    args.m = int(ec_profile_data['m'])
-                except Exception as e2:
-                    print(f"Error loading local EC profile data: {e2}")
-                    return
-        except:
-            print("    Warning: Unable to parse erasure code profile. Please specify --k and --m manually.")
-            print(pool['erasure_code_profile'])
+            args.k = int(ec_profile_data['k'])
+            args.m = int(ec_profile_data['m'])
+            args.size = None
+        except (TypeError, KeyError, ValueError):
+            print(f"    Warning: could not read k/m from erasure code profile "
+                  f"'{pool['erasure_code_profile']}', skipping pool. "
+                  "Use the simulate subcommand with --k/--m instead.")
             return
     else:
         vprint(f"    Type: replicated")
@@ -1016,77 +1042,37 @@ def analyze_pool(args, pool, pg_dump):
     vprint(f"    Total raw data: {format_bytes(bytes_raw)} ({format_int(objects_raw)} objects)")
     vprint(f"    Data per OSD: {format_bytes(args.tb_per_osd * 1024**4)} ({format_int(objects_raw / len(osds))} objects)")
     vprint(f"    Average object size: {format_bytes(args.object_size)}")
-    
-    # Try to fetch recovery tunables from cluster
-    try:
-        ceph_cmd = ['ceph', f'--cluster={args.cluster}', 'config', 'get', 'osd', 'osd_recovery_sleep', '--format=json']
-        result = subprocess.check_output(ceph_cmd, stderr=subprocess.DEVNULL)
-        args.osd_recovery_sleep = float(json.loads(result))
-        vprint(f"    Using cluster osd_recovery_sleep: {args.osd_recovery_sleep}s")
-    except Exception:
-        vprint(f"    Using default osd_recovery_sleep: {args.osd_recovery_sleep}s")
 
-    try:
-        ceph_cmd = ['ceph', f'--cluster={args.cluster}', 'config', 'get', 'osd', 'osd_recovery_max_active', '--format=json']
-        result = subprocess.check_output(ceph_cmd, stderr=subprocess.DEVNULL)
-        args.osd_recovery_max_active = int(json.loads(result))
-        vprint(f"    Using cluster osd_recovery_max_active: {args.osd_recovery_max_active}")
-    except Exception:
-        vprint(f"    Using default osd_recovery_max_active: {args.osd_recovery_max_active}")
-    
+    # Try to fetch recovery tunables from cluster
+    args.osd_recovery_sleep = fetch_ceph_config(
+        args, 'osd_recovery_sleep', float, args.osd_recovery_sleep)
+    args.osd_recovery_max_active = fetch_ceph_config(
+        args, 'osd_recovery_max_active', int, args.osd_recovery_max_active)
+
     vprint("")
-    r = simulate(args, domains=domains)
-    mttdl, nines = r['mttdl'], r['nines']
+    simulate(args, domains=domains)
 
 
 def analyze(args):
-    import subprocess
-    import json
-
     # Set random seed for reproducibility
     random.seed(args.seed)
 
     cluster = args.cluster
     pool_name = args.pool
 
-    # fetch pool list
-    try:
-        ceph_cmd = ['ceph', f'--cluster={cluster}', 'osd', 'pool', 'ls', 'detail', '--format=json']
-        pool_json = subprocess.check_output(ceph_cmd)
-        pool_data = json.loads(pool_json)
-    except Exception as e:
-        pool_data = None
-
-    # Try using local copy of ceph-osd-pool-ls-detail.json
+    pool_data = fetch_ceph_json(args, ['osd', 'pool', 'ls', 'detail', '--format=json'],
+                                'ceph-osd-pool-ls-detail.json')
     if pool_data is None:
-        try:
-            with open('ceph-osd-pool-ls-detail.json', 'r') as f:
-                pool_data = json.load(f)
-            print("Reading ceph-osd-pool-ls-detail.json ...")
-        except Exception as e2:
-            print(f"Error loading local pool data: {e2}")
-            return
+        return 1
 
-    # fetch ceph pg dump
-    try:
-        ceph_cmd = ['ceph', f'--cluster={cluster}', 'pg', 'dump', '--format=json']
-        pg_dump_json = subprocess.check_output(ceph_cmd)
-        pg_dump_data = json.loads(pg_dump_json)
-    except Exception as e:
-        pg_dump_data = None
-
-    # Try using local copy of ceph-pg-dump.json
+    pg_dump_data = fetch_ceph_json(args, ['pg', 'dump', '--format=json'],
+                                   'ceph-pg-dump.json')
     if pg_dump_data is None:
-        try:
-            with open('ceph-pg-dump.json', 'r') as f:
-                pg_dump_data = json.load(f)
-            print("Reading ceph-pg-dump.json ...")
-            vprint("")
-            vprint("========================================")
-            vprint("")
-        except Exception as e2:
-            print(f"Error loading local PG dump data: {e2}")
-            return
+        return 1
+
+    vprint("")
+    vprint("========================================")
+    vprint("")
 
     found = False
     for p in pool_data:
@@ -1099,8 +1085,9 @@ def analyze(args):
 
     if not found:
         print(f"Pool '{pool_name}' not found in cluster '{cluster}'.")
+        return 1
 
-    return
+    return 0
 
 def test_prob_k_or_more_failures():
     # (n, p, k, expected_P_X_ge_k)
@@ -1344,7 +1331,7 @@ def main():
     sim.add_argument('--tb-per-osd', type=float, default=10.0, help="raw data per OSD in TB (default: 10.0)")
     sim.add_argument('--object-size', type=int, default=4*1024*1024, help="average object size in bytes (default: 4MB)")
     sim.add_argument('--pgs-per-osd', type=float, default=100, help="target PGs per OSD (default: 100)")
-    sim.add_argument('--size', type=int, default=3, help="simulate a replicated pool with SIZE replicas (default: 3)")
+    sim.add_argument('--size', type=int, default=None, help="simulate a replicated pool with SIZE replicas (default: 3)")
     sim.add_argument('--k', type=int, help="simulate an erasure coded pool with K data shards")
     sim.add_argument('--m', type=int, help="simulate an erasure coded pool with M parity shards")
     sim.add_argument('--simulations', type=int, default=1000, help="number of incidents to simulate (default: 1000)")
@@ -1364,6 +1351,9 @@ def main():
     an.add_argument('--debug', action='store_true', help='enable debug output')
     an.add_argument('--cluster', type=str, default='ceph', help='Ceph cluster name (default: ceph)')
     an.add_argument('--pool', type=str, help='analyze only the given pool (default: all pools)')
+    an.add_argument('--from-json', type=str, metavar='DIR',
+                    help='read saved ceph-pg-dump.json / ceph-osd-pool-ls-detail.json '
+                         'from DIR instead of querying a cluster')
     an.add_argument('--simulations', type=int, default=1000, help="number of incidents to simulate (default: 1000)")
     an.add_argument('--seed', type=int, default=int(time.time()), help='random seed (default: current time)')
     an.add_argument('--fudge', type=int, default=100, help='correlation "fudge" factor (default: 100)')
@@ -1398,26 +1388,43 @@ def main():
         print(f"Command line: {cmdline}")
         print("---------------------------------------------------------")
         vprint()
-        args.func(args)
+        result = args.func(args)
         vprint()
         vprint("---------------------------------------------------------")
         vprint(f"Command line: {cmdline}")
         vprint("---------------------------------------------------------")
         vprint()
+        # subcommands return an exit status, or their results
+        if isinstance(result, int):
+            return result
+
+    return 0
 
 if __name__ == "__main__":
-    # Hide cursor
-    print('\033[?25l', end='', flush=True)
+    # Hide cursor, but leave escape codes out of redirected output
+    interactive = sys.stdout.isatty()
+    if interactive:
+        print('\033[?25l', end='', flush=True)
 
+    exit_code = 0
     try:
-        main()
+        exit_code = main()
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
         import traceback
         traceback.print_exc()
+        exit_code = 130
+    except ValueError as e:
+        # invalid input: report it without a traceback
+        print(f"Error: {e}", file=sys.stderr)
+        exit_code = 2
     except Exception:
         import traceback
         traceback.print_exc()
+        exit_code = 1
     finally:
         # Restore cursor
-        print('\033[?25h', end='', flush=True)
+        if interactive:
+            print('\033[?25h', end='', flush=True)
+
+    sys.exit(exit_code)
