@@ -754,14 +754,32 @@ def simulate(args, domains=None):
             critical_osds = args.m
         else:
             critical_osds = args.size - 1
-        num_osds_left = max(1, num_osds - args.domains_down*osds_per_domain - num_osds_to_fail + 1)
-        # How many PGs need to be recovered 
-        max_osd_load = expected_max_osd_load(num_osds_left, critical_osds*pgs_per_osd)
 
-        vprint(f"    Expected most loaded OSD when recovering {format_int(critical_osds*pgs_per_osd)} PGs to {num_osds_left} OSDs = {max_osd_load} PGs")
+        # Restoring redundancy needs pg_size distinct failure domains that can
+        # still hold a shard. A pre-failed domain is gone entirely; a critical
+        # OSD failure only removes one if that domain had a single OSD. With
+        # too few left CRUSH has nowhere to put the missing shards, so the PGs
+        # stay undersized and the pool is exposed until the hardware is
+        # replaced, not merely until a backfill finishes.
+        domains_left = num_domains - args.domains_down
+        if osds_per_domain <= 1:
+            domains_left -= critical_osds
+        if domains_left < pg_size:
+            max_osd_load = None
+            recovery_time = args.replacement_time * 86400
+            vprint(f"    Only {max(0, domains_left)} of {num_domains} failure domains can still "
+                   f"hold a shard, but {pg_size} are needed to restore redundancy")
+            vprint(f"    Expected critical period (hardware replacement, --replacement-time) = {format_time(recovery_time)}")
+        else:
+            num_osds_left = max(1, num_osds - args.domains_down*osds_per_domain - num_osds_to_fail + 1)
+            # How many PGs need to be recovered, at most every PG in the pool
+            pgs_to_recover = min(critical_osds * pgs_per_osd, num_pgs)
+            max_osd_load = expected_max_osd_load(num_osds_left, pgs_to_recover)
 
-        recovery_time = max(max_osd_load * recovery_time_per_pg, 60) # minimum 1 minutes per PG
-        vprint(f"    Expected critical period ({max_osd_load} PGs * {format_time(recovery_time_per_pg)}) = {format_time(recovery_time)}")
+            vprint(f"    Expected most loaded OSD when recovering {format_int(pgs_to_recover)} PGs to {num_osds_left} OSDs = {max_osd_load} PGs")
+
+            recovery_time = max(max_osd_load * recovery_time_per_pg, 60) # minimum 1 minutes per PG
+            vprint(f"    Expected critical period ({max_osd_load} PGs * {format_time(recovery_time_per_pg)}) = {format_time(recovery_time)}")
 
         critical_windows_per_year = SECONDS_PER_YEAR / recovery_time
         vprint(f"    Expected critical periods annually (1 yr / {format_time(recovery_time)}) = {critical_windows_per_year:.1f}")
@@ -1230,6 +1248,7 @@ def run_tests(args):
                 osd_recovery_sleep=0.1,
                 osd_recovery_max_active=1,
                 domains_down=0,
+                replacement_time=7.0,
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
@@ -1255,6 +1274,7 @@ def run_tests(args):
                 osd_recovery_sleep=0.1,
                 osd_recovery_max_active=1,
                 domains_down=0,
+                replacement_time=7.0,
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
@@ -1280,6 +1300,7 @@ def run_tests(args):
                 osd_recovery_sleep=0.1,
                 osd_recovery_max_active=1,
                 domains_down=1,
+                replacement_time=7.0,
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
@@ -1305,6 +1326,7 @@ def run_tests(args):
                 osd_recovery_sleep=0.1,
                 osd_recovery_max_active=1,
                 domains_down=0,
+                replacement_time=7.0,
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
@@ -1330,6 +1352,7 @@ def run_tests(args):
                 osd_recovery_sleep=0.1,
                 osd_recovery_max_active=1,
                 domains_down=0,
+                replacement_time=7.0,
                 skip_monte_carlo=True,
                 max_mc_runtime=30
             ),
@@ -1381,6 +1404,10 @@ def main():
     sim.add_argument('--recovery-rate', type=float, default=50, help='Recovery rate per OSD (default: 50MBps)')
     sim.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
     sim.add_argument('--osd-recovery-max-active', type=int, default=1, help='OSD Recovery Max Active (default: 1)')
+    sim.add_argument('--replacement-time', type=float, default=7.0,
+                    help='days to physically replace failed hardware, used as the\n'
+                         'exposure window when too few failure domains survive for\n'
+                         'recovery to run (default: 7.0)')
     sim.add_argument('--domains-down', type=int, default=0, help='number of failure domains to take down in simulation (default: 0)')
     sim.add_argument('--skip-monte-carlo', action='store_true', help='Skip the Monte Carlo sims and use theoretical estimates instead')
     sim.add_argument('--max-mc-runtime', type=int, default=30, help='Maximum simulation runtime in seconds (default: 30s)')
@@ -1401,6 +1428,10 @@ def main():
     an.add_argument('--recovery-rate', type=float, default=50, help='Per-OSD data recovery rate (default: 50MBps)')
     an.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
     an.add_argument('--osd-recovery-max-active', type=int, default=1, help='OSD Recovery Max Active (default: 1)')
+    an.add_argument('--replacement-time', type=float, default=7.0,
+                    help='days to physically replace failed hardware, used as the\n'
+                         'exposure window when too few failure domains survive for\n'
+                         'recovery to run (default: 7.0)')
     an.add_argument('--domains-down', type=int, default=0, help='number of failure domains to take down in simulation (default: 0)')
     an.add_argument('--skip-monte-carlo', action='store_true', help='Skip the Monte Carlo sims and use theoretical estimates instead')
     an.add_argument('--max-mc-runtime', type=int, default=30, help='Maximum Monte Carlo simulation runtime in seconds per pool (default: 30s)')
