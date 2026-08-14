@@ -246,13 +246,21 @@ def simple_crush(osd_ids, num_domains, pg_size, num_pgs):
     return domains, pgs
 
 def confidence_interval(successes, trials):
+    """99.9% Wilson score interval for a binomial proportion.
+
+    The plain normal approximation collapses to zero width at 0 and 1
+    successes, which is exactly where a Monte Carlo run of a rare event lands,
+    and it is a poor fit anywhere near those ends.
+    """
     if trials == 0:
         return (0, 0)
     p_hat = successes / trials
-    # 99.9% confidence interval using normal approximation
     z = 3.2905  # z-score for 99.9% confidence
-    margin_of_error = z * ((p_hat * (1 - p_hat)) / trials) ** 0.5
-    return (max(0, p_hat - margin_of_error), min(1, p_hat + margin_of_error))
+    z2 = z * z
+    centre = (p_hat + z2 / (2 * trials)) / (1 + z2 / trials)
+    margin = (z * math.sqrt(p_hat * (1 - p_hat) / trials + z2 / (4 * trials * trials))
+              / (1 + z2 / trials))
+    return (max(0.0, centre - margin), min(1.0, centre + margin))
 
 
 def effective_recovery_rate(object_size_bytes,
@@ -680,12 +688,15 @@ def simulate(args, domains=None):
         # use simulated result
         loss_rate = simulations_with_loss / num_simulations
         confidence = confidence_interval(simulations_with_loss, num_simulations)
-        plus_minus = confidence[1] - loss_rate
+        plus_minus = max(0.0, confidence[1] - loss_rate)
         vprint(f"    Observed Incidents with ≥1 PG lost: {simulations_with_loss}/{num_simulations} ({100 * loss_rate:.3f}%)")
         print(f"    Monte Carlo Data Loss Rate: {loss_rate * 100:.3g}% ± {plus_minus * 100:.3g}%")
 
-        # warn if theoretical and simulated differ significantly
-        if calculated_loss_rate < confidence[0] or calculated_loss_rate > confidence[1]:
+        # warn if theoretical and simulated differ significantly. The tolerance
+        # keeps float noise quiet: a theoretical rate of 1 - 1e-16 is not a
+        # meaningful disagreement with a simulated 100%.
+        tolerance = 1e-9
+        if not (confidence[0] - tolerance <= calculated_loss_rate <= confidence[1] + tolerance):
             vprint()
             vprint("    Warning: Theoretical and simulated loss rates differ significantly!")
             vprint(f"      Theoretical: {calculated_loss_rate * 100:.3g}%, Simulated: {100 * loss_rate:.3g}% ± {plus_minus * 100:.3g}%")
@@ -1163,6 +1174,24 @@ def test_infer_failure_domains():
 
     print("All infer_failure_domains tests passed.")
 
+def test_confidence_interval():
+    # the interval must stay usable at the ends, where a Wald interval collapses
+    # to zero width -- that is where rare-event Monte Carlo runs land
+    for successes in (0, 1000):
+        lo, hi = confidence_interval(successes, 1000)
+        if not 0.0 <= lo < hi <= 1.0:
+            raise AssertionError(
+                f"degenerate interval ({lo}, {hi}) for {successes}/1000")
+
+    lo, hi = confidence_interval(500, 1000)
+    if not lo < 0.5 < hi:
+        raise AssertionError(f"interval ({lo}, {hi}) excludes the observed 0.5")
+
+    if confidence_interval(0, 0) != (0, 0):
+        raise AssertionError("no trials should give an empty interval")
+
+    print("All confidence_interval tests passed.")
+
 def test_comb():
     for n in range(8):
         for k in range(-2, 10):
@@ -1173,6 +1202,7 @@ def test_comb():
 
 def run_tests(args):
     test_comb()
+    test_confidence_interval()
     test_prob_k_or_more_failures()
     test_expected_max_osd_load()
     test_infer_failure_domains()
