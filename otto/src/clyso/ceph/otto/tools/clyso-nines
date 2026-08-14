@@ -1163,7 +1163,17 @@ def test_infer_failure_domains():
 
     print("All infer_failure_domains tests passed.")
 
+def test_comb():
+    for n in range(8):
+        for k in range(-2, 10):
+            expected = math.comb(n, k) if 0 <= k <= n else 0
+            if comb(n, k) != expected:
+                raise AssertionError(f"comb({n}, {k}) = {comb(n, k)}, expected {expected}")
+    print("All comb tests passed.")
+
 def run_tests(args):
+    test_comb()
+    test_prob_k_or_more_failures()
     test_expected_max_osd_load()
     test_infer_failure_domains()
 
@@ -1309,7 +1319,7 @@ def run_tests(args):
         print(f"\nTest case {i+1} completed.")
         print("========================================")
 
-    test_prob_k_or_more_failures()
+    print("\nAll tests passed.")
 
 
 # ---------------------------- Main CLI ----------------------------
