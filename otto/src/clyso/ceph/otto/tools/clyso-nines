@@ -277,56 +277,40 @@ def effective_recovery_rate(object_size_bytes,
 
 
 def infer_failure_domains(pgs):
-    """Infer failure domains from OSD and PG distribution."""
+    """Infer failure domains from the OSD distribution across PGs.
 
-    # discover all 'up' OSDs -- those are outputs of the crush map
-    osds = set()
+    CRUSH places each PG on OSDs in distinct failure domains, so two OSDs can
+    only share a domain if they never appear together in the same PG. Build the
+    graph of OSD pairs that do appear together and colour it: every colour
+    class is then a set of OSDs that could be co-located, i.e. a domain.
+
+    Accuracy grows with the number of PGs supplied, so callers should pass
+    every PG in the cluster rather than those of a single pool. A pool whose
+    PGs cover few OSDs cannot pin down the real topology on its own, and the
+    result will have fewer domains than the cluster really has.
+    """
+    osds = sorted({osd for pg in pgs for osd in pg})
+
+    # OSD pairs that share a PG, and therefore cannot share a failure domain
+    conflicts = {osd: set() for osd in osds}
     for pg in pgs:
-        osds.update(pg)
+        for a, b in itertools.combinations(set(pg), 2):
+            conflicts[a].add(b)
+            conflicts[b].add(a)
 
-    # start with a single host containing all OSDs
-    osd_tree = [list(osds)]
+    # Greedily colour the conflict graph, most-constrained OSD first. Each
+    # domain is an independent set, so every PG is guaranteed to land in as
+    # many distinct domains as it has shards.
+    domains = []
+    for osd in sorted(osds, key=lambda o: (-len(conflicts[o]), o)):
+        for domain in domains:
+            if domain.isdisjoint(conflicts[osd]):
+                domain.add(osd)
+                break
+        else:
+            domains.append({osd})
 
-    for pg in pgs:
-        pg_size = len(pg)
-
-        # map OSDs to hosts, and count how many PG OSDs fall into each host
-        osd_to_host = {}
-        host_size = {}
-
-        for host_idx, host in enumerate(osd_tree):
-            count = 0
-            for osd in pg:
-                if osd in host:
-                    osd_to_host[osd] = host_idx
-                    count += 1
-            if count > 0:
-                host_size[host_idx] = count
-
-        # split OSDs from this PG across different hosts
-        for host_idx in range(len(osd_tree) + pg_size - 1):
-            if host_idx not in host_size:
-                continue
-
-            if host_size[host_idx] < 1:
-                continue
-
-            first = True
-            new_host_offset = 1
-            for osd in list(osd_tree[host_idx]):
-                if osd not in pg:
-                    continue
-
-                if first:
-                    first = False
-                    continue
-
-                osd_tree[host_idx].remove(osd)
-                try:
-                    osd_tree[host_idx + new_host_offset].append(osd)
-                except IndexError:
-                    osd_tree.append(list([osd]))
-                new_host_offset += 1
+    osd_tree = [sorted(domain) for domain in domains]
 
     dprint("Inferred failure domains:")
     for idx, host in enumerate(osd_tree):
@@ -351,7 +335,9 @@ def calculate_pg_loss_rate(num_domains,
     f_new = max(0, f_total_threshold - int(prefailed_domains))
 
     H_dead = int(prefailed_domains)
-    n = int(osds_per_domain)
+    # the model assumes a uniform number of OSDs per domain; round rather than
+    # truncate so e.g. 15.8 OSDs per domain does not become 15
+    n = max(1, round(osds_per_domain))
     r = int(pg_size)
     N = int(num_osds)
 
@@ -976,12 +962,15 @@ def analyze_pool(args, pool, pg_dump):
     args.pgs = pgs
     args.pool_name = pool['pool_name']
 
-    osds = set()
+    # Infer failure domains from every PG in the cluster, not just this pool's:
+    # a single pool rarely covers enough OSD pairs to pin down the topology.
+    all_pgs = []
     for pg in pg_stats:
-        osds.update(valid_osds(pg['acting']))
-        osds.update(valid_osds(pg['up']))
+        all_pgs.append(valid_osds(pg['acting']))
+        if pg['up'] != pg['acting']:
+            all_pgs.append(valid_osds(pg['up']))
 
-    osds = sorted(osds)
+    osds = sorted({osd for pg in all_pgs for osd in pg})
     args.osds = osds
     args.num_osds = len(osds)
 
@@ -990,14 +979,25 @@ def analyze_pool(args, pool, pg_dump):
         vprint(f"    Note: {len(osds)} OSDs hold PGs but the cluster reports "
                f"{reported_osds}; using {len(osds)}.")
 
-    # infer the number of failure domains
-    domains = infer_failure_domains(pgs)
+    domains = infer_failure_domains(all_pgs)
     args.num_domains = len(domains)
     args.failure_domain = "domain"
 
+    domain_sizes = [len(d) for d in domains]
+    pool_osds = {osd for pg in pgs for osd in pg}
+
     vprint(f"    Number of PGs: {args.pg_num}")
     vprint(f"    Number of OSDs: {len(osds)}")
-    vprint(f"    Number of {args.failure_domain}s: {args.num_domains}")
+    vprint(f"    Number of {args.failure_domain}s: {args.num_domains} "
+           f"({min(domain_sizes)}-{max(domain_sizes)} OSDs each)")
+
+    if max(domain_sizes) > 2 * min(domain_sizes):
+        print(f"    Warning: inferred failure domains are uneven "
+              f"({min(domain_sizes)}-{max(domain_sizes)} OSDs); the risk model assumes "
+              "a uniform OSD count per domain, so treat the result as approximate.")
+    if len(pool_osds) < len(osds):
+        vprint(f"    Note: this pool's PGs only cover {len(pool_osds)} of {len(osds)} OSDs; "
+               "the failure model still uses the whole cluster.")
 
     # Derive tb_per_osd from pool size and pg stat_sum num_bytes
     bytes_stored = sum(pg['stat_sum']['num_bytes'] for pg in pg_stats if pg['pgid'].startswith(f"{pool['pool_id']}."))
@@ -1150,8 +1150,35 @@ def test_expected_max_osd_load():
 
     print("All expected_max_osd_load tests passed.")
 
+def test_infer_failure_domains():
+    # 3 domains of 4 OSDs, PGs of size 3 taking one OSD from three domains
+    truth = [[0, 1, 2, 3], [10, 11, 12, 13], [20, 21, 22, 23]]
+    pgs = []
+    for a in truth[0]:
+        for b in truth[1]:
+            for c in truth[2]:
+                pgs.append([a, b, c])
+
+    domains = infer_failure_domains(pgs)
+    if sorted(domains) != sorted(truth):
+        raise AssertionError(f"inferred {domains}, expected {truth}")
+
+    # whatever the input, no PG may end up with two shards in one domain
+    random.seed(7)
+    pgs = [random.sample(range(30), 4) for _ in range(200)]
+    domains = infer_failure_domains(pgs)
+    domain_of = {osd: idx for idx, domain in enumerate(domains) for osd in domain}
+    for pg in pgs:
+        if len({domain_of[osd] for osd in pg}) != len(set(pg)):
+            raise AssertionError(f"PG {pg} shares a failure domain: {domains}")
+    if sum(len(d) for d in domains) != 30:
+        raise AssertionError(f"lost OSDs while inferring domains: {domains}")
+
+    print("All infer_failure_domains tests passed.")
+
 def run_tests(args):
     test_expected_max_osd_load()
+    test_infer_failure_domains()
 
     # run some known simulate commands
     # add all args
