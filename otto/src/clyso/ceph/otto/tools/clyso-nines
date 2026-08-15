@@ -114,10 +114,14 @@ def mttdl(N, k, afr, fudge, recovery_time_sec):
         # k > N, or a zero AFR: k concurrent failures never happen
         return float('inf')
     # comb(N,k)*p^k over-counts as p grows, and the correlation factor scales
-    # it further, so this can exceed 1. Clamp: at certainty the mean time to k
-    # concurrent failures is one recovery window, and never less.
+    # it further, so this can exceed 1. Clamp: at certainty the k-down state
+    # recurs as fast as it can be left, and never faster.
     prob_k_failures = min(1.0, prob_k_failures)
-    mttdl_seconds = recovery_time_sec / prob_k_failures
+    # The k-down state lasts recovery_time/k, not recovery_time, since it ends
+    # when any one of the k OSDs finishes recovering. See the matching note in
+    # simulate(): without this the rate is a factor of k too low.
+    mean_state_duration = recovery_time_sec / max(1, k)
+    mttdl_seconds = mean_state_duration / prob_k_failures
     return mttdl_seconds
 
 # https://en.wikipedia.org/wiki/Binomial_distribution
@@ -430,14 +434,21 @@ def calculate_pg_loss_rate(num_domains,
 
                 p_kill_pg += prob_hosts * prob_osds
 
-        # Aggregate Risk for this bucket
-        if p_kill_pg >= 1.0:
-             prob_survive_bucket = math.exp(-num_pgs_in_state)
-        elif p_kill_pg <= 0.0:
+        # Aggregate risk for this bucket. Each of the num_pgs PGs independently
+        # lands in this bucket and dies, with probability prob_pg_state_k *
+        # p_kill_pg, so the pool survives it with (1 - that)**num_pgs. Working
+        # per PG rather than per bucket member keeps the certain case exact:
+        # exp(-num_pgs_in_state) approximates that only for a small kill
+        # probability, and claimed a 1.8% survival for four PGs that were all
+        # certain to die.
+        p_pg_dies = prob_pg_state_k * p_kill_pg
+        if p_pg_dies >= 1.0:
+            prob_survive_bucket = 0.0
+        elif p_pg_dies <= 0.0:
             prob_survive_bucket = 1.0
         else:
             # High precision aggregation
-            prob_survive_bucket = math.exp(num_pgs_in_state * math.log1p(-p_kill_pg))
+            prob_survive_bucket = math.exp(num_pgs * math.log1p(-p_pg_dies))
 
         vprint(f"    Bucket [Overlap={k}]: {prob_pg_state_k*100:.1f}% of PGs. Kill Prob: {p_kill_pg:.4g}")
         prob_pool_survives *= prob_survive_bucket
@@ -451,8 +462,13 @@ def calculate_pg_loss_rate(num_domains,
         if k > H_dead: continue
         needed = max(0, f_total_threshold - k)
         if needed <= 0:
+            # every PG in this bucket is already lost, so the pool survives
+            # only if no PG landed in it
             p_state = (comb(H_dead, k) * comb(H_alive, r - k)) / pg_placements
-            prob_survive_doa *= math.exp(- (num_pgs * p_state))
+            if p_state >= 1.0:
+                prob_survive_doa = 0.0
+            elif p_state > 0.0:
+                prob_survive_doa *= math.exp(num_pgs * math.log1p(-p_state))
 
     risk_doa = 1.0 - prob_survive_doa
     total_risk = max(risk_doa, eligibility * risk_raw)
@@ -800,8 +816,19 @@ def simulate(args, domains=None):
                   f"every critical period, so the estimates below are a floor, not a forecast.")
         vprint(f"    Probability of {num_osds_to_fail}+ failures in any critical period ({format_time(recovery_time)}) = 1 in {format_int(inv(failure_prob))}")
 
-        expected_annual_events = critical_windows_per_year * failure_prob
-        vprint(f"    Expected annual {num_osds_to_fail}+ failure events: {expected_annual_events:.3g} (1 every {format_time(inv(expected_annual_events) * SECONDS_PER_YEAR)})")
+        # That is the probability of being in the k-down state at any instant.
+        # Turning it into a rate needs the mean time the state lasts, which is
+        # recovery_time/k rather than recovery_time: the state ends as soon as
+        # *any one* of the k failed OSDs finishes recovering. Dividing by the
+        # full window instead treats consecutive windows as independent trials
+        # and misses every failure run that straddles a boundary, understating
+        # the rate by exactly a factor of k against the repairable-system
+        # Markov chain.
+        concurrent_failures = max(1, num_osds_to_fail)
+        expected_annual_events = critical_windows_per_year * concurrent_failures * failure_prob
+        vprint(f"    Expected annual {num_osds_to_fail}+ failure events: {expected_annual_events:.3g} "
+               f"({concurrent_failures} recovering OSDs / {format_time(recovery_time)}) "
+               f"(1 every {format_time(inv(expected_annual_events) * SECONDS_PER_YEAR)})")
         mtt_multi_failure = mttdl(num_osds, num_failures_for_data_loss, afr, args.fudge, recovery_time)
         vprint(f"    Alternate calculation (mean time to {num_osds_to_fail}+ concurrent failures) = {format_time(mtt_multi_failure)}")
     else: # size == 1 (no redundancy)
@@ -1252,7 +1279,7 @@ def run_tests(args):
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("197.1 thousand years", "8-nines")
+            ("65.7 thousand years", "8-nines")
         ],
         [
             argparse.Namespace(
@@ -1278,7 +1305,7 @@ def run_tests(args):
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("133.5 million years", "11-nines")
+            ("33.4 million years", "11-nines")
         ],
         [
             argparse.Namespace(
@@ -1304,7 +1331,7 @@ def run_tests(args):
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("3.1 million years", "10-nines")
+            ("1.0 million years", "9-nines")
         ],
         [
             argparse.Namespace(
@@ -1330,7 +1357,7 @@ def run_tests(args):
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("80.8 billion years", "12-nines")
+            ("26.9 billion years", "12-nines")
         ],
         [
             argparse.Namespace(
@@ -1356,7 +1383,7 @@ def run_tests(args):
                 skip_monte_carlo=True,
                 max_mc_runtime=30
             ),
-            ("853.5 thousand years", "11-nines")
+            ("213.4 thousand years", "11-nines")
         ]
     ]
     for i, test_arg in enumerate(test_args):
