@@ -151,9 +151,9 @@ def comb(n, k):
         c = c * (n - i + 1) // i
     return c
 
-def mttdl(N, k, afr, fudge, recovery_time_sec):
-    p = afr * recovery_time_sec / SECONDS_PER_YEAR
-    prob_k_failures = fudge*comb(N, k) * (p ** k)
+def mttdl(N, k, osd_failure_rate, correlation, recovery_time_sec):
+    p = osd_failure_rate * recovery_time_sec / SECONDS_PER_YEAR
+    prob_k_failures = correlation*comb(N, k) * (p ** k)
     if prob_k_failures <= 0:
         # k > N, or a zero AFR: k concurrent failures never happen
         return float('inf')
@@ -763,8 +763,9 @@ def simulate(args, domains=None):
     # Set random seed for reproducibility
     random.seed(args.seed)
 
-    if not 0 <= args.afr <= 1:
-        raise ValueError(f"--afr must be between 0 and 1, got {args.afr}")
+    if not 0 <= args.osd_failure_rate <= 1:
+        raise ValueError("--osd-failure-rate must be between 0 and 1, got "
+                         f"{args.osd_failure_rate}")
 
     raw_to_stored_factor = 0
     profile = ""
@@ -1112,9 +1113,9 @@ def simulate(args, domains=None):
     vprint("")
 
     vprint(f"Estimating the probability of {num_osds_to_fail}x failures")
-    afr = args.afr
+    osd_failure_rate = args.osd_failure_rate
     if pg_size > 1:
-        vprint(f"    Estimated per-drive AFR: {afr}")
+        vprint(f"    OSD failure rate: {osd_failure_rate * 100:.3g}% a year")
 
         # Per-OSD ceilings, so they already account for however many PGs the OSD
         # is recovering in parallel.
@@ -1204,15 +1205,15 @@ def simulate(args, domains=None):
         critical_windows_per_year = SECONDS_PER_YEAR / recovery_time
         vprint(f"    Expected critical periods annually (1 yr / {format_time(recovery_time)}) = {critical_windows_per_year:.1f}")
 
-        failure_prob_per_disk = recovery_time / SECONDS_PER_YEAR * afr
+        failure_prob_per_disk = recovery_time / SECONDS_PER_YEAR * osd_failure_rate
         vprint(f"    Expected per-OSD critical period failure rate = {failure_prob_per_disk:.2g} (1 in {format_int(inv(failure_prob_per_disk))})")
 
-        vprint(f"    Failure correlation factor = {args.fudge}")
+        vprint(f"    Correlation factor = {args.correlation_factor}")
 
         # The correlation factor scales a binomial probability, so it can push
         # the result above 1. Anything beyond certainty is meaningless, and
         # leaving it unclamped inflates the event rate below.
-        raw_failure_prob = args.fudge * prob_k_or_more_failures(num_osds, failure_prob_per_disk, num_osds_to_fail)
+        raw_failure_prob = args.correlation_factor * prob_k_or_more_failures(num_osds, failure_prob_per_disk, num_osds_to_fail)
         failure_prob = min(1.0, raw_failure_prob)
         if raw_failure_prob > 1.0:
             print(f"    Warning: correlated probability of {num_osds_to_fail}+ concurrent failures "
@@ -1233,7 +1234,9 @@ def simulate(args, domains=None):
         vprint(f"    Expected annual {num_osds_to_fail}+ failure events: {expected_annual_events:.3g} "
                f"({concurrent_failures} recovering OSDs / {format_time(recovery_time)}) "
                f"(1 every {format_time(inv(expected_annual_events) * SECONDS_PER_YEAR)})")
-        mtt_multi_failure = mttdl(num_osds, num_failures_for_data_loss, afr, args.fudge, recovery_time)
+        mtt_multi_failure = mttdl(num_osds, num_failures_for_data_loss,
+                                  osd_failure_rate, args.correlation_factor,
+                                  recovery_time)
         vprint(f"    Alternate calculation (mean time to {num_osds_to_fail}+ concurrent failures) = {format_time(mtt_multi_failure)}")
 
         # --- availability -------------------------------------------------
@@ -1242,7 +1245,7 @@ def simulate(args, domains=None):
         # event lasts until one shard is rebuilt, and Ceph prioritises PGs that
         # are below min_size, so the outage is one shard's recovery rather than
         # the whole window.
-        unavail_prob = min(1.0, args.fudge * prob_k_or_more_failures(
+        unavail_prob = min(1.0, args.correlation_factor * prob_k_or_more_failures(
             num_osds, failure_prob_per_disk, additional_for_unavailable))
         unavail_events_per_year = (critical_windows_per_year
                                    * additional_for_unavailable * unavail_prob)
@@ -1284,7 +1287,7 @@ def simulate(args, domains=None):
                f"{format_time(domain_downtime)}/yr")
     else: # size == 1 (no redundancy)
         vprint("    No redundancy configured, data loss is certain on any failure.")
-        expected_annual_events = num_osds * afr
+        expected_annual_events = num_osds * osd_failure_rate
         mtt_multi_failure = inv(expected_annual_events) * SECONDS_PER_YEAR
         vprint(f"    Expected annual failure events: {expected_annual_events:.3g} (1 every {format_time(mtt_multi_failure)})")
         recovery_rate = None
@@ -1527,10 +1530,6 @@ def fetch_ceph_config(args, option, cast, current):
 
 
 def analyze_pool(args, pool, pg_dump):
-    # FIXME: The math breaks without this workaround
-    if args.domains_down > 0:
-        args.fudge = 1
-
     vprint(f"Analyzing pool '{pool['pool_name']}' (id {pool['pool_id']}, size {pool['size']}) ")
     if 'erasure_code_profile' in pool and pool['erasure_code_profile']:
         vprint(f"    Type: erasure-coded ({pool['erasure_code_profile']})")
@@ -2110,8 +2109,8 @@ def run_tests(args):
                 m=None,
                 simulations=1000,
                 seed=42,
-                fudge=100,
-                afr=0.02,
+                correlation_factor=100,
+                osd_failure_rate=0.02,
                 osd_recovery_sleep=0.1,
                 osd_recovery_max_active=1,
                 domains_down=0,
@@ -2137,8 +2136,8 @@ def run_tests(args):
                 size=None,
                 simulations=1000,
                 seed=42,
-                fudge=100,
-                afr=0.02,
+                correlation_factor=100,
+                osd_failure_rate=0.02,
                 osd_recovery_sleep=0.1,
                 osd_recovery_max_active=1,
                 domains_down=0,
@@ -2164,8 +2163,8 @@ def run_tests(args):
                 size=None,
                 simulations=1000,
                 seed=42,
-                fudge=100,
-                afr=0.02,
+                correlation_factor=100,
+                osd_failure_rate=0.02,
                 osd_recovery_sleep=0.1,
                 osd_recovery_max_active=1,
                 domains_down=1,
@@ -2191,8 +2190,8 @@ def run_tests(args):
                 m=None,
                 simulations=1000,
                 seed=42,
-                fudge=100,
-                afr=0.02,
+                correlation_factor=100,
+                osd_failure_rate=0.02,
                 osd_recovery_sleep=0.1,
                 osd_recovery_max_active=1,
                 domains_down=0,
@@ -2218,8 +2217,8 @@ def run_tests(args):
                 m=3,
                 simulations=1000,
                 seed=42,
-                fudge=100,
-                afr=0.02,
+                correlation_factor=100,
+                osd_failure_rate=0.02,
                 osd_recovery_sleep=0.1,
                 osd_recovery_max_active=1,
                 domains_down=0,
@@ -2336,6 +2335,7 @@ def evaluate_profiles(args, profiles, num_domains, osds_per_domain, failure_doma
         sub.failure_domain = failure_domain
         sub.skip_monte_carlo = not args.monte_carlo
         sub.min_size = None   # each profile takes the default for its type
+        sub.domains_down = 0  # design compares healthy clusters
         sub.seed = args.seed          # same failure draws for every profile
         captured = io.StringIO()
         try:
@@ -2357,7 +2357,8 @@ def design(args):
           f"{format_bytes(raw_bytes)} raw, {args.device_class}")
     print(f"    {args.workload}: {format_bytes(args.object_size)} objects read "
           f"{format_bytes(args.client_io_size)} at a time, {args.pgs_per_osd:.3g} PGs per OSD, "
-          f"AFR {args.afr * 100:.3g}%")
+          f"OSD failure rate {args.osd_failure_rate * 100:.3g}%/yr, "
+          f"correlation factor {args.correlation_factor}")
     spare_cap = args.num_hosts - args.min_spare_domains
     if spare_cap < args.max_width:
         domains = "domain" if args.min_spare_domains == 1 else "domains"
@@ -2602,82 +2603,104 @@ def apply_device_class_defaults(args):
     return args
 
 
-def add_shared_options(p, monte_carlo=True):
-    """Options every subcommand needs: failure model, recovery ceilings, Monte Carlo."""
+def add_shared_options(p, monte_carlo=True, single_pool=True):
+    """Options every subcommand needs, grouped so --help stays readable.
+
+    single_pool covers the options that only mean something for one specific
+    pool in a specific state, which design has no use for: it is choosing what
+    to build, not describing a pool that already exists and may be degraded.
+    """
     p.add_argument('--verbose', action='store_true', help='enable verbose output')
     p.add_argument('--debug', action='store_true', help='enable debug output')
-    p.add_argument('--simulations', type=int, default=10000,
-                   help="number of incidents to simulate (default: 10000)")
-    p.add_argument('--seed', type=int, default=int(time.time()),
-                   help='random seed (default: current time)')
-    p.add_argument('--fudge', type=int, default=100,
-                   help='correlation "fudge" factor (default: 100)')
-    p.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
-    p.add_argument('--device-class', choices=sorted(DEVICE_CLASS_DEFAULTS), default='hdd',
-                   help='device class the pool lives on, selecting the recovery\n'
-                        'ceiling defaults (default: hdd)')
-    p.add_argument('--osd-read-bw', type=float, default=None,
-                   help='per-OSD read bandwidth in MBps (default: by --device-class)')
-    p.add_argument('--osd-write-bw', type=float, default=None,
-                   help='per-OSD write bandwidth in MBps (default: by --device-class)')
-    p.add_argument('--osd-recovery-sleep', type=float, default=None,
-                   help='OSD Recovery Sleep in seconds (default: by --device-class)')
-    p.add_argument('--osd-recovery-max-active', type=int, default=None,
-                   help='OSD Recovery Max Active (default: by --device-class)')
-    p.add_argument('--peering-time-per-pg', type=float, default=1.0,
-                   help='seconds to re-peer one affected PG before recovery can start\n'
-                        '(default: 1.0s)')
-    p.add_argument('--replacement-time', type=float, default=7.0,
-                   help='days to physically replace failed hardware, used as the\n'
-                        'exposure window when too few failure domains survive for\n'
-                        'recovery to run (default: 7.0)')
-    p.add_argument('--osd-read-iops', type=float, default=None,
-                   help='per-OSD client read IOPS for small IO '
-                        '(default: by --device-class)')
-    p.add_argument('--osd-write-iops', type=float, default=None,
-                   help='per-OSD client write IOPS for small IO; an HDD in\n'
-                        'write-through mode serves these from its media cache '
-                        '(default: by --device-class)')
-    p.add_argument('--osd-read-latency', type=float, default=None,
-                   help='per-OSD read latency in seconds (default: by --device-class)')
-    p.add_argument('--osd-write-latency', type=float, default=None,
-                   help='per-OSD write latency in seconds (default: by --device-class)')
-    p.add_argument('--host-outage-rate', type=float, default=0.05,
-                   help='whole-host outages per host per year from causes other than\n'
-                        'the disks - CPU, memory, PSU, panics. These cost availability\n'
-                        'and not durability (default: 0.05)')
-    p.add_argument('--host-outage-hours', type=float, default=4.0,
-                   help='hours a host outage lasts (default: 4.0)')
-    p.add_argument('--rack-outage-rate', type=float, default=0.02,
-                   help='whole-rack outages per rack per year, e.g. a switch failure\n'
-                        '(default: 0.02)')
-    p.add_argument('--rack-outage-hours', type=float, default=4.0,
-                   help='hours a rack outage lasts (default: 4.0)')
-    p.add_argument('--workload', choices=sorted(WORKLOAD_DEFAULTS), default='rbd',
-                   help='workload preset, setting the object and client IO sizes:\n'
-                        'rbd 4MB objects read 4kB at a time, cephfs 64kB objects\n'
-                        'read the same way, s3 4MB both (default: rbd)')
-    p.add_argument('--client-io-size', type=int, default=None,
-                   help='client IO size the performance figures are for. Separate from\n'
-                        '--object-size, which is how the data is stored '
-                        '(default: by --workload)')
-    p.add_argument('--ec-stripe-unit', type=int, default=EC_STRIPE_UNIT,
-                   help='EC stripe unit, as osd_pool_erasure_code_stripe_unit. Fast EC\n'
-                        'only helps while an IO fits inside one (default: 4kB)')
-    p.add_argument('--min-size', type=int, default=None,
-                   help='shards that must be up for a PG to serve IO\n'
-                        '(default: 2 replicated, k+1 erasure coded)')
-    p.add_argument('--domains-down', type=int, default=0,
-                   help='number of failure domains to take down in simulation (default: 0)')
-    p.add_argument('--max-mc-runtime', type=int, default=30,
-                   help='Maximum simulation runtime in seconds (default: 30s)')
+
+    preset = p.add_argument_group(
+        'hardware and workload',
+        'Two presets that set most of the detail below. Override individually if needed.')
+    preset.add_argument('--device-class', choices=sorted(DEVICE_CLASS_DEFAULTS), default='hdd',
+                        help='device class the pool lives on, setting its bandwidth,\n'
+                             'object rate, latency and recovery tunables (default: hdd)')
+    preset.add_argument('--workload', choices=sorted(WORKLOAD_DEFAULTS), default='rbd',
+                        help='workload preset, setting the object and client IO sizes:\n'
+                             'rbd 4MB objects read 4kB at a time, cephfs 64kB objects\n'
+                             'read the same way, s3 4MB both (default: rbd)')
+
+    model = p.add_argument_group('failure model')
+    model.add_argument('--osd-failure-rate', '--afr', type=float, default=0.02,
+                       help='annualised failure rate of one OSD, the fraction expected to\n'
+                            'fail outright in a year. Unlike the outage rates below, these\n'
+                            'destroy their data (default: 0.02)')
+    model.add_argument('--correlation-factor', '--fudge', type=int, default=100,
+                       help='how much more likely concurrent failures are than an\n'
+                            'independent model says: real ones share firmware, batches,\n'
+                            'power and cooling. The independent estimate is multiplied by\n'
+                            'this (default: 100)')
+    model.add_argument('--host-outage-rate', type=float, default=0.05,
+                       help='whole-host outages per host per year from causes other than\n'
+                            'the disks - CPU, memory, PSU, panics. These cost availability\n'
+                            'and not durability (default: 0.05)')
+    model.add_argument('--host-outage-hours', type=float, default=4.0,
+                       help='hours a host outage lasts (default: 4.0)')
+    model.add_argument('--rack-outage-rate', type=float, default=0.02,
+                       help='whole-rack outages per rack per year, e.g. a switch failure\n'
+                            '(default: 0.02)')
+    model.add_argument('--rack-outage-hours', type=float, default=4.0,
+                       help='hours a rack outage lasts (default: 4.0)')
+    model.add_argument('--replacement-time', type=float, default=7.0,
+                       help='days to physically replace failed hardware, used as the\n'
+                            'exposure window when too few failure domains survive for\n'
+                            'recovery to run (default: 7.0)')
+    model.add_argument('--peering-time-per-pg', type=float, default=1.0,
+                       help='seconds to re-peer one affected PG before recovery can start\n'
+                            '(default: 1.0s)')
+    if single_pool:
+        model.add_argument('--domains-down', type=int, default=0,
+                           help='failure domains already down, to model a degraded pool\n'
+                                '(default: 0)')
+        model.add_argument('--min-size', type=int, default=None,
+                           help='shards that must be up for a PG to serve IO\n'
+                                '(default: 2 replicated, k+1 erasure coded)')
+
+    detail = p.add_argument_group('device and workload detail',
+                                  'Defaults come from the two presets above.')
+    detail.add_argument('--osd-read-bw', type=float, default=None,
+                        help='per-OSD read bandwidth in MBps')
+    detail.add_argument('--osd-write-bw', type=float, default=None,
+                        help='per-OSD write bandwidth in MBps')
+    detail.add_argument('--osd-read-iops', type=float, default=None,
+                        help='per-OSD client read IOPS for small IO')
+    detail.add_argument('--osd-write-iops', type=float, default=None,
+                        help='per-OSD client write IOPS for small IO; an HDD in\n'
+                             'write-through mode serves these from its media cache')
+    detail.add_argument('--osd-read-latency', type=float, default=None,
+                        help='per-OSD read latency in seconds')
+    detail.add_argument('--osd-write-latency', type=float, default=None,
+                        help='per-OSD write latency in seconds')
+    detail.add_argument('--osd-recovery-sleep', type=float, default=None,
+                        help='OSD Recovery Sleep in seconds')
+    detail.add_argument('--osd-recovery-max-active', type=int, default=None,
+                        help='OSD Recovery Max Active')
+    detail.add_argument('--client-io-size', type=int, default=None,
+                        help='client IO size the performance figures are for. Separate\n'
+                             'from --object-size, which is how the data is stored')
+    detail.add_argument('--ec-stripe-unit', type=int, default=EC_STRIPE_UNIT,
+                        help='EC stripe unit, as osd_pool_erasure_code_stripe_unit. Fast\n'
+                             'EC only helps while an IO fits inside one (default: 4kB)')
+
+    mc = p.add_argument_group('monte carlo cross-check',
+                              'An independent check on the calculated loss rate.')
+    mc.add_argument('--simulations', type=int, default=10000,
+                    help="number of incidents to simulate (default: 10000)")
+    mc.add_argument('--seed', type=int, default=int(time.time()),
+                    help='random seed (default: current time)')
+    mc.add_argument('--max-mc-runtime', type=int, default=30,
+                    help='Maximum simulation runtime in seconds (default: 30s)')
     if monte_carlo:
-        p.add_argument('--skip-monte-carlo', action='store_true',
-                       help='Skip the Monte Carlo sims and use theoretical estimates instead')
+        mc.add_argument('--skip-monte-carlo', action='store_true',
+                        help='Skip the Monte Carlo sims and use theoretical estimates instead')
 
 
 def add_cluster_shape_options(p):
-    """Options describing a hypothetical cluster, for simulate and design."""
+    """Options describing a hypothetical cluster, for simulate."""
     p.add_argument('--failure-domain', type=str, default="host",
                    help="Type of failure domain (host/rack/...) (default: host)")
     p.add_argument('--num-domains', type=int, default=10,
@@ -2723,32 +2746,36 @@ def build_parser():
 
     des = subparsers.add_parser('design',
                                 help='Compare feasible pool profiles for a given cluster shape')
-    add_shared_options(des, monte_carlo=False)
-    des.add_argument('--num-hosts', type=int, default=10, help='number of hosts (default: 10)')
-    des.add_argument('--osds-per-host', type=int, default=16,
-                     help='number of OSDs per host (default: 16)')
-    des.add_argument('--hosts-per-rack', type=int, nargs='+', default=None,
-                     help='rack groupings to compare against host-level placement\n'
-                          '(default: a couple of divisors of --num-hosts)')
-    des.add_argument('--min-spare-domains', type=int, default=1,
-                     help='failure domains to keep beyond the shard width, so a lost\n'
-                          'shard has somewhere to go (default: 1)')
-    des.add_argument('--tb-per-osd', type=float, default=10.0,
-                     help="raw data per OSD in TB (default: 10.0)")
-    des.add_argument('--object-size', type=int, default=None,
-                     help="average stored object size in bytes; recovery moves whole\n"
-                          "objects, so this drives recovery (default: by --workload)")
-    des.add_argument('--pgs-per-osd', type=float, default=100,
-                     help="target PGs per OSD (default: 100)")
-    des.add_argument('--max-width', type=int, default=11,
-                     help='largest k+m to consider. Past 8+3 the stripe is wide\n'
-                          'enough that performance, not durability, decides\n'
-                          '(default: 11)')
-    des.add_argument('--monte-carlo', action='store_true',
-                     help='also run the Monte Carlo cross-check for each profile (slower)')
-    des.add_argument('--target-nines', type=int, default=None,
-                     help='durability to aim for; the advice names the most space\n'
-                          'efficient profile that reaches it')
+    shape = des.add_argument_group('cluster shape')
+    shape.add_argument('--num-hosts', type=int, default=10, help='number of hosts (default: 10)')
+    shape.add_argument('--osds-per-host', type=int, default=16,
+                       help='number of OSDs per host (default: 16)')
+    shape.add_argument('--tb-per-osd', type=float, default=10.0,
+                       help="raw data per OSD in TB (default: 10.0)")
+    shape.add_argument('--hosts-per-rack', type=int, nargs='+', default=None,
+                       help='rack groupings to compare against host-level placement\n'
+                            '(default: divisors of --num-hosts)')
+    shape.add_argument('--pgs-per-osd', type=float, default=100,
+                       help="target PGs per OSD (default: 100)")
+    shape.add_argument('--object-size', type=int, default=None,
+                       help="average stored object size in bytes; recovery moves whole\n"
+                            "objects, so this drives recovery (default: by --workload)")
+
+    choose = des.add_argument_group('profiles to compare')
+    choose.add_argument('--max-width', type=int, default=11,
+                        help='largest k+m to consider. Past 8+3 the stripe is wide\n'
+                             'enough that performance, not durability, decides\n'
+                             '(default: 11)')
+    choose.add_argument('--min-spare-domains', type=int, default=1,
+                        help='failure domains to keep beyond the shard width, so a lost\n'
+                             'shard has somewhere to go (default: 1)')
+    choose.add_argument('--target-nines', type=int, default=None,
+                        help='durability to aim for; the advice names the most space\n'
+                             'efficient profile that reaches it')
+    choose.add_argument('--monte-carlo', action='store_true',
+                        help='also run the Monte Carlo cross-check for each profile (slower)')
+
+    add_shared_options(des, monte_carlo=False, single_pool=False)
     des.set_defaults(func=design)
 
     test = subparsers.add_parser('test', help='run internal tests')
