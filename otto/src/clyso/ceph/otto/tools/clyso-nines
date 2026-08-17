@@ -334,6 +334,53 @@ def infer_failure_domains(pgs):
     return osd_tree
 
 
+# A union bound over PG subsets is tight while the loss rate is small (under
+# 2% high on real pools) and useless once PGs start sharing failure sets, so it
+# is only trusted below this rate.
+UNION_BOUND_MAX_RATE = 0.01
+
+# Below this many observed losses a sampled rate is too noisy to build on: at
+# 6 losses the 99.9% interval spans a factor of ten.
+MIN_LOSSES_FOR_MC = 30
+
+def mapping_loss_rate(pgs, num_osds, num_failures, max_subsets=2_000_000):
+    """Probability that num_failures random OSD failures destroy at least one PG.
+
+    Derived from the actual PG->OSD mapping, so it holds for any CRUSH map:
+    uneven failure domains, multi-level hierarchies, device-class restricted
+    pools, reweighted OSDs. A failure set is fatal for a PG when it contains
+    num_failures of that PG's OSDs, so the answer is a count of fatal failure
+    sets over the C(num_osds, num_failures) equally likely ones.
+
+    Returns (rate, method). Deduplicating the fatal sets gives the exact rate.
+    When there are too many to hold, the sum of the per-PG counts is used: a
+    union bound that over-counts failure sets fatal for more than one PG. That
+    is under 2% high on real pools, but grows once PGs start sharing subsets,
+    so it is reported as a bound and the caller should only trust it while it
+    is small (see UNION_BOUND_MAX_RATE).
+    """
+    if num_failures <= 0:
+        return 1.0, 'certain'
+    denominator = comb(int(num_osds), int(num_failures))
+    if denominator == 0:
+        # fewer OSDs in the cluster than it takes to lose data
+        return 1.0, 'certain'
+
+    shards = [sorted(set(pg)) for pg in pgs]
+    total = sum(comb(len(osds), num_failures) for osds in shards)
+    if total == 0:
+        return 0.0, 'exact'
+
+    if total <= max_subsets:
+        fatal = set()
+        for osds in shards:
+            if len(osds) >= num_failures:
+                fatal.update(itertools.combinations(osds, num_failures))
+        return min(1.0, len(fatal) / denominator), 'exact'
+
+    return min(1.0, total / denominator), 'union bound'
+
+
 def calculate_pg_loss_rate(num_domains,
                            osds_per_domain,
                            pg_size,
@@ -607,9 +654,14 @@ def simulate(args, domains=None):
     vprint(f"    Example PG: {pgs[0]}\n")
 
 
-    # Compute theoretical loss rate
-    # i.e. how often do random failures cause data loss
-    calculated_loss_rate = loss_rate = calculate_pg_loss_rate(
+    # Three independent estimates of the loss rate follow.
+    #
+    # 1. The closed form over domain counts. Fast and mapping-independent, but
+    #    it only sees the domain count and the mean OSDs per domain, so it is
+    #    blind to topology skew: four clusters with domains of [25,25,25,25],
+    #    [40,30,20,10], [70,20,5,5] and [90,5,3,2] all get the same answer,
+    #    while the true rates differ by 2x.
+    calculated_loss_rate = calculate_pg_loss_rate(
         num_domains,
         osds_per_domain,
         pg_size,
@@ -619,7 +671,31 @@ def simulate(args, domains=None):
         args.domains_down
     )
 
-    print(f"    Calculated PG Loss Rate (with {args.domains_down} pre-failed domains): {loss_rate * 100:.4g}%")
+    print(f"    Calculated PG Loss Rate (with {args.domains_down} pre-failed domains): {calculated_loss_rate * 100:.4g}%")
+
+    # 2. Counted over the real PG->OSD mapping. Assumption-free and therefore
+    #    correct on any CRUSH map, and deterministic, so it does not move
+    #    between runs. This is the headline estimate. Pre-failed domains change
+    #    the failure population per domain drawn, which this does not model, so
+    #    fall back to the closed form and the Monte Carlo for that case.
+    mapped_loss_rate = mapped_method = None
+    mapped_is_usable = False
+    if args.domains_down == 0:
+        map_start = time.time()
+        mapped_loss_rate, mapped_method = mapping_loss_rate(
+            pgs, num_osds, num_failures_for_data_loss)
+        dprint(f"    mapping_loss_rate took {time.time() - map_start:.2f}s")
+        label = "≤" if mapped_method == 'union bound' else ""
+        print(f"    Mapped PG Loss Rate ({mapped_method}, from the PG placement): "
+              f"{label}{mapped_loss_rate * 100:.4g}%")
+        mapped_is_usable = (mapped_method != 'union bound'
+                            or mapped_loss_rate <= UNION_BOUND_MAX_RATE)
+        if not mapped_is_usable:
+            print(f"    Note: the union bound is only tight for small rates, so "
+                  f"{mapped_loss_rate * 100:.3g}% is an upper bound rather than an estimate.")
+
+    # provisional until the Monte Carlo has run and the estimate is chosen
+    loss_rate = mapped_loss_rate if mapped_is_usable else calculated_loss_rate
 
 
     # simulate the major incidents
@@ -647,6 +723,17 @@ def simulate(args, domains=None):
     animate = sys.stdout.isatty()
     all_osds = set(osds)
     candidates = list(all_osds)  # invariant while no domain is pre-failed
+
+    # Index PGs by OSD so a trial only has to look at the PGs touching the
+    # failed OSDs, instead of scanning every PG in the pool. Same predicate,
+    # and it is what makes enough trials affordable to be worth running: a
+    # linear scan over a real 32k-PG pool caps out at ~1k trials/s, which
+    # cannot tell a correct loss rate from one that is three times wrong.
+    pgs_by_osd = defaultdict(list)
+    for pg_idx, pg in enumerate(pgs):
+        for osd in set(pg):
+            pgs_by_osd[osd].append(pg_idx)
+
     for batch in range(num_batches):
         batch_good = True
         for _ in range(batch_size):
@@ -667,12 +754,16 @@ def simulate(args, domains=None):
             failed_osds.update(random.sample(candidates, num_osds_to_fail))
             dprint(f"Failed OSDs: {failed_osds}")
 
+            # count failed shards per affected PG; a PG dies the moment it
+            # reaches the threshold
             dead_pgs = 0
-            for pg in pgs:
-                if sum(1 for osd in pg if osd in failed_osds) >= num_failures_for_data_loss:
-                    dead_pgs += 1
-                    dprint(f"PG {pg} lost due to failed OSDs {failed_osds}")
-
+            hits = defaultdict(int)
+            for osd in failed_osds:
+                for pg_idx in pgs_by_osd.get(osd, ()):
+                    hits[pg_idx] += 1
+                    if hits[pg_idx] == num_failures_for_data_loss:
+                        dead_pgs += 1
+                        dprint(f"PG {pgs[pg_idx]} lost due to failed OSDs {failed_osds}")
 
             total_pg_losses += dead_pgs
             if dead_pgs > 0:
@@ -694,29 +785,59 @@ def simulate(args, domains=None):
         vprint(f"    ╰{'─' * num_batches}╯")
         vprint()
 
-    if args.skip_monte_carlo or simulations_with_loss < 1:
-        # use theoretical estimate
-        total_pg_losses = simulations_with_loss = calculated_loss_rate * num_simulations  # use theoretical estimate
+    # 3. The Monte Carlo. It samples the same failure process the other two
+    #    reason about, so it is an independent check on them rather than the
+    #    headline: it makes no assumptions, but a rare-event rate estimated
+    #    from a handful of observed losses swings by several times between
+    #    runs. Its job is to falsify the other estimates, and to supply the
+    #    blast radius, which neither of them computes.
+    mc_loss_rate = None
+    if not args.skip_monte_carlo and num_simulations > 0:
+        mc_loss_rate = simulations_with_loss / num_simulations
+        confidence = confidence_interval(simulations_with_loss, num_simulations)
+        plus_minus = max(0.0, confidence[1] - mc_loss_rate)
+        vprint(f"    Observed Incidents with ≥1 PG lost: {simulations_with_loss}/{num_simulations} ({100 * mc_loss_rate:.3f}%)")
+        print(f"    Monte Carlo Data Loss Rate: {mc_loss_rate * 100:.3g}% ± {plus_minus * 100:.3g}% "
+              f"({simulations_with_loss} losses in {num_simulations} trials)")
+
+        # Cross-check every estimate we have against the sample. A disagreement
+        # is worth seeing without --verbose: for the closed form it usually
+        # means the topology is not uniform enough for it, and for the mapped
+        # rate it means one of the two is wrong.
+        tolerance = 1e-9
+        for name, rate in (('Calculated', calculated_loss_rate), ('Mapped', mapped_loss_rate)):
+            if rate is None:
+                continue
+            if confidence[0] - tolerance <= rate <= confidence[1] + tolerance:
+                continue
+            factor = f", {rate / mc_loss_rate:.2g}x the sampled rate" if mc_loss_rate else ""
+            print(f"    Warning: {name} loss rate {rate * 100:.3g}% is outside the Monte Carlo "
+                  f"99.9% CI [{confidence[0] * 100:.3g}%, {confidence[1] * 100:.3g}%]{factor}")
+        if simulations_with_loss < MIN_LOSSES_FOR_MC:
+            vprint(f"    Note: only {simulations_with_loss} losses observed, so the sampled rate is "
+                   f"weak evidence; raise --simulations to tighten it.")
+    else:
         confidence = (loss_rate, loss_rate)
         plus_minus = 0.0
-        vprint(f"    No PGs lost in Monte Carlo simulation, using theoretical estimate.")
-    else:
-        # use simulated result
-        loss_rate = simulations_with_loss / num_simulations
-        confidence = confidence_interval(simulations_with_loss, num_simulations)
-        plus_minus = max(0.0, confidence[1] - loss_rate)
-        vprint(f"    Observed Incidents with ≥1 PG lost: {simulations_with_loss}/{num_simulations} ({100 * loss_rate:.3f}%)")
-        print(f"    Monte Carlo Data Loss Rate: {loss_rate * 100:.3g}% ± {plus_minus * 100:.3g}%")
+        vprint("    Monte Carlo skipped; loss rate not cross-checked.")
 
-        # warn if theoretical and simulated differ significantly. The tolerance
-        # keeps float noise quiet: a theoretical rate of 1 - 1e-16 is not a
-        # meaningful disagreement with a simulated 100%.
-        tolerance = 1e-9
-        if not (confidence[0] - tolerance <= calculated_loss_rate <= confidence[1] + tolerance):
-            vprint()
-            vprint("    Warning: Theoretical and simulated loss rates differ significantly!")
-            vprint(f"      Theoretical: {calculated_loss_rate * 100:.3g}%, Simulated: {100 * loss_rate:.3g}% ± {plus_minus * 100:.3g}%")
-            vprint()
+    # Pick the estimate to carry forward, preferring the ones that make the
+    # fewest assumptions and vary the least between runs.
+    if mapped_is_usable:
+        loss_rate, loss_rate_source = mapped_loss_rate, f"PG placement, {mapped_method}"
+        confidence, plus_minus = (mapped_loss_rate, mapped_loss_rate), 0.0
+    elif mc_loss_rate is not None and simulations_with_loss >= MIN_LOSSES_FOR_MC:
+        loss_rate, loss_rate_source = mc_loss_rate, "Monte Carlo"
+        # confidence and plus_minus are already the sampling interval
+    else:
+        loss_rate, loss_rate_source = calculated_loss_rate, "closed form"
+        confidence, plus_minus = (calculated_loss_rate, calculated_loss_rate), 0.0
+    vprint(f"    Using the {loss_rate_source} loss rate: {loss_rate * 100:.4g}%")
+
+    # The blast radius per data loss event only comes from the simulation.
+    # Without an observed loss, assume an event takes out a single PG.
+    if simulations_with_loss < 1:
+        total_pg_losses = simulations_with_loss = loss_rate * max(1, num_simulations)
 
 
     # Expected PGs lost per simulated incident, i.e. averaged over all
@@ -1279,7 +1400,7 @@ def run_tests(args):
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("65.7 thousand years", "8-nines")
+            ("107.8 thousand years", "8-nines")
         ],
         [
             argparse.Namespace(
@@ -1305,7 +1426,7 @@ def run_tests(args):
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("33.4 million years", "11-nines")
+            ("111.0 million years", "11-nines")
         ],
         [
             argparse.Namespace(
@@ -1331,7 +1452,7 @@ def run_tests(args):
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("1.0 million years", "9-nines")
+            ("833.5 thousand years", "9-nines")
         ],
         [
             argparse.Namespace(
@@ -1424,7 +1545,7 @@ def main():
     sim.add_argument('--size', type=int, default=None, help="simulate a replicated pool with SIZE replicas (default: 3)")
     sim.add_argument('--k', type=int, help="simulate an erasure coded pool with K data shards")
     sim.add_argument('--m', type=int, help="simulate an erasure coded pool with M parity shards")
-    sim.add_argument('--simulations', type=int, default=1000, help="number of incidents to simulate (default: 1000)")
+    sim.add_argument('--simulations', type=int, default=10000, help="number of incidents to simulate (default: 10000)")
     sim.add_argument('--seed', type=int, default=int(time.time()), help='random seed (default: current time)')
     sim.add_argument('--fudge', type=int, default=100, help='correlation "fudge" factor (default: 100)')
     sim.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
@@ -1448,7 +1569,7 @@ def main():
     an.add_argument('--from-json', type=str, metavar='DIR',
                     help='read saved ceph-pg-dump.json / ceph-osd-pool-ls-detail.json '
                          'from DIR instead of querying a cluster')
-    an.add_argument('--simulations', type=int, default=1000, help="number of incidents to simulate (default: 1000)")
+    an.add_argument('--simulations', type=int, default=10000, help="number of incidents to simulate (default: 10000)")
     an.add_argument('--seed', type=int, default=int(time.time()), help='random seed (default: current time)')
     an.add_argument('--fudge', type=int, default=100, help='correlation "fudge" factor (default: 100)')
     an.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
