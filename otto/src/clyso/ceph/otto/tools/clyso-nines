@@ -763,12 +763,6 @@ def simulate(args, domains=None):
     # Set random seed for reproducibility
     random.seed(args.seed)
 
-    # FIXME: The math breaks without this workaround
-    if args.domains_down > 0 and args.fudge != 1:
-        print(f"    Note: ignoring --fudge {args.fudge}; the correlation factor is "
-              "forced to 1 when --domains-down > 0")
-        args.fudge = 1
-
     if not 0 <= args.afr <= 1:
         raise ValueError(f"--afr must be between 0 and 1, got {args.afr}")
 
@@ -801,6 +795,12 @@ def simulate(args, domains=None):
     min_size = args.min_size if getattr(args, 'min_size', None) else default_min_size(args.size, args.k)
     min_size = max(1, min(min_size, pg_size))
     num_failures_for_unavailable = max(1, pg_size - min_size + 1)
+    # As with data loss, a domain already down has taken a shard from every PG
+    # it held, so fewer further failures are needed to go below min_size. Once
+    # that reaches zero the pool is not one failure from unavailable, it is
+    # unavailable.
+    already_unavailable = num_failures_for_unavailable - args.domains_down <= 0
+    additional_for_unavailable = max(1, num_failures_for_unavailable - args.domains_down)
 
     # how many (additional) OSD failures would cause data loss?
     # adjust for pre-failed domains
@@ -1243,9 +1243,9 @@ def simulate(args, domains=None):
         # are below min_size, so the outage is one shard's recovery rather than
         # the whole window.
         unavail_prob = min(1.0, args.fudge * prob_k_or_more_failures(
-            num_osds, failure_prob_per_disk, num_failures_for_unavailable))
+            num_osds, failure_prob_per_disk, additional_for_unavailable))
         unavail_events_per_year = (critical_windows_per_year
-                                   * max(1, num_failures_for_unavailable) * unavail_prob)
+                                   * additional_for_unavailable * unavail_prob)
         unavail_rate, unavail_method = mapping_loss_rate(
             pgs, num_osds, num_failures_for_unavailable)
         outage_events_per_year = unavail_events_per_year * unavail_rate
@@ -1256,16 +1256,26 @@ def simulate(args, domains=None):
         # destroying anything. The data returns with the hardware, so this costs
         # availability and no durability.
         domain_downtime = outage_downtime_fraction(
-            num_domains, 1, args.host_outage_rate, args.host_outage_hours,
-            num_domains, pg_size, num_failures_for_unavailable, num_pgs
+            num_domains - args.domains_down, 1, args.host_outage_rate, args.host_outage_hours,
+            num_domains, pg_size, additional_for_unavailable, num_pgs
         ) * SECONDS_PER_YEAR
 
-        downtime_per_year = osd_downtime + domain_downtime
+        if already_unavailable:
+            # min_size cannot be met with this many domains down, so the pool is
+            # not serving at all.
+            osd_downtime = domain_downtime = 0.0
+            downtime_per_year = SECONDS_PER_YEAR
+            print(f"    Warning: {args.domains_down} domains down leaves fewer than min_size "
+                  f"{min_size} shards for some PGs, so the pool is already unavailable.")
+        else:
+            downtime_per_year = osd_downtime + domain_downtime
         availability = max(0.0, 1.0 - downtime_per_year / SECONDS_PER_YEAR)
 
         vprint(f"    Availability: min_size {min_size} of {pg_size}, so "
-               f"{num_failures_for_unavailable} concurrent failures take a PG below it")
-        vprint(f"      {num_failures_for_unavailable}+ failure events annually: {unavail_events_per_year:.3g}, "
+               f"{num_failures_for_unavailable} concurrent failures take a PG below it"
+               + (f", {additional_for_unavailable} more given {args.domains_down} already down"
+                  if args.domains_down else ""))
+        vprint(f"      {additional_for_unavailable}+ failure events annually: {unavail_events_per_year:.3g}, "
                f"of which {unavail_rate * 100:.3g}% hit a PG ({unavail_method})")
         vprint(f"      From OSD failures: {outage_events_per_year:.3g}/yr x "
                f"{format_time(recovery_time_per_pg)} = {format_time(osd_downtime)}/yr")
@@ -1413,6 +1423,7 @@ def simulate(args, domains=None):
         # Availability: any PG below min_size takes the pool out of service
         'min_size': min_size,
         'failures_to_unavailable': num_failures_for_unavailable,
+        'additional_failures_to_unavailable': additional_for_unavailable,
         'unavail_events_per_year': unavail_events_per_year,
         'outage_events_per_year': outage_events_per_year,
         'downtime_sec_per_year': downtime_per_year,
@@ -2164,7 +2175,7 @@ def run_tests(args):
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("600.2 thousand years", "9-nines")
+            ("6.0 thousand years", "7-nines")
         ],
         [
             argparse.Namespace(
