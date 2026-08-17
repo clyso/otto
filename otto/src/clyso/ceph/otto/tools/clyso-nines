@@ -18,6 +18,8 @@
 #   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
+import contextlib
+import io
 import itertools
 import json
 import math
@@ -1446,8 +1448,68 @@ def test_comb():
                 raise AssertionError(f"comb({n}, {k}) = {comb(n, k)}, expected {expected}")
     print("All comb tests passed.")
 
+def test_candidate_profiles():
+    # a shard needs its own failure domain, and one domain is kept spare so a
+    # lost shard has somewhere to go
+    for num_domains in range(1, 26):
+        for min_spare in (0, 1, 2):
+            for prof in candidate_profiles(num_domains, max_width=20, min_spare=min_spare):
+                if prof['width'] > num_domains - min_spare:
+                    raise AssertionError(
+                        f"{prof['label']} is width {prof['width']} on {num_domains} domains "
+                        f"keeping {min_spare} spare")
+                if prof['width'] > 20:
+                    raise AssertionError(f"{prof['label']} exceeds max_width")
+                expected = prof['k'] / prof['width'] if prof['k'] else 1.0 / prof['size']
+                if abs(prof['usable'] - expected) > 1e-12:
+                    raise AssertionError(f"{prof['label']} usable fraction {prof['usable']}")
+                tolerates = prof['m'] if prof['m'] else prof['size'] - 1
+                if prof['tolerates'] != tolerates:
+                    raise AssertionError(f"{prof['label']} tolerates {prof['tolerates']}")
+
+    # on 10 hosts the widest offered is 9, so 8+2 is out but 6+3 is in
+    labels = [p['label'] for p in candidate_profiles(10, 20)]
+    if '8+2 erasure' in labels:
+        raise AssertionError("8+2 uses all 10 domains and leaves no spare")
+    if '6+3 erasure' not in labels:
+        raise AssertionError(f"6+3 fits in 10 domains with one spare, got {labels}")
+
+    # too few domains for anything, unless the spare requirement is waived
+    if candidate_profiles(2, 20):
+        raise AssertionError("2 domains cannot host a redundant profile and keep a spare")
+    if [p['label'] for p in candidate_profiles(2, 20, min_spare=0)] != ['2x replicated']:
+        raise AssertionError("2 domains with no spare should allow 2x replication")
+    if [p['label'] for p in candidate_profiles(3, 20)] != ['2x replicated']:
+        raise AssertionError("3 domains with one spare should allow only 2x replication")
+
+    # max_width has to bite independently of the domain count
+    if any(p['width'] > 6 for p in candidate_profiles(50, max_width=6)):
+        raise AssertionError("max_width not honoured")
+
+    print("All candidate_profiles tests passed.")
+
+def test_rack_loss_fraction():
+    # a rack holding fewer hosts than a PG needs shards cannot take the PG out
+    if rack_loss_fraction(20, 2, 3, 3) != 0.0:
+        raise AssertionError("a 2-host rack cannot hold 3 shards of one PG")
+    # a rack holding the whole width takes everything
+    if rack_loss_fraction(6, 6, 3, 3) != 1.0:
+        raise AssertionError("one rack holding every host must lose every PG")
+    # wider stripes are more exposed, since more shards can share a rack
+    widths = [rack_loss_fraction(20, 4, w, 3) for w in (3, 4, 6, 8)]
+    if widths != sorted(widths):
+        raise AssertionError(f"exposure should grow with width, got {widths}")
+    # and a fraction is a fraction
+    for width in range(2, 20):
+        f = rack_loss_fraction(20, 4, width, 2)
+        if not 0.0 <= f <= 1.0:
+            raise AssertionError(f"width {width} gave {f}")
+    print("All rack_loss_fraction tests passed.")
+
 def run_tests(args):
     test_comb()
+    test_candidate_profiles()
+    test_rack_loss_fraction()
     test_confidence_interval()
     test_prob_k_or_more_failures()
     test_expected_max_osd_load()
@@ -1618,7 +1680,331 @@ def run_tests(args):
     print("\nAll tests passed.")
 
 
+# ---------------------------- Design Subcommand ----------------------------
+
+# The k values people actually deploy, rather than every integer.
+EC_DATA_SHARDS = (2, 3, 4, 6, 8, 10, 12, 16)
+
+
+def rack_loss_fraction(num_hosts, hosts_per_rack, width, num_failures):
+    """Fraction of PGs that lose num_failures shards when one whole rack fails.
+
+    This is the question rack-level failure domains exist to answer, and it is
+    invisible to the OSD-failure model: with the failure domain at host level a
+    PG's shards land on distinct hosts that may share a rack, so one rack
+    outage can take several shards of the same PG. With the failure domain at
+    rack level a PG has at most one shard per rack, so no rack outage can cost
+    it more than one - which is why this returns 0 for rack-level placement.
+
+    Hypergeometric: of the `width` hosts a PG occupies, how many fall in the
+    rack that failed.
+    """
+    if hosts_per_rack <= 0 or num_failures <= 0:
+        return 0.0
+    placements = comb(num_hosts, width)
+    if placements == 0:
+        return 0.0
+    fatal = 0
+    for j in range(num_failures, min(hosts_per_rack, width) + 1):
+        fatal += comb(hosts_per_rack, j) * comb(num_hosts - hosts_per_rack, width - j)
+    return fatal / placements
+
+
+def rack_groupings(num_hosts, limit=2):
+    """Plausible hosts-per-rack values for a cluster of num_hosts hosts."""
+    divisors = [d for d in range(2, num_hosts) if num_hosts % d == 0]
+    if not divisors:
+        return []
+    if len(divisors) <= limit:
+        return divisors
+    # spread the choices over the range rather than taking the smallest
+    step = (len(divisors) - 1) / (limit - 1) if limit > 1 else 0
+    return sorted({divisors[round(i * step)] for i in range(limit)})
+
+
+def candidate_profiles(num_domains, max_width, min_spare=1):
+    """Pool profiles worth comparing on a cluster with num_domains domains.
+
+    CRUSH needs a distinct domain per shard, and a profile that uses every
+    domain has nowhere to re-place a shard when one is lost, so the width is
+    capped at num_domains - min_spare: on 10 hosts the widest offered is 9.
+
+    Replication at 2x and 3x, then erasure coding at the widths people deploy
+    for m=2 and m=3.
+    """
+    usable_width = num_domains - min_spare
+    profiles = []
+    for size in (2, 3):
+        if size <= usable_width:
+            profiles.append({'label': f'{size}x replicated', 'size': size, 'k': None, 'm': None,
+                             'width': size, 'tolerates': size - 1, 'usable': 1.0 / size})
+    for m in (2, 3):
+        for k in EC_DATA_SHARDS:
+            width = k + m
+            if width > usable_width or width > max_width:
+                continue
+            profiles.append({'label': f'{k}+{m} erasure', 'size': None, 'k': k, 'm': m,
+                             'width': width, 'tolerates': m, 'usable': k / width})
+    return profiles
+
+
+def evaluate_profiles(args, profiles, num_domains, osds_per_domain, failure_domain):
+    """Run every profile through the model for one failure-domain choice."""
+    rows = []
+    for prof in profiles:
+        sub = argparse.Namespace(**vars(args))
+        sub.command = 'simulate'
+        sub.size, sub.k, sub.m = prof['size'], prof['k'], prof['m']
+        sub.num_domains, sub.osds_per_domain = num_domains, osds_per_domain
+        sub.failure_domain = failure_domain
+        sub.skip_monte_carlo = not args.monte_carlo
+        sub.seed = args.seed          # same failure draws for every profile
+        captured = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(captured):
+                result = simulate(sub)
+        except Exception as e:                                    # noqa: BLE001
+            print(f"    {prof['label']}: skipped ({e})")
+            continue
+        rows.append((prof, result, captured.getvalue()))
+    return rows
+
+
+def design(args):
+    """Compare feasible pool profiles, and host- against rack-level placement."""
+    num_osds = args.num_hosts * args.osds_per_host
+    raw_bytes = num_osds * args.tb_per_osd * 1024**4
+
+    print(f"Designing pool profiles for {args.num_hosts} hosts x {args.osds_per_host} OSDs "
+          f"= {num_osds} OSDs")
+    print(f"    Raw capacity: {format_bytes(raw_bytes)} at {args.tb_per_osd:.3g}TB per OSD, "
+          f"{args.device_class}")
+    print(f"    Assuming {format_bytes(args.object_size)} objects, {args.pgs_per_osd:.3g} PGs per OSD, "
+          f"AFR {args.afr * 100:.3g}%, correlation factor {args.fudge}")
+    print(f"    Widths are capped at {args.num_hosts - args.min_spare_domains} to keep "
+          f"{args.min_spare_domains} spare domain(s) for re-placing a lost shard")
+    print()
+
+    host_profiles = candidate_profiles(args.num_hosts, args.max_width, args.min_spare_domains)
+    if not host_profiles:
+        raise ValueError(
+            f"No pool profile fits in {args.num_hosts} hosts while keeping "
+            f"{args.min_spare_domains} spare; at least {2 + args.min_spare_domains} are needed.")
+
+    host_rows = evaluate_profiles(args, host_profiles, args.num_hosts,
+                                 args.osds_per_host, 'host')
+    if not host_rows:
+        raise ValueError("No profile could be evaluated.")
+
+    groupings = args.hosts_per_rack if args.hosts_per_rack else rack_groupings(args.num_hosts)
+    groupings = [g for g in groupings if 1 < g < args.num_hosts and args.num_hosts % g == 0]
+
+    if not groupings:
+        _print_profile_table(args, host_rows, raw_bytes, None, None)
+        _print_advice(args, host_rows, raw_bytes)
+        print()
+        print(f"    Note: {args.num_hosts} hosts do not divide into racks evenly, so there is "
+              "no rack grouping to compare. Pass --hosts-per-rack to force one.")
+        return 0
+
+    for hosts_per_rack in groupings:
+        num_racks = args.num_hosts // hosts_per_rack
+        rack_profiles = candidate_profiles(num_racks, args.max_width, args.min_spare_domains)
+        rack_rows = evaluate_profiles(args, rack_profiles, num_racks,
+                                      args.osds_per_host * hosts_per_rack, 'rack')
+        print(f"=== {hosts_per_rack} hosts per rack -> {num_racks} racks of "
+              f"{args.osds_per_host * hosts_per_rack} OSDs "
+              f"(rack-level widths capped at {num_racks - args.min_spare_domains})")
+        print()
+        _print_profile_table(args, host_rows, raw_bytes, rack_rows, hosts_per_rack)
+        print()
+
+    _print_advice(args, host_rows, raw_bytes)
+    _print_rack_verdict(args, host_rows, raw_bytes, groupings)
+    return 0
+
+
+def _print_profile_table(args, host_rows, raw_bytes, rack_rows, hosts_per_rack):
+    """One row per profile, host-level placement beside rack-level."""
+    by_label = {row[0]['label']: row for row in (rack_rows or [])}
+    racked = rack_rows is not None
+
+    cols = f"{'profile':<15}{'width':>6}{'usable':>10}{'eff':>6}{'durability':>12}{'MTTDL':>22}"
+    if racked:
+        cols += f"{'rack outage':>13}{'racked':>12}"
+        print(f"{' ' * 37}{'--- failure domain = host ---':^34}"
+              f"{'  --- rack ---':^25}")
+    print(cols)
+    print('-' * len(cols))
+
+    for prof, r, _ in host_rows:
+        line = (f"{prof['label']:<15}{prof['width']:>6}"
+                f"{format_bytes(raw_bytes * prof['usable']):>10}{prof['usable'] * 100:>5.0f}%"
+                f"{r['nines']:>12}{r['mttdl']:>22}")
+        if racked:
+            lost = rack_loss_fraction(args.num_hosts, hosts_per_rack,
+                                      prof['width'], prof['tolerates'] + 1)
+            other = by_label.get(prof['label'])
+            racked_nines = other[1]['nines'] if other else 'too wide'
+            line += f"{lost * 100:>12.2f}%{racked_nines:>12}"
+        print(line)
+
+    print()
+    print("    eff         = usable capacity as a fraction of raw")
+    print("    durability  = fraction of data surviving a year of independent OSD failures")
+    if racked:
+        print("    rack outage = PGs lost if one whole rack fails, which only host-level")
+        print("                  placement is exposed to")
+        print("    racked      = durability with the failure domain at rack level instead")
+
+
+def _print_advice(args, rows, raw_bytes):
+    def nines_of(result):
+        return int(result['nines'].split('-')[0])
+
+    print("Advice (host-level placement):")
+    best = max(rows, key=lambda row: row[1]['durability'])
+    print(f"    Most durable: {best[0]['label']} at {best[1]['nines']}, keeping "
+          f"{format_bytes(raw_bytes * best[0]['usable'])} usable "
+          f"({best[0]['usable'] * 100:.0f}% of raw)")
+
+    if args.target_nines is not None:
+        reaching = [row for row in rows if nines_of(row[1]) >= args.target_nines]
+        if reaching:
+            pick = max(reaching, key=lambda row: row[0]['usable'])
+            print(f"    Most space efficient at {args.target_nines}-nines or better: "
+                  f"{pick[0]['label']}, {format_bytes(raw_bytes * pick[0]['usable'])} usable "
+                  f"({pick[0]['usable'] * 100:.0f}% of raw), {pick[1]['nines']}")
+        else:
+            print(f"    Nothing on this shape reaches {args.target_nines}-nines; the best is "
+                  f"{best[1]['nines']} with {best[0]['label']}")
+    else:
+        def dominated(row):
+            for other in rows:
+                if other is row:
+                    continue
+                atleast = (other[1]['durability'] >= row[1]['durability']
+                           and other[0]['usable'] >= row[0]['usable'])
+                better = (other[1]['durability'] > row[1]['durability']
+                          or other[0]['usable'] > row[0]['usable'])
+                if atleast and better:
+                    return True
+            return False
+
+        frontier = sorted((row for row in rows if not dominated(row)),
+                          key=lambda row: row[0]['usable'])
+        print("    Worth considering, in order of usable capacity; everything else here is")
+        print("    beaten on both capacity and durability by one of these:")
+        for prof, r, _ in frontier:
+            print(f"      {prof['label']:<15} {format_bytes(raw_bytes * prof['usable']):>9} usable "
+                  f"({prof['usable'] * 100:>3.0f}%)  {r['nines']:>9}  MTTDL {r['mttdl']}")
+
+    if any(row[0]['size'] == 2 for row in rows):
+        print("    Warning: 2x replication tolerates a single OSD failure, so any second "
+              "failure during recovery loses data. Rarely appropriate for primary copies.")
+
+    bounded = [row[0]['label'] for row in rows if 'union bound' in row[2]]
+    if bounded:
+        print(f"    Note: the loss rate for {', '.join(bounded)} is an upper bound; the exact "
+              "count was too large to enumerate.")
+
+
+def _print_rack_verdict(args, host_rows, raw_bytes, groupings):
+    """Say plainly what the grouping does and does not buy."""
+    print()
+    print("Does racking change durability?")
+    print("    Against independent OSD failures, no. The loss rate depends on the PG count")
+    print("    and the OSD count, not on how the OSDs are grouped, so the durability columns")
+    print("    above match wherever a profile is feasible at both levels.")
+    print()
+    print("    What racking buys is surviving a whole-rack outage. Under host-level placement")
+    print("    a PG's shards land on distinct hosts that may share a rack, so one rack going")
+    print("    down takes several shards of the same PG:")
+    for hosts_per_rack in groupings:
+        worst = max(host_rows, key=lambda row: rack_loss_fraction(
+            args.num_hosts, hosts_per_rack, row[0]['width'], row[0]['tolerates'] + 1))
+        lost = rack_loss_fraction(args.num_hosts, hosts_per_rack,
+                                  worst[0]['width'], worst[0]['tolerates'] + 1)
+        pgs = worst[1]['num_pgs']
+        print(f"      at {hosts_per_rack} hosts per rack, {worst[0]['label']} loses "
+              f"{lost * 100:.2f}% of its PGs, about {round(lost * pgs)} of {pgs}")
+    print("    Any non-zero figure there means a rack outage is a data loss event, not a")
+    print("    degraded one. Rack-level placement puts at most one shard per rack, so the")
+    print("    same outage leaves every PG readable.")
+    print()
+    print("    The cost is width. Rack-level placement has far fewer domains to spread over:")
+    for hosts_per_rack in groupings:
+        num_racks = args.num_hosts // hosts_per_rack
+        rack_profiles = candidate_profiles(num_racks, args.max_width, args.min_spare_domains)
+        host_best = max(host_rows, key=lambda row: (row[0]['usable'], row[0]['tolerates']))
+        if rack_profiles:
+            rack_best = max(rack_profiles, key=lambda prof: (prof['usable'], prof['tolerates']))
+            print(f"      {hosts_per_rack} hosts per rack: widest usable profile drops from "
+                  f"{host_best[0]['label']} at {host_best[0]['usable'] * 100:.0f}% to "
+                  f"{rack_best['label']} at {rack_best['usable'] * 100:.0f}% of raw")
+        else:
+            print(f"      {hosts_per_rack} hosts per rack: {num_racks} racks leaves no feasible "
+                  f"profile at all with {args.min_spare_domains} spare")
+
+
 # ---------------------------- Main CLI ----------------------------
+def add_shared_options(p, monte_carlo=True):
+    """Options every subcommand needs: failure model, recovery ceilings, Monte Carlo."""
+    p.add_argument('--verbose', action='store_true', help='enable verbose output')
+    p.add_argument('--debug', action='store_true', help='enable debug output')
+    p.add_argument('--simulations', type=int, default=10000,
+                   help="number of incidents to simulate (default: 10000)")
+    p.add_argument('--seed', type=int, default=int(time.time()),
+                   help='random seed (default: current time)')
+    p.add_argument('--fudge', type=int, default=100,
+                   help='correlation "fudge" factor (default: 100)')
+    p.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
+    p.add_argument('--device-class', choices=sorted(DEVICE_CLASS_DEFAULTS), default='hdd',
+                   help='device class the pool lives on, selecting the recovery\n'
+                        'ceiling defaults (default: hdd)')
+    p.add_argument('--recovery-rate', type=float, default=None,
+                   help='per-OSD recovery bandwidth ceiling in MBps '
+                        '(default: by --device-class)')
+    p.add_argument('--recovery-iops', type=float, default=None,
+                   help='per-OSD recovery object rate ceiling in objects/s; this is\n'
+                        'what makes small-object pools slow to recover '
+                        '(default: by --device-class)')
+    p.add_argument('--osd-recovery-sleep', type=float, default=None,
+                   help='OSD Recovery Sleep in seconds (default: by --device-class)')
+    p.add_argument('--osd-recovery-max-active', type=int, default=None,
+                   help='OSD Recovery Max Active (default: by --device-class)')
+    p.add_argument('--peering-time-per-pg', type=float, default=1.0,
+                   help='seconds to re-peer one affected PG before recovery can start\n'
+                        '(default: 1.0s)')
+    p.add_argument('--replacement-time', type=float, default=7.0,
+                   help='days to physically replace failed hardware, used as the\n'
+                        'exposure window when too few failure domains survive for\n'
+                        'recovery to run (default: 7.0)')
+    p.add_argument('--domains-down', type=int, default=0,
+                   help='number of failure domains to take down in simulation (default: 0)')
+    p.add_argument('--max-mc-runtime', type=int, default=30,
+                   help='Maximum simulation runtime in seconds (default: 30s)')
+    if monte_carlo:
+        p.add_argument('--skip-monte-carlo', action='store_true',
+                       help='Skip the Monte Carlo sims and use theoretical estimates instead')
+
+
+def add_cluster_shape_options(p):
+    """Options describing a hypothetical cluster, for simulate and design."""
+    p.add_argument('--failure-domain', type=str, default="host",
+                   help="Type of failure domain (host/rack/...) (default: host)")
+    p.add_argument('--num-domains', type=int, default=10,
+                   help="number of failure domains (default: 10)")
+    p.add_argument('--osds-per-domain', type=int, default=16,
+                   help="number of OSDs per failure domain (default: 16)")
+    p.add_argument('--tb-per-osd', type=float, default=10.0,
+                   help="raw data per OSD in TB (default: 10.0)")
+    p.add_argument('--object-size', type=int, default=4*1024*1024,
+                   help="average object size in bytes (default: 4MB)")
+    p.add_argument('--pgs-per-osd', type=float, default=100,
+                   help="target PGs per OSD (default: 100)")
+
+
 def main():
     parser = argparse.ArgumentParser(
             prog='clyso-nines',
@@ -1629,86 +2015,49 @@ def main():
     subparsers = parser.add_subparsers(dest='command')
 
     sim = subparsers.add_parser('simulate', help='Calculate durability of a randomized pool')
-    sim.add_argument('--verbose', action='store_true', help='enable verbose output')
-    sim.add_argument('--debug', action='store_true', help='enable debug output')
-    sim.add_argument('--failure-domain', type=str, default="host", help="Type of failure domain (host/rack/...) (default: host)")
-    sim.add_argument('--num-domains', type=int, default=10, help="number of failure domains (default: 10)")
-    sim.add_argument('--osds-per-domain', type=int, default=16, help="number of OSDs per failure domain (default: 16)")
-    sim.add_argument('--tb-per-osd', type=float, default=10.0, help="raw data per OSD in TB (default: 10.0)")
-    sim.add_argument('--object-size', type=int, default=4*1024*1024, help="average object size in bytes (default: 4MB)")
-    sim.add_argument('--pgs-per-osd', type=float, default=100, help="target PGs per OSD (default: 100)")
-    sim.add_argument('--size', type=int, default=None, help="simulate a replicated pool with SIZE replicas (default: 3)")
+    add_shared_options(sim)
+    add_cluster_shape_options(sim)
+    sim.add_argument('--size', type=int, default=None,
+                     help="simulate a replicated pool with SIZE replicas (default: 3)")
     sim.add_argument('--k', type=int, help="simulate an erasure coded pool with K data shards")
     sim.add_argument('--m', type=int, help="simulate an erasure coded pool with M parity shards")
-    sim.add_argument('--simulations', type=int, default=10000, help="number of incidents to simulate (default: 10000)")
-    sim.add_argument('--seed', type=int, default=int(time.time()), help='random seed (default: current time)')
-    sim.add_argument('--fudge', type=int, default=100, help='correlation "fudge" factor (default: 100)')
-    sim.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
-    sim.add_argument('--device-class', choices=sorted(DEVICE_CLASS_DEFAULTS), default='hdd',
-                    help='device class the pool lives on, selecting the recovery\n'
-                         'ceiling defaults (default: hdd)')
-    sim.add_argument('--recovery-rate', type=float, default=None,
-                    help='per-OSD recovery bandwidth ceiling in MBps '
-                         '(default: by --device-class)')
-    sim.add_argument('--recovery-iops', type=float, default=None,
-                    help='per-OSD recovery object rate ceiling in objects/s; this is\n'
-                         'what makes small-object pools slow to recover '
-                         '(default: by --device-class)')
-    sim.add_argument('--osd-recovery-sleep', type=float, default=None,
-                    help='OSD Recovery Sleep in seconds (default: by --device-class)')
-    sim.add_argument('--osd-recovery-max-active', type=int, default=None,
-                    help='OSD Recovery Max Active (default: by --device-class)')
-    sim.add_argument('--peering-time-per-pg', type=float, default=1.0,
-                    help='seconds to re-peer one PG after a map change; every PG on an\n'
-                         'OSD peers, so this is the cost that grows with the PG count\n'
-                         '(default: 1.0s)')
-    sim.add_argument('--replacement-time', type=float, default=7.0,
-                    help='days to physically replace failed hardware, used as the\n'
-                         'exposure window when too few failure domains survive for\n'
-                         'recovery to run (default: 7.0)')
-    sim.add_argument('--domains-down', type=int, default=0, help='number of failure domains to take down in simulation (default: 0)')
-    sim.add_argument('--skip-monte-carlo', action='store_true', help='Skip the Monte Carlo sims and use theoretical estimates instead')
-    sim.add_argument('--max-mc-runtime', type=int, default=30, help='Maximum simulation runtime in seconds (default: 30s)')
     sim.set_defaults(func=simulate)
 
     an = subparsers.add_parser('analyze', help='Calculate durability of the local pools')
-    an.add_argument('--verbose', action='store_true', help='enable verbose output')
-    an.add_argument('--debug', action='store_true', help='enable debug output')
+    add_shared_options(an)
     an.add_argument('--cluster', type=str, default='ceph', help='Ceph cluster name (default: ceph)')
     an.add_argument('--pool', type=str, help='analyze only the given pool (default: all pools)')
     an.add_argument('--from-json', type=str, metavar='DIR',
                     help='read saved ceph-pg-dump.json / ceph-osd-pool-ls-detail.json '
                          'from DIR instead of querying a cluster')
-    an.add_argument('--simulations', type=int, default=10000, help="number of incidents to simulate (default: 10000)")
-    an.add_argument('--seed', type=int, default=int(time.time()), help='random seed (default: current time)')
-    an.add_argument('--fudge', type=int, default=100, help='correlation "fudge" factor (default: 100)')
-    an.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
-    an.add_argument('--device-class', choices=sorted(DEVICE_CLASS_DEFAULTS), default='hdd',
-                    help='device class the pool lives on, selecting the recovery\n'
-                         'ceiling defaults (default: hdd)')
-    an.add_argument('--recovery-rate', type=float, default=None,
-                    help='per-OSD recovery bandwidth ceiling in MBps '
-                         '(default: by --device-class)')
-    an.add_argument('--recovery-iops', type=float, default=None,
-                    help='per-OSD recovery object rate ceiling in objects/s; this is\n'
-                         'what makes small-object pools slow to recover '
-                         '(default: by --device-class)')
-    an.add_argument('--osd-recovery-sleep', type=float, default=None,
-                    help='OSD Recovery Sleep in seconds (default: by --device-class)')
-    an.add_argument('--osd-recovery-max-active', type=int, default=None,
-                    help='OSD Recovery Max Active (default: by --device-class)')
-    an.add_argument('--peering-time-per-pg', type=float, default=1.0,
-                    help='seconds to re-peer one PG after a map change; every PG on an\n'
-                         'OSD peers, so this is the cost that grows with the PG count\n'
-                         '(default: 1.0s)')
-    an.add_argument('--replacement-time', type=float, default=7.0,
-                    help='days to physically replace failed hardware, used as the\n'
-                         'exposure window when too few failure domains survive for\n'
-                         'recovery to run (default: 7.0)')
-    an.add_argument('--domains-down', type=int, default=0, help='number of failure domains to take down in simulation (default: 0)')
-    an.add_argument('--skip-monte-carlo', action='store_true', help='Skip the Monte Carlo sims and use theoretical estimates instead')
-    an.add_argument('--max-mc-runtime', type=int, default=30, help='Maximum Monte Carlo simulation runtime in seconds per pool (default: 30s)')
     an.set_defaults(func=analyze)
+
+    des = subparsers.add_parser('design',
+                                help='Compare feasible pool profiles for a given cluster shape')
+    add_shared_options(des, monte_carlo=False)
+    des.add_argument('--num-hosts', type=int, default=10, help='number of hosts (default: 10)')
+    des.add_argument('--osds-per-host', type=int, default=16,
+                     help='number of OSDs per host (default: 16)')
+    des.add_argument('--hosts-per-rack', type=int, nargs='+', default=None,
+                     help='rack groupings to compare against host-level placement\n'
+                          '(default: a couple of divisors of --num-hosts)')
+    des.add_argument('--min-spare-domains', type=int, default=1,
+                     help='failure domains to keep beyond the shard width, so a lost\n'
+                          'shard has somewhere to go (default: 1)')
+    des.add_argument('--tb-per-osd', type=float, default=10.0,
+                     help="raw data per OSD in TB (default: 10.0)")
+    des.add_argument('--object-size', type=int, default=4*1024*1024,
+                     help="average object size in bytes (default: 4MB)")
+    des.add_argument('--pgs-per-osd', type=float, default=100,
+                     help="target PGs per OSD (default: 100)")
+    des.add_argument('--max-width', type=int, default=20,
+                     help='largest k+m to consider (default: 20)')
+    des.add_argument('--monte-carlo', action='store_true',
+                     help='also run the Monte Carlo cross-check for each profile (slower)')
+    des.add_argument('--target-nines', type=int, default=None,
+                     help='durability to aim for; the advice names the most space\n'
+                          'efficient profile that reaches it')
+    des.set_defaults(func=design)
 
     test = subparsers.add_parser('test', help='run internal tests')
     test.add_argument('--verbose', action='store_true', help='enable verbose output')
