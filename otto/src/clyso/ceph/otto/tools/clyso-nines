@@ -37,6 +37,19 @@ SECONDS_PER_YEAR = 31_536_000
 # CRUSH_ITEM_NONE: placeholder used in pg 'up'/'acting' for a missing OSD
 CRUSH_ITEM_NONE = 0x7fffffff
 
+# Per-OSD recovery ceilings by device class: MB/s and objects/s. Recovery
+# competes with client IO and is rarely allowed the device's full sequential
+# throughput, so these are working figures for a busy cluster rather than
+# datasheet numbers. Override either with --recovery-rate/--recovery-iops.
+# The recovery tunables mirror Ceph's own osd_recovery_{sleep,max_active}_hdd
+# and _ssd defaults, which is what an OSD of that class actually applies.
+DEVICE_CLASS_DEFAULTS = {
+    'hdd':  {'recovery_rate':  50.0, 'recovery_iops':  100.0,
+             'osd_recovery_sleep': 0.1, 'osd_recovery_max_active': 3},
+    'nvme': {'recovery_rate': 500.0, 'recovery_iops': 5000.0,
+             'osd_recovery_sleep': 0.0, 'osd_recovery_max_active': 10},
+}
+
 # ---------------------------- Utilities ----------------------------
 
 def vprint(*args, **kwargs):
@@ -267,28 +280,34 @@ def confidence_interval(successes, trials):
     return (max(0.0, centre - margin), min(1.0, centre + margin))
 
 
-def effective_recovery_rate(object_size_bytes,
-                            recovery_bw=50*1024*1024,  # 50 MB/s
-                            osd_recovery_sleep=0.1,
-                            osd_recovery_max_active=1):
+def effective_recovery_rate(object_size_bytes, max_bw, max_iops,
+                            osd_recovery_sleep=0.0, osd_recovery_max_active=0):
+    """Bytes per second that one OSD can recover.
+
+    Recovery moves one object at a time, so an OSD is limited by whichever
+    ceiling binds first: its bandwidth, or its object rate. Small objects are
+    object-rate bound and large objects bandwidth bound, which is why a 4kB
+    pool is far more painful to recover than a 4MB one at the same capacity.
+
+    These are per-OSD ceilings, so they divide among however many PGs an OSD is
+    recovering at once: the caller multiplies this rate by the OSD's whole share
+    of the recovery, and the PG count drops out.
+
+    osd_recovery_sleep is charged on top, shared across the operations in
+    flight, so a cluster throttling recovery to protect client IO recovers
+    correspondingly slower.
     """
-    Calculate Ceph effective recovery throughput considering chunking and sleep.
+    if object_size_bytes <= 0:
+        return max_bw
 
-    object_size_bytes: size of one object in bytes
-    recovery_bw_MBps: raw recovery bandwidth (MB/s)
-    osd_recovery_sleep: sleep time after each chunk (seconds)
-    osd_recovery_max_active: number of concurrent recovery operations per OSD
-    """
-    chunk_size_bytes = (object_size_bytes * osd_recovery_max_active)
+    # The two ceilings apply at the same time, so the binding one sets the cost
+    # of an object. The sleep is different: Ceph sleeps *after* an operation
+    # completes, so it adds to that cost rather than competing with it, and it
+    # is shared by whatever is in flight.
+    per_object = max(object_size_bytes / max_bw, 1.0 / max_iops)
+    per_object += osd_recovery_sleep / max(1, osd_recovery_max_active)
 
-    # Time to recover chunk at given bandwidth (seconds)
-    transfer_time = chunk_size_bytes / recovery_bw
-
-    # Add recovery sleep per chunk
-    total_time = transfer_time + osd_recovery_sleep
-
-    # Effective throughput (Bps)
-    return chunk_size_bytes / total_time
+    return object_size_bytes / per_object
 
 
 def infer_failure_domains(pgs):
@@ -584,6 +603,16 @@ def simulate(args, domains=None):
         failure_domain = args.failure_domain
 
         num_pgs = round_to_nearest_power_of_two((num_osds * pgs_per_osd) / pg_size)
+
+        # pg_num is a power of two, so the pool rarely lands on the requested
+        # PGs per OSD -- a --pgs-per-osd of 3000 becomes 2458. Everything
+        # downstream must use what the pool actually got, as analyze does,
+        # or the recovery model and the data per PG disagree by up to 30%.
+        pgs_per_osd = num_pgs * pg_size / num_osds
+        if abs(pgs_per_osd - args.pgs_per_osd) > 0.01 * args.pgs_per_osd:
+            vprint(f"    Note: pg_num rounded to {num_pgs} (a power of two), giving "
+                   f"{pgs_per_osd:.3g} PGs per OSD rather than the requested {args.pgs_per_osd:.3g}")
+
         osds = list(range(1, num_osds + 1))
         vprint(f"Generating {num_pgs} PGs using simple CRUSH-like algorithm...")
         time_start = time.time()
@@ -864,11 +893,20 @@ def simulate(args, domains=None):
     if pg_size > 1:
         vprint(f"    Estimated per-drive AFR: {afr}")
 
-        # recovery rate is a function of object size, recovery bandwidth, and OSD recovery sleep
+        # Per-OSD ceilings, so they already account for however many PGs the OSD
+        # is recovering in parallel.
         recovery_rate = effective_recovery_rate(args.object_size,
                                                 args.recovery_rate*1024*1024,
+                                                args.recovery_iops,
                                                 args.osd_recovery_sleep,
                                                 args.osd_recovery_max_active)
+        # which ceiling binds is a property of the object size alone
+        bound_by = ("bandwidth"
+                    if args.object_size / (args.recovery_rate*1024*1024) >= 1.0 / args.recovery_iops
+                    else "object rate")
+        vprint(f"    Recovery ceilings for {args.device_class}: {args.recovery_rate:.3g}MBps, "
+               f"{format_int(args.recovery_iops)} objects/s -> {bound_by} bound at "
+               f"{format_bytes(args.object_size)} objects")
 
         try:
             vprint(f"    Estimated per-OSD recovery rate: {format_bytes(recovery_rate)}ps ({format_int(recovery_rate/args.object_size)} objects/s)")
@@ -915,8 +953,25 @@ def simulate(args, domains=None):
 
             vprint(f"    Expected most loaded OSD when recovering {format_int(pgs_to_recover)} PGs to {num_osds_left} OSDs = {max_osd_load} PGs")
 
-            recovery_time = max(max_osd_load * recovery_time_per_pg, 60) # minimum 1 minutes per PG
-            vprint(f"    Expected critical period ({max_osd_load} PGs * {format_time(recovery_time_per_pg)}) = {format_time(recovery_time)}")
+            backfill_time = max_osd_load * recovery_time_per_pg
+
+            # Recovery cannot start until the affected PGs have peered. Only
+            # the PGs whose up/acting set changed re-peer -- not every PG on the
+            # OSD -- so the peering load is the affected PGs a surviving OSD
+            # takes part in: the failed OSDs' PGs have pg_size-1 surviving
+            # shards each, spread over the survivors with the same
+            # balls-in-bins variance as the backfill.
+            peering_pgs = expected_max_osd_load(num_osds_left,
+                                                pgs_to_recover * max(1, pg_size - 1))
+            peering_time = args.peering_time_per_pg * peering_pgs
+
+            recovery_time = max(backfill_time + peering_time, 60) # minimum 1 minute
+            vprint(f"    Expected critical period = {format_time(recovery_time)}")
+            vprint(f"      backfill: {max_osd_load} PGs * {format_time(recovery_time_per_pg)} = {format_time(backfill_time)}")
+            vprint(f"      peering:  {peering_pgs} affected PGs * {args.peering_time_per_pg}s = {format_time(peering_time)}")
+            if peering_time > backfill_time:
+                print(f"    Note: peering dominates the critical period ({format_time(peering_time)} of "
+                      f"{format_time(recovery_time)}) with {peering_pgs} affected PGs per OSD.")
 
         critical_windows_per_year = SECONDS_PER_YEAR / recovery_time
         vprint(f"    Expected critical periods annually (1 yr / {format_time(recovery_time)}) = {critical_windows_per_year:.1f}")
@@ -1099,20 +1154,45 @@ def fetch_ceph_json(args, ceph_args, local_filename):
         return None
 
 
-def fetch_ceph_config(args, option, cast, current):
-    """Return an osd config option from the cluster, or `current` as fallback."""
+def ceph_config_get(args, option, cast):
+    """Return an osd config option from the cluster, or None if unavailable."""
     if args.from_json:
-        vprint(f"    Using default {option}: {current}")
-        return current
-
+        return None
     ceph_cmd = ['ceph', f'--cluster={args.cluster}', 'config', 'get', 'osd', option, '--format=json']
     try:
-        value = cast(json.loads(subprocess.check_output(ceph_cmd, stderr=subprocess.DEVNULL)))
+        return cast(json.loads(subprocess.check_output(ceph_cmd, stderr=subprocess.DEVNULL)))
     except Exception:
-        vprint(f"    Using default {option}: {current}")
-        return current
-    vprint(f"    Using cluster {option}: {value}")
-    return value
+        return None
+
+
+def fetch_ceph_config(args, option, cast, current):
+    """Return an osd config option from the cluster, or `current` as fallback.
+
+    osd_recovery_sleep and osd_recovery_max_active both default to 0, which is
+    a sentinel meaning "use the _hdd/_ssd/_hybrid variant for this device
+    class", not a literal zero. Reading the generic option alone therefore
+    reports 0 on a default cluster, and taking that at face value makes
+    recovery look instantaneous: a zero max_active gave a 0 B/s recovery rate,
+    which collapsed the critical period to its floor and reported 14 nines.
+
+    We cannot tell a pool's device class from the PG dump alone, so resolve the
+    sentinel against the variant for --device-class.
+    """
+    value = ceph_config_get(args, option, cast)
+    if value:
+        vprint(f"    Using cluster {option}: {value}")
+        return value
+
+    if value == 0:
+        variant = f"{option}_{'ssd' if getattr(args, 'device_class', 'hdd') == 'nvme' else 'hdd'}"
+        by_class = ceph_config_get(args, variant, cast)
+        if by_class:
+            vprint(f"    Cluster {option} is 0, which defers to the device class; "
+                   f"using {variant}: {by_class}")
+            return by_class
+
+    vprint(f"    Using default {option}: {current}")
+    return current
 
 
 def analyze_pool(args, pool, pg_dump):
@@ -1397,10 +1477,13 @@ def run_tests(args):
                 osd_recovery_max_active=1,
                 domains_down=0,
                 replacement_time=7.0,
+                peering_time_per_pg=1.0,
+                device_class='hdd',
+                recovery_iops=100.0,
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("107.8 thousand years", "8-nines")
+            ("107.7 thousand years", "8-nines")
         ],
         [
             argparse.Namespace(
@@ -1423,10 +1506,13 @@ def run_tests(args):
                 osd_recovery_max_active=1,
                 domains_down=0,
                 replacement_time=7.0,
+                peering_time_per_pg=1.0,
+                device_class='hdd',
+                recovery_iops=100.0,
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("111.0 million years", "11-nines")
+            ("110.7 million years", "11-nines")
         ],
         [
             argparse.Namespace(
@@ -1449,10 +1535,13 @@ def run_tests(args):
                 osd_recovery_max_active=1,
                 domains_down=1,
                 replacement_time=7.0,
+                peering_time_per_pg=1.0,
+                device_class='hdd',
+                recovery_iops=100.0,
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("833.5 thousand years", "9-nines")
+            ("831.9 thousand years", "9-nines")
         ],
         [
             argparse.Namespace(
@@ -1475,10 +1564,13 @@ def run_tests(args):
                 osd_recovery_max_active=1,
                 domains_down=0,
                 replacement_time=7.0,
+                peering_time_per_pg=1.0,
+                device_class='hdd',
+                recovery_iops=100.0,
                 skip_monte_carlo=False,
                 max_mc_runtime=30
             ),
-            ("26.9 billion years", "12-nines")
+            ("26.8 billion years", "12-nines")
         ],
         [
             argparse.Namespace(
@@ -1501,10 +1593,13 @@ def run_tests(args):
                 osd_recovery_max_active=1,
                 domains_down=0,
                 replacement_time=7.0,
+                peering_time_per_pg=1.0,
+                device_class='hdd',
+                recovery_iops=100.0,
                 skip_monte_carlo=True,
                 max_mc_runtime=30
             ),
-            ("213.4 thousand years", "11-nines")
+            ("234.5 thousand years", "11-nines")
         ]
     ]
     for i, test_arg in enumerate(test_args):
@@ -1549,9 +1644,24 @@ def main():
     sim.add_argument('--seed', type=int, default=int(time.time()), help='random seed (default: current time)')
     sim.add_argument('--fudge', type=int, default=100, help='correlation "fudge" factor (default: 100)')
     sim.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
-    sim.add_argument('--recovery-rate', type=float, default=50, help='Recovery rate per OSD (default: 50MBps)')
-    sim.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
-    sim.add_argument('--osd-recovery-max-active', type=int, default=1, help='OSD Recovery Max Active (default: 1)')
+    sim.add_argument('--device-class', choices=sorted(DEVICE_CLASS_DEFAULTS), default='hdd',
+                    help='device class the pool lives on, selecting the recovery\n'
+                         'ceiling defaults (default: hdd)')
+    sim.add_argument('--recovery-rate', type=float, default=None,
+                    help='per-OSD recovery bandwidth ceiling in MBps '
+                         '(default: by --device-class)')
+    sim.add_argument('--recovery-iops', type=float, default=None,
+                    help='per-OSD recovery object rate ceiling in objects/s; this is\n'
+                         'what makes small-object pools slow to recover '
+                         '(default: by --device-class)')
+    sim.add_argument('--osd-recovery-sleep', type=float, default=None,
+                    help='OSD Recovery Sleep in seconds (default: by --device-class)')
+    sim.add_argument('--osd-recovery-max-active', type=int, default=None,
+                    help='OSD Recovery Max Active (default: by --device-class)')
+    sim.add_argument('--peering-time-per-pg', type=float, default=1.0,
+                    help='seconds to re-peer one PG after a map change; every PG on an\n'
+                         'OSD peers, so this is the cost that grows with the PG count\n'
+                         '(default: 1.0s)')
     sim.add_argument('--replacement-time', type=float, default=7.0,
                     help='days to physically replace failed hardware, used as the\n'
                          'exposure window when too few failure domains survive for\n'
@@ -1573,9 +1683,24 @@ def main():
     an.add_argument('--seed', type=int, default=int(time.time()), help='random seed (default: current time)')
     an.add_argument('--fudge', type=int, default=100, help='correlation "fudge" factor (default: 100)')
     an.add_argument('--afr', type=float, default=0.02, help='Device AFR (default: 0.02)')
-    an.add_argument('--recovery-rate', type=float, default=50, help='Per-OSD data recovery rate (default: 50MBps)')
-    an.add_argument('--osd-recovery-sleep', type=float, default=0.1, help='OSD Recovery Sleep in seconds (default: 0.1s)')
-    an.add_argument('--osd-recovery-max-active', type=int, default=1, help='OSD Recovery Max Active (default: 1)')
+    an.add_argument('--device-class', choices=sorted(DEVICE_CLASS_DEFAULTS), default='hdd',
+                    help='device class the pool lives on, selecting the recovery\n'
+                         'ceiling defaults (default: hdd)')
+    an.add_argument('--recovery-rate', type=float, default=None,
+                    help='per-OSD recovery bandwidth ceiling in MBps '
+                         '(default: by --device-class)')
+    an.add_argument('--recovery-iops', type=float, default=None,
+                    help='per-OSD recovery object rate ceiling in objects/s; this is\n'
+                         'what makes small-object pools slow to recover '
+                         '(default: by --device-class)')
+    an.add_argument('--osd-recovery-sleep', type=float, default=None,
+                    help='OSD Recovery Sleep in seconds (default: by --device-class)')
+    an.add_argument('--osd-recovery-max-active', type=int, default=None,
+                    help='OSD Recovery Max Active (default: by --device-class)')
+    an.add_argument('--peering-time-per-pg', type=float, default=1.0,
+                    help='seconds to re-peer one PG after a map change; every PG on an\n'
+                         'OSD peers, so this is the cost that grows with the PG count\n'
+                         '(default: 1.0s)')
     an.add_argument('--replacement-time', type=float, default=7.0,
                     help='days to physically replace failed hardware, used as the\n'
                          'exposure window when too few failure domains survive for\n'
@@ -1598,6 +1723,12 @@ def main():
         global DEBUG
         VERBOSE = args.verbose
         DEBUG = args.debug
+
+        # Fill in whichever recovery ceilings were left to the device class, so
+        # the echoed command line shows what was actually used.
+        for option, value in DEVICE_CLASS_DEFAULTS[getattr(args, 'device_class', 'hdd')].items():
+            if getattr(args, option, None) is None:
+                setattr(args, option, value)
 
         # Reconstruct command
         cmdline = reconstruct_command_line(parser, args)
