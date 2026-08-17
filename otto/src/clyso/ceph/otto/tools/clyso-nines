@@ -454,26 +454,37 @@ def pool_performance(size, k, m, num_osds, read_bw, write_bw, read_iops,
         read_trips = [1]
         write_trips = [size]
     elif fast_ec:
-        read_ops, write_ops = 1, m + 2
+        # Chance the shard the IO lands on is not the primary's own.
+        proxied = (k - 1) / k
+        read_ops = 1 + proxied
+        # A parity shard cannot be updated blind: it has to be read before the
+        # new value can be written, so each of the m costs two operations, as
+        # does the data shard being modified.
+        write_ops = 1 + proxied + 2 * m
         read_trips = [1]
-        write_trips = [1, m + 1]          # read the data shard, then write it and parity
+        # the data shard and the parities are read together, then written together
+        write_trips = [m + 1, m + 1]
     else:
         read_ops, write_ops = k, 2 * k + m
         read_trips = [k]
         write_trips = [k, k + m]          # read every data shard, then write them all
 
+    # A proxied op waits for a hop out and back on top of the op itself. The
+    # OSD latency stands in for a hop, as it does for the subops elsewhere.
+    proxy = 1 + (proxied if fast_ec and k is not None else 0.0)
+
     # A classic EC write reads every data shard before writing, so its first
     # round trip is a read and pays read latency.
     write_lat = write_latency * sum(slowest_of(n) for n in write_trips[-1:])
     if len(write_trips) > 1:
-        write_lat += read_latency * sum(slowest_of(n) for n in write_trips[:-1])
+        write_lat += proxy * read_latency * sum(slowest_of(n) for n in write_trips[:-1])
 
     return {
         'read_ops': read_ops,
         'write_ops': write_ops,
         'read_iops': read_budget / read_ops,
         'write_iops': write_budget / write_ops,
-        'read_latency': read_latency * sum(slowest_of(n) for n in read_trips),
+        'read_latency': proxy * read_latency * sum(slowest_of(n) for n in read_trips),
         'write_latency': write_lat,
     }
 
@@ -1815,20 +1826,52 @@ def test_pool_performance():
             if (classic['read_ops'], classic['write_ops']) != (k, 2 * k + m):
                 raise AssertionError(
                     f"{k}+{m} classic costs {classic['read_ops']}/{classic['write_ops']}")
-            # fast reads one shard; a write touches the shard and the parities
-            if (fast['read_ops'], fast['write_ops']) != (1, m + 2):
-                raise AssertionError(f"{k}+{m} fast costs {fast['read_ops']}/{fast['write_ops']}")
-            # fast EC is never the slower of the two
-            for key in ('read_iops', 'write_iops'):
-                if fast[key] < classic[key]:
-                    raise AssertionError(f"{k}+{m} fast {key} below classic")
-            for key in ('read_latency', 'write_latency'):
-                if fast[key] > classic[key]:
-                    raise AssertionError(f"{k}+{m} fast {key} above classic")
-            # fast EC write cost depends on m alone, not on the stripe width
-            other = perf(None, k * 2, m, fast=True)
-            if other['write_ops'] != fast['write_ops']:
-                raise AssertionError("fast EC write cost should not depend on k")
+            # Fast EC touches one shard, but the primary holds only 1 of the k,
+            # so the rest are proxied and involve two OSDs rather than one.
+            proxied = (k - 1) / k
+            if abs(fast['read_ops'] - (1 + proxied)) > 1e-12:
+                raise AssertionError(
+                    f"{k}+{m} fast read should cost {1 + proxied} ops, got {fast['read_ops']}")
+            if abs(fast['write_ops'] - (1 + proxied + 2 * m)) > 1e-12:
+                raise AssertionError(
+                    f"{k}+{m} fast write should cost {1 + proxied + 2 * m}, "
+                    f"got {fast['write_ops']}")
+            # the data side costs what a read does; each parity shard then costs
+            # two, being read before it is rewritten
+            if abs(fast['write_ops'] - fast['read_ops'] - 2 * m) > 1e-12:
+                raise AssertionError(
+                    f"{k}+{m} fast write should exceed its read by exactly 2m")
+            # so it is never as cheap as a replicated read, which is always local
+            replicated = perf(3, None, None)
+            if fast['read_ops'] <= replicated['read_ops']:
+                raise AssertionError(
+                    f"{k}+{m} fast read should cost more than a replicated read")
+            if fast['read_latency'] <= replicated['read_latency']:
+                raise AssertionError(
+                    f"{k}+{m} fast read should be slower than a replicated read")
+            # and the proxy share grows towards 1 as the stripe widens
+            if not 1.0 < fast['read_ops'] < 2.0:
+                raise AssertionError(f"{k}+{m} fast read ops out of range: {fast['read_ops']}")
+            # Fast EC always wins on reads: one shard, proxied or not, against
+            # all k.
+            if fast['read_ops'] >= classic['read_ops']:
+                raise AssertionError(f"{k}+{m} fast read should beat classic")
+
+            # Writes are not a given. Fast EC skips reading the k data shards
+            # but pays 2m for the parity read-modify-writes, so a narrow stripe
+            # carrying a lot of parity - 2+3 - is better off on the classic
+            # path. Pin the crossover in both directions.
+            cheaper = fast['write_ops'] <= classic['write_ops']
+            should_be = (1 + (k - 1) / k + 2 * m) <= (2 * k + m)
+            if cheaper != should_be:
+                raise AssertionError(
+                    f"{k}+{m}: fast write {fast['write_ops']} vs classic "
+                    f"{classic['write_ops']}, expected fast to be "
+                    f"{'cheaper' if should_be else 'dearer'}")
+            # widening the stripe makes a larger share of reads remote
+            wider = perf(None, k * 2, m, fast=True)
+            if wider['read_ops'] <= fast['read_ops']:
+                raise AssertionError("a wider stripe should proxy more of its reads")
 
     # a wider fan-out costs latency even though the subops are parallel
     lat = [perf(size, None, None)['write_latency'] for size in (2, 3, 4, 6)]
@@ -2235,7 +2278,9 @@ def design(args):
 
 def _print_profile_table(args, host_rows, raw_bytes):
     """Capacity, safety and speed for every feasible profile."""
-    print(f"{'':<62}{'classic EC':^18}{'fast EC':^18}")
+    # The first pair is what a replicated pool gets and what an EC pool gets
+    # without fast EC, so it must not read as "classic EC" alone.
+    print(f"{'':<62}{'repl or classic EC':^18}{'fast EC only':^18}")
     cols = (f"{'profile':<15}{'usable':>10}{'eff':>5}{'durab':>6}{'loss/yr':>10}"
             f"{'avail':>6}{'down/yr':>10}{'read':>9}{'write':>9}{'read':>9}{'write':>9}")
     print(cols)
@@ -2259,9 +2304,11 @@ def _print_profile_table(args, host_rows, raw_bytes):
     print()
     print("    durab/avail  nines of durability and availability; loss/yr and down/yr are the")
     print("                 same two figures as bytes lost and time with a PG below min_size")
-    print(f"    read/write   cluster IOPS at {format_bytes(PERF_IO_SIZE)}. Classic EC reads all k "
-          f"shards and writes 2k+m;")
-    print("                 fast EC reads one and writes m+2, so its reads match replication's")
+    print(f"    read/write   cluster IOPS at {format_bytes(PERF_IO_SIZE)}. The left pair is what a "
+          f"replicated pool gets,")
+    print("                 and what an EC pool gets without fast EC: every shard read, 2k+m")
+    print("                 written. The right pair exists only for EC, and touches one shard,")
+    print("                 though just 1 read in k is local and the rest are proxied.")
 
 
 def _print_rack_table(args, host_rows, groupings):
