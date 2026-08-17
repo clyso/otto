@@ -252,6 +252,14 @@ def format_time(seconds):
     for i in reversed(range(1, len(units))):
         if seconds >= thresholds[i]:
             return f"{round(seconds / thresholds[i], 1)} {units[i]}"
+    # Keep sub-second values legible: rounding them to "0 s" hides the
+    # difference between an eight-nines pool and a perfect one.
+    if seconds <= 0:
+        return "0 s"
+    if seconds < 0.1:
+        return "<0.1 s"
+    if seconds < 10:
+        return f"{seconds:.1f} s"
     return f"{round(seconds)} s"
 
 def simple_crush(osd_ids, num_domains, pg_size, num_pgs):
@@ -2013,7 +2021,7 @@ def rack_loss_fraction(num_hosts, hosts_per_rack, width, num_failures):
     return fatal / placements
 
 
-def rack_groupings(num_hosts, limit=2):
+def rack_groupings(num_hosts, limit=4):
     """Plausible hosts-per-rack values for a cluster of num_hosts hosts."""
     divisors = [d for d in range(2, num_hosts) if num_hosts % d == 0]
     if not divisors:
@@ -2083,8 +2091,13 @@ def design(args):
           f"{format_bytes(raw_bytes)} raw, {args.device_class}")
     print(f"    {format_bytes(args.object_size)} objects, {args.pgs_per_osd:.3g} PGs per OSD, "
           f"AFR {args.afr * 100:.3g}%, correlation factor {args.fudge}")
-    print(f"    k+m capped at {args.max_width}, and at {args.num_hosts - args.min_spare_domains} "
-          f"to keep {args.min_spare_domains} spare domain(s)")
+    spare_cap = args.num_hosts - args.min_spare_domains
+    if spare_cap < args.max_width:
+        domains = "domain" if args.min_spare_domains == 1 else "domains"
+        print(f"    k+m capped at {spare_cap}, to keep {args.min_spare_domains} spare "
+              f"{domains} for re-placing a lost shard")
+    else:
+        print(f"    k+m capped at {args.max_width}; past 8+3 performance decides, not durability")
     print()
 
     host_profiles = candidate_profiles(args.num_hosts, args.max_width, args.min_spare_domains)
@@ -2101,16 +2114,9 @@ def design(args):
     groupings = args.hosts_per_rack if args.hosts_per_rack else rack_groupings(args.num_hosts)
     groupings = [g for g in groupings if 1 < g < args.num_hosts and args.num_hosts % g == 0]
 
-    _print_profile_table(args, host_rows, raw_bytes, groupings[0] if groupings else None)
-    if len(groupings) > 1:
-        print()
-        print(f"    rack-loss at other groupings:")
-        for hosts_per_rack in groupings[1:]:
-            worst = max(host_rows, key=lambda row: rack_loss_fraction(
-                args.num_hosts, hosts_per_rack, row[0]['width'], row[0]['tolerates'] + 1))
-            print(f"      {hosts_per_rack} hosts/rack: up to "
-                  f"{rack_loss_fraction(args.num_hosts, hosts_per_rack, worst[0]['width'], worst[0]['tolerates'] + 1) * 100:.2f}%"
-                  f" ({worst[0]['label']})")
+    _print_profile_table(args, host_rows, raw_bytes)
+    if groupings:
+        _print_rack_table(args, host_rows, groupings)
     _print_advice(args, host_rows, raw_bytes, groupings)
     if not groupings:
         print()
@@ -2119,38 +2125,67 @@ def design(args):
     return 0
 
 
-def _print_profile_table(args, host_rows, raw_bytes, hosts_per_rack):
-    """One line per profile: capacity, safety, speed, rack exposure."""
-    cols = (f"{'profile':<15}{'usable':>10}{'eff':>5}{'durab':>7}{'avail':>6}"
-            f"{'loss/yr':>11}{'read':>9}{'write':>9}{'fast-wr':>9}")
-    if hosts_per_rack:
-        cols += f"{'rack-loss':>11}"
+def _print_profile_table(args, host_rows, raw_bytes):
+    """Capacity, safety and speed for every feasible profile."""
+    print(f"{'':<62}{'classic EC':^18}{'fast EC':^18}")
+    cols = (f"{'profile':<15}{'usable':>10}{'eff':>5}{'durab':>6}{'loss/yr':>10}"
+            f"{'avail':>6}{'down/yr':>10}{'read':>9}{'write':>9}{'read':>9}{'write':>9}")
     print(cols)
     print('-' * len(cols))
 
     for prof, r, _ in host_rows:
         fast = r['perf_fast']
-        line = (f"{prof['label']:<15}{format_bytes(raw_bytes * prof['usable']):>10}"
-                f"{prof['usable'] * 100:>4.0f}%"
-                f"{r['nines'].split('-')[0]:>7}{r['availability_nines'].split('-')[0]:>6}"
-                f"{format_bytes(r['expected_bytes_lost_per_year']):>11}"
-                f"{format_int(r['perf']['read_iops']):>9}"
-                f"{format_int(r['perf']['write_iops']):>9}"
-                f"{format_int(fast['write_iops']) if fast else '-':>9}")
-        if hosts_per_rack:
+        avail = r['availability_nines'].split('-')[0] if r['availability_nines'] else '-'
+        downtime = (format_time(r['downtime_sec_per_year'])
+                    if r['downtime_sec_per_year'] is not None else '-')
+        print(f"{prof['label']:<15}{format_bytes(raw_bytes * prof['usable']):>10}"
+              f"{prof['usable'] * 100:>4.0f}%"
+              f"{r['nines'].split('-')[0]:>6}"
+              f"{format_bytes(r['expected_bytes_lost_per_year']):>10}"
+              f"{avail:>6}{downtime:>10}"
+              f"{format_int(r['perf']['read_iops']):>9}"
+              f"{format_int(r['perf']['write_iops']):>9}"
+              f"{format_int(fast['read_iops']) if fast else '-':>9}"
+              f"{format_int(fast['write_iops']) if fast else '-':>9}")
+
+    print()
+    print("    durab/avail  nines of durability and availability; loss/yr and down/yr are the")
+    print("                 same two figures as bytes lost and time with a PG below min_size")
+    print(f"    read/write   cluster IOPS at {format_bytes(PERF_IO_SIZE)}. Classic EC reads all k "
+          f"shards and writes 2k+m;")
+    print("                 fast EC reads one and writes m+2, so its reads match replication's")
+
+
+def _print_rack_table(args, host_rows, groupings):
+    """Rack exposure for every grouping, and what each costs in stripe width."""
+    print()
+    print("Rack exposure: PGs lost if one whole rack fails, with the failure domain at")
+    print("host level. Rack-level placement puts one shard per rack, so it is always zero.")
+    print()
+    header = f"{'profile':<15}"
+    for hosts_per_rack in groupings:
+        header += f"{f'{hosts_per_rack}/rack':>11}"
+    print(header)
+    subhead = f"{'':<15}"
+    for hosts_per_rack in groupings:
+        subhead += f"{f'{args.num_hosts // hosts_per_rack} racks':>11}"
+    print(subhead)
+    print('-' * len(header))
+    for prof, _r, _ in host_rows:
+        line = f"{prof['label']:<15}"
+        for hosts_per_rack in groupings:
             lost = rack_loss_fraction(args.num_hosts, hosts_per_rack,
                                       prof['width'], prof['tolerates'] + 1)
             line += f"{lost * 100:>10.2f}%"
         print(line)
 
     print()
-    print(f"    durab/avail  nines of durability and availability (min_size per profile type)")
-    print(f"    read/write   cluster IOPS at {format_bytes(PERF_IO_SIZE)}, classic EC; fast-wr "
-          f"is EC writing only the")
-    print(f"                 touched shard and parity. A fast-EC read is one op, so it matches "
-          f"the replicated read.")
-    if hosts_per_rack:
-        print("    rack-loss    PGs lost if one whole rack fails, host-level placement only")
+    print("    Choosing rack-level placement instead caps k+m at the rack count:")
+    for hosts_per_rack in groupings:
+        num_racks = args.num_hosts // hosts_per_rack
+        feasible = candidate_profiles(num_racks, args.max_width, args.min_spare_domains)
+        names = ", ".join(prof['label'].split()[0] for prof in feasible) or "nothing"
+        print(f"      {num_racks:>2} racks of {hosts_per_rack} hosts: {names}")
 
 
 def _print_advice(args, rows, raw_bytes, groupings):
@@ -2197,17 +2232,8 @@ def _print_advice(args, rows, raw_bytes, groupings):
         print(f"    Loss rate for {', '.join(bounded)} is an upper bound, not exact.")
 
     if groupings:
-        print()
-        print("Racking makes no difference to durability against independent OSD failures: the")
-        print("loss rate follows the PG and OSD counts, not how the OSDs are grouped. It buys")
-        print("surviving a whole-rack outage, which the rack-loss column prices, at the cost of")
-        print("having far fewer domains to spread a stripe over:")
-        for hosts_per_rack in groupings:
-            num_racks = args.num_hosts // hosts_per_rack
-            feasible = candidate_profiles(num_racks, args.max_width, args.min_spare_domains)
-            names = ", ".join(prof['label'].split()[0] for prof in feasible) or "nothing"
-            print(f"    {hosts_per_rack} hosts/rack -> {num_racks} racks: rack-level placement "
-                  f"allows {names}")
+        print("    Racking changes no durability figure above: the loss rate follows the PG and")
+        print("    OSD counts, not how the OSDs are grouped. It buys surviving a rack outage.")
 
 
 # ---------------------------- Main CLI ----------------------------
