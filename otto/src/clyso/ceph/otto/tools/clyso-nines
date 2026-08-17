@@ -39,10 +39,20 @@ SECONDS_PER_YEAR = 31_536_000
 # CRUSH_ITEM_NONE: placeholder used in pg 'up'/'acting' for a missing OSD
 CRUSH_ITEM_NONE = 0x7fffffff
 
-# Default client IO size the performance model prices, and the EC stripe unit
-# it is measured against (Ceph's osd_pool_erasure_code_stripe_unit default).
-PERF_IO_SIZE = 4096
+# The EC stripe unit an IO is measured against, being Ceph's
+# osd_pool_erasure_code_stripe_unit default.
 EC_STRIPE_UNIT = 4096
+
+# Object size and client IO size are different quantities and the gap between
+# them depends entirely on the workload: RBD stores 4MB objects and reads 4kB of
+# them, S3 stores and reads whole objects, CephFS stores much smaller objects
+# than either but is read like RBD. Recovery moves whole objects, so the object
+# size drives that while the IO size drives client throughput.
+WORKLOAD_DEFAULTS = {
+    'rbd':    {'object_size': 4 * 1024 * 1024, 'client_io_size': 4096},
+    'cephfs': {'object_size': 64 * 1024,       'client_io_size': 4096},
+    's3':     {'object_size': 4 * 1024 * 1024, 'client_io_size': 4 * 1024 * 1024},
+}
 
 # Per-OSD recovery ceilings by device class: MB/s and objects/s. Recovery
 # competes with client IO and is rarely allowed the device's full sequential
@@ -460,7 +470,7 @@ def pool_performance(size, k, m, num_osds, read_bw, write_bw, read_iops,
     """
     # An op is limited by the object rate or by bandwidth, whichever binds at
     # this IO size. At 4kB the object rate binds on every device class here.
-    io_size = io_size or PERF_IO_SIZE
+    io_size = io_size or WORKLOAD_DEFAULTS['rbd']['client_io_size']
     read_budget = num_osds * min(read_iops, read_bw / io_size)
     write_budget = num_osds * min(write_iops, write_bw / io_size)
 
@@ -1836,6 +1846,30 @@ def test_recovery_read_amplification():
                 f"at {size}B both sides are bandwidth bound, so read IOPS is irrelevant")
     print("All recovery_read_amplification tests passed.")
 
+def test_workload_defaults():
+    # object size and IO size are independent, and the presets say so: RBD and
+    # S3 store the same 4MB objects but read them completely differently, while
+    # CephFS is read like RBD but stores far smaller objects
+    presets = {name: apply_workload_defaults(argparse.Namespace(workload=name))
+               for name in WORKLOAD_DEFAULTS}
+    if presets['rbd'].object_size != presets['s3'].object_size:
+        raise AssertionError("rbd and s3 both store 4MB objects")
+    if presets['rbd'].client_io_size != presets['cephfs'].client_io_size:
+        raise AssertionError("cephfs is read like rbd")
+    if presets['s3'].client_io_size <= presets['rbd'].client_io_size:
+        raise AssertionError("s3 reads whole objects, rbd reads a piece")
+    if presets['cephfs'].object_size >= presets['rbd'].object_size:
+        raise AssertionError("cephfs stores smaller objects than rbd")
+
+    # anything set explicitly survives the preset
+    pinned = apply_workload_defaults(
+        argparse.Namespace(workload='s3', object_size=1234, client_io_size=None))
+    if pinned.object_size != 1234:
+        raise AssertionError("an explicit object size must not be overwritten")
+    if pinned.client_io_size != WORKLOAD_DEFAULTS['s3']['client_io_size']:
+        raise AssertionError("the unset half should still come from the preset")
+    print("All workload_defaults tests passed.")
+
 def test_ec_shards_touched():
     # a stripe unit is one shard's worth, handed round-robin to the k data
     # shards, so an IO reaches as many shards as it covers units, up to k
@@ -2039,6 +2073,7 @@ def run_tests(args):
     test_rack_loss_fraction()
     test_default_min_size()
     test_outage_downtime_fraction()
+    test_workload_defaults()
     test_ec_shards_touched()
     test_pool_performance()
     test_recovery_read_amplification()
@@ -2198,6 +2233,7 @@ def run_tests(args):
         test_arg[0] = defaults
         test_arg[0].command = 'simulate'
         apply_device_class_defaults(test_arg[0])
+        apply_workload_defaults(test_arg[0])
         cmdline = reconstruct_command_line(parser, test_arg[0])
         print(f"Command line: {cmdline}")
         r = simulate(test_arg[0])
@@ -2308,8 +2344,9 @@ def design(args):
 
     print(f"{args.num_hosts} hosts x {args.osds_per_host} OSDs = {num_osds} OSDs, "
           f"{format_bytes(raw_bytes)} raw, {args.device_class}")
-    print(f"    {format_bytes(args.object_size)} objects, {args.pgs_per_osd:.3g} PGs per OSD, "
-          f"AFR {args.afr * 100:.3g}%, correlation factor {args.fudge}")
+    print(f"    {args.workload}: {format_bytes(args.object_size)} objects read "
+          f"{format_bytes(args.client_io_size)} at a time, {args.pgs_per_osd:.3g} PGs per OSD, "
+          f"AFR {args.afr * 100:.3g}%")
     spare_cap = args.num_hosts - args.min_spare_domains
     if spare_cap < args.max_width:
         domains = "domain" if args.min_spare_domains == 1 else "domains"
@@ -2537,6 +2574,14 @@ def _print_advice(args, rows, raw_bytes, groupings):
 
 
 # ---------------------------- Main CLI ----------------------------
+def apply_workload_defaults(args):
+    """Fill in the object and IO sizes the workload implies, if unset."""
+    for option, value in WORKLOAD_DEFAULTS[getattr(args, 'workload', 'rbd')].items():
+        if getattr(args, option, None) is None:
+            setattr(args, option, value)
+    return args
+
+
 def apply_device_class_defaults(args):
     """Fill in whichever device-class options were left unset."""
     defaults = DEVICE_CLASS_DEFAULTS[getattr(args, 'device_class', 'hdd')]
@@ -2597,10 +2642,14 @@ def add_shared_options(p, monte_carlo=True):
                         '(default: 0.02)')
     p.add_argument('--rack-outage-hours', type=float, default=4.0,
                    help='hours a rack outage lasts (default: 4.0)')
-    p.add_argument('--client-io-size', type=int, default=PERF_IO_SIZE,
+    p.add_argument('--workload', choices=sorted(WORKLOAD_DEFAULTS), default='rbd',
+                   help='workload preset, setting the object and client IO sizes:\n'
+                        'rbd 4MB objects read 4kB at a time, cephfs 64kB objects\n'
+                        'read the same way, s3 4MB both (default: rbd)')
+    p.add_argument('--client-io-size', type=int, default=None,
                    help='client IO size the performance figures are for. Separate from\n'
                         '--object-size, which is how the data is stored '
-                        '(default: 4kB)')
+                        '(default: by --workload)')
     p.add_argument('--ec-stripe-unit', type=int, default=EC_STRIPE_UNIT,
                    help='EC stripe unit, as osd_pool_erasure_code_stripe_unit. Fast EC\n'
                         'only helps while an IO fits inside one (default: 4kB)')
@@ -2626,8 +2675,9 @@ def add_cluster_shape_options(p):
                    help="number of OSDs per failure domain (default: 16)")
     p.add_argument('--tb-per-osd', type=float, default=10.0,
                    help="raw data per OSD in TB (default: 10.0)")
-    p.add_argument('--object-size', type=int, default=4*1024*1024,
-                   help="average object size in bytes (default: 4MB)")
+    p.add_argument('--object-size', type=int, default=None,
+                   help="average stored object size in bytes; recovery moves whole\n"
+                        "objects, so this drives recovery (default: by --workload)")
     p.add_argument('--pgs-per-osd', type=float, default=100,
                    help="target PGs per OSD (default: 100)")
 
@@ -2674,8 +2724,9 @@ def build_parser():
                           'shard has somewhere to go (default: 1)')
     des.add_argument('--tb-per-osd', type=float, default=10.0,
                      help="raw data per OSD in TB (default: 10.0)")
-    des.add_argument('--object-size', type=int, default=4*1024*1024,
-                     help="average object size in bytes (default: 4MB)")
+    des.add_argument('--object-size', type=int, default=None,
+                     help="average stored object size in bytes; recovery moves whole\n"
+                          "objects, so this drives recovery (default: by --workload)")
     des.add_argument('--pgs-per-osd', type=float, default=100,
                      help="target PGs per OSD (default: 100)")
     des.add_argument('--max-width', type=int, default=11,
@@ -2710,6 +2761,7 @@ def main():
         # Fill in whichever device-class options were left unset, so the echoed
         # command line shows what was actually used.
         apply_device_class_defaults(args)
+        apply_workload_defaults(args)
 
         # Reconstruct command
         cmdline = reconstruct_command_line(parser, args)
