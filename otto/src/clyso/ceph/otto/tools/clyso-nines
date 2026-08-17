@@ -478,6 +478,51 @@ def pool_performance(size, k, m, num_osds, read_bw, write_bw, read_iops,
     }
 
 
+def outage_downtime_fraction(num_groups, group_size, outage_rate, outage_hours,
+                             num_hosts, width, threshold, num_pgs):
+    """Fraction of the year a pool is unavailable because whole groups went down.
+
+    A host losing its CPU, memory or PSU, or a rack losing its switch, takes
+    every OSD in it away at once without destroying anything: the data comes
+    back when the hardware does. So these contribute downtime and no data loss.
+
+    The fraction of time in a state is just its probability, so no rate and
+    duration decomposition is needed: work out how likely it is that enough
+    groups are down at once to take some PG below min_size, and that is the
+    answer.
+
+    num_groups groups each fail outage_rate times a year and stay down
+    outage_hours, so each is down for outage_rate*outage_hours/8760 of the time.
+    A PG needs `threshold` of its shards gone to stop serving, and it holds one
+    shard per failure domain, so `threshold` domains have to be down together.
+    group_size is how many domains one group takes with it: 1 for a host that is
+    itself the failure domain, hosts_per_rack for a rack under host-level
+    placement.
+    """
+    if outage_rate <= 0 or outage_hours <= 0 or num_groups < 1:
+        return 0.0
+
+    down_fraction = min(1.0, outage_rate * outage_hours / (365.0 * 24.0))
+
+    # How many groups have to be down at once, and how many domains that is.
+    groups_needed = max(1, math.ceil(threshold / max(1, group_size)))
+    if groups_needed > num_groups:
+        return 0.0
+    domains_down = groups_needed * group_size
+
+    time_in_state = prob_k_or_more_failures(num_groups, down_fraction, groups_needed)
+    if time_in_state <= 0:
+        return 0.0
+
+    # Given that many domains are down, does any PG lose `threshold` shards?
+    per_pg = rack_loss_fraction(num_hosts, domains_down, width, threshold)
+    if per_pg <= 0:
+        return 0.0
+    any_pg = 1.0 - math.exp(num_pgs * math.log1p(-per_pg)) if per_pg < 1 else 1.0
+
+    return min(1.0, time_in_state * any_pg)
+
+
 def default_min_size(size, k):
     """Ceph's min_size: shards that must be up for a PG to serve IO.
 
@@ -1158,15 +1203,29 @@ def simulate(args, domains=None):
         unavail_rate, unavail_method = mapping_loss_rate(
             pgs, num_osds, num_failures_for_unavailable)
         outage_events_per_year = unavail_events_per_year * unavail_rate
-        downtime_per_year = outage_events_per_year * recovery_time_per_pg
+        osd_downtime = outage_events_per_year * recovery_time_per_pg
+
+        # A whole failure domain going down for reasons that are not the disks -
+        # CPU, memory, a PSU, a kernel panic - takes its OSDs away without
+        # destroying anything. The data returns with the hardware, so this costs
+        # availability and no durability.
+        domain_downtime = outage_downtime_fraction(
+            num_domains, 1, args.host_outage_rate, args.host_outage_hours,
+            num_domains, pg_size, num_failures_for_unavailable, num_pgs
+        ) * SECONDS_PER_YEAR
+
+        downtime_per_year = osd_downtime + domain_downtime
         availability = max(0.0, 1.0 - downtime_per_year / SECONDS_PER_YEAR)
 
         vprint(f"    Availability: min_size {min_size} of {pg_size}, so "
                f"{num_failures_for_unavailable} concurrent failures take a PG below it")
         vprint(f"      {num_failures_for_unavailable}+ failure events annually: {unavail_events_per_year:.3g}, "
                f"of which {unavail_rate * 100:.3g}% hit a PG ({unavail_method})")
-        vprint(f"      Expected outages: {outage_events_per_year:.3g}/yr x "
-               f"{format_time(recovery_time_per_pg)} = {format_time(downtime_per_year)}/yr")
+        vprint(f"      From OSD failures: {outage_events_per_year:.3g}/yr x "
+               f"{format_time(recovery_time_per_pg)} = {format_time(osd_downtime)}/yr")
+        vprint(f"      From whole-{failure_domain} outages "
+               f"({args.host_outage_rate:.3g}/yr each, {args.host_outage_hours:.3g}h): "
+               f"{format_time(domain_downtime)}/yr")
     else: # size == 1 (no redundancy)
         vprint("    No redundancy configured, data loss is certain on any failure.")
         expected_annual_events = num_osds * afr
@@ -1183,6 +1242,8 @@ def simulate(args, domains=None):
         unavail_rate = None
         outage_events_per_year = None
         downtime_per_year = None
+        osd_downtime = None
+        domain_downtime = None
         availability = None
 
 
@@ -1299,6 +1360,8 @@ def simulate(args, domains=None):
         'unavail_events_per_year': unavail_events_per_year,
         'outage_events_per_year': outage_events_per_year,
         'downtime_sec_per_year': downtime_per_year,
+        'downtime_osd_sec_per_year': osd_downtime,
+        'downtime_domain_sec_per_year': domain_downtime,
         'availability': availability,
         'availability_nines': count_nines(availability) if availability is not None else None,
         # OSD distribution stats (optional, only for real pools)
@@ -1775,6 +1838,45 @@ def test_pool_performance():
         raise AssertionError("one operation is its own slowest")
     print("All pool_performance tests passed.")
 
+def test_outage_downtime_fraction():
+    # a whole-domain outage is downtime, so it scales with rate and duration
+    # A width-2 pool has a shard on every host it uses, so any single host
+    # outage takes it below min_size: the downtime is the time some host is
+    # down, which to first order is hosts x rate x duration. The exact figure is
+    # a shade under that, being a binomial tail rather than a sum.
+    base = outage_downtime_fraction(16, 1, 0.05, 4.0, 16, 2, 1, 4096)
+    approx = 16 * 0.05 * 4.0 / (365 * 24)
+    if not 0.99 * approx <= base <= approx:
+        raise AssertionError(
+            f"expected just under {approx:.6g} for a width-2 pool, got {base:.6g}")
+    if outage_downtime_fraction(16, 1, 0.10, 4.0, 16, 2, 1, 4096) <= base:
+        raise AssertionError("twice the outage rate must cost more downtime")
+    if outage_downtime_fraction(16, 1, 0.05, 8.0, 16, 2, 1, 4096) <= base:
+        raise AssertionError("twice the outage duration must cost more downtime")
+
+    # needing more domains down at once is exponentially safer
+    by_threshold = [outage_downtime_fraction(16, 1, 0.05, 4.0, 16, 11, t, 4096)
+                    for t in (1, 2, 3)]
+    if by_threshold != sorted(by_threshold, reverse=True):
+        raise AssertionError(f"a higher threshold must cost less, got {by_threshold}")
+
+    # a rack takes several domains at once, so it reaches the threshold alone
+    one_host = outage_downtime_fraction(16, 1, 0.02, 4.0, 16, 6, 2, 4096)
+    one_rack = outage_downtime_fraction(4, 4, 0.02, 4.0, 16, 6, 2, 4096)
+    if one_rack <= one_host:
+        raise AssertionError("a rack outage should outweigh a single host outage")
+
+    # switched off, or impossible, means no downtime
+    for kwargs in (dict(outage_rate=0.0), dict(outage_hours=0.0)):
+        args = dict(num_groups=16, group_size=1, outage_rate=0.05, outage_hours=4.0,
+                    num_hosts=16, width=3, threshold=2, num_pgs=4096)
+        args.update(kwargs)
+        if outage_downtime_fraction(**args) != 0.0:
+            raise AssertionError(f"{kwargs} should mean no downtime")
+    if outage_downtime_fraction(2, 1, 0.05, 4.0, 16, 3, 3, 4096) != 0.0:
+        raise AssertionError("3 domains cannot go down when only 2 exist")
+    print("All outage_downtime_fraction tests passed.")
+
 def test_default_min_size():
     # 2 for replication, k+1 for erasure coding
     for size in (2, 3, 4):
@@ -1826,6 +1928,7 @@ def run_tests(args):
     test_candidate_profiles()
     test_rack_loss_fraction()
     test_default_min_size()
+    test_outage_downtime_fraction()
     test_pool_performance()
     test_recovery_read_amplification()
     test_confidence_interval()
@@ -2157,28 +2260,39 @@ def _print_profile_table(args, host_rows, raw_bytes):
 
 
 def _print_rack_table(args, host_rows, groupings):
-    """Rack exposure for every grouping, and what each costs in stripe width."""
+    """Rack exposure for every grouping: data at risk, and downtime."""
     print()
-    print("Rack exposure: PGs lost if one whole rack fails, with the failure domain at")
-    print("host level. Rack-level placement puts one shard per rack, so it is always zero.")
+    print("Rack outages, with the failure domain at host level. A switch failure takes the")
+    print("whole rack's OSDs away without destroying them, so it costs availability; losing")
+    print("a rack for good costs data. Rack-level placement puts one shard per rack, which")
+    print("makes both columns zero.")
     print()
     header = f"{'profile':<15}"
+    sub = f"{'':<15}"
     for hosts_per_rack in groupings:
-        header += f"{f'{hosts_per_rack}/rack':>11}"
+        label = f"{hosts_per_rack}/rack, {args.num_hosts // hosts_per_rack} racks"
+        header += f"{label:^21}"
+        sub += f"{'PGs lost':>12}{'down/yr':>9}"
     print(header)
-    subhead = f"{'':<15}"
-    for hosts_per_rack in groupings:
-        subhead += f"{f'{args.num_hosts // hosts_per_rack} racks':>11}"
-    print(subhead)
+    print(sub)
     print('-' * len(header))
-    for prof, _r, _ in host_rows:
+    for prof, r, _ in host_rows:
         line = f"{prof['label']:<15}"
         for hosts_per_rack in groupings:
+            num_racks = args.num_hosts // hosts_per_rack
             lost = rack_loss_fraction(args.num_hosts, hosts_per_rack,
                                       prof['width'], prof['tolerates'] + 1)
-            line += f"{lost * 100:>10.2f}%"
+            down = outage_downtime_fraction(
+                num_racks, hosts_per_rack, args.rack_outage_rate, args.rack_outage_hours,
+                args.num_hosts, prof['width'],
+                prof['width'] - r['min_size'] + 1, r['num_pgs']) * SECONDS_PER_YEAR
+            line += f"{lost * 100:>11.2f}%{format_time(down):>9}"
         print(line)
 
+    print()
+    print("    PGs      share of PGs lost for good if one rack is destroyed")
+    print(f"    down/yr  time offline from switch-style outages, {args.rack_outage_rate:.3g} per rack "
+          f"per year lasting {args.rack_outage_hours:.3g}h")
     print()
     print("    Choosing rack-level placement instead caps k+m at the rack count:")
     for hosts_per_rack in groupings:
@@ -2286,6 +2400,17 @@ def add_shared_options(p, monte_carlo=True):
                    help='per-OSD read latency in seconds (default: by --device-class)')
     p.add_argument('--osd-write-latency', type=float, default=None,
                    help='per-OSD write latency in seconds (default: by --device-class)')
+    p.add_argument('--host-outage-rate', type=float, default=0.05,
+                   help='whole-host outages per host per year from causes other than\n'
+                        'the disks - CPU, memory, PSU, panics. These cost availability\n'
+                        'and not durability (default: 0.05)')
+    p.add_argument('--host-outage-hours', type=float, default=4.0,
+                   help='hours a host outage lasts (default: 4.0)')
+    p.add_argument('--rack-outage-rate', type=float, default=0.02,
+                   help='whole-rack outages per rack per year, e.g. a switch failure\n'
+                        '(default: 0.02)')
+    p.add_argument('--rack-outage-hours', type=float, default=4.0,
+                   help='hours a rack outage lasts (default: 4.0)')
     p.add_argument('--min-size', type=int, default=None,
                    help='shards that must be up for a PG to serve IO\n'
                         '(default: 2 replicated, k+1 erasure coded)')
