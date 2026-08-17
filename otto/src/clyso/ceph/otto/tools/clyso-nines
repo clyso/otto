@@ -72,6 +72,9 @@ def reconstruct_command_line(parser, args):
         if isinstance(value, bool):
             if value:
                 command_parts.append(f"--{arg.replace('_', '-')}")
+        elif isinstance(value, (list, tuple)):
+            command_parts.append(f"--{arg.replace('_', '-')}")
+            command_parts.extend(shlex.quote(str(v)) for v in value)
         elif value is not None:
             command_parts.append(f"--{arg.replace('_', '-')}")
             command_parts.append(shlex.quote(str(value)))
@@ -364,6 +367,15 @@ UNION_BOUND_MAX_RATE = 0.01
 # 6 losses the 99.9% interval spans a factor of ten.
 MIN_LOSSES_FOR_MC = 30
 
+def default_min_size(size, k):
+    """Ceph's min_size: shards that must be up for a PG to serve IO.
+
+    2 for a replicated pool, k+1 for an erasure coded one, which leaves an EC
+    pool one parity shard of headroom before it stops accepting writes.
+    """
+    return 2 if k is None else k + 1
+
+
 def mapping_loss_rate(pgs, num_osds, num_failures, max_subsets=2_000_000):
     """Probability that num_failures random OSD failures destroy at least one PG.
 
@@ -580,6 +592,13 @@ def simulate(args, domains=None):
         num_failures_for_data_loss = args.size
 
     num_failures_for_data_loss = max(0, num_failures_for_data_loss)
+
+    # A pool stops serving IO once any one of its PGs has fewer than min_size
+    # shards up, which happens one failure earlier than data loss for the
+    # standard min_size values: 2 failures for a 3x pool, m for a k+m pool.
+    min_size = args.min_size if getattr(args, 'min_size', None) else default_min_size(args.size, args.k)
+    min_size = max(1, min(min_size, pg_size))
+    num_failures_for_unavailable = max(1, pg_size - min_size + 1)
 
     # how many (additional) OSD failures would cause data loss?
     # adjust for pre-failed domains
@@ -1009,6 +1028,29 @@ def simulate(args, domains=None):
                f"(1 every {format_time(inv(expected_annual_events) * SECONDS_PER_YEAR)})")
         mtt_multi_failure = mttdl(num_osds, num_failures_for_data_loss, afr, args.fudge, recovery_time)
         vprint(f"    Alternate calculation (mean time to {num_osds_to_fail}+ concurrent failures) = {format_time(mtt_multi_failure)}")
+
+        # --- availability -------------------------------------------------
+        # The same failure process, counted at the lower threshold: how often
+        # do enough OSDs fail at once to drop some PG below min_size. Each such
+        # event lasts until one shard is rebuilt, and Ceph prioritises PGs that
+        # are below min_size, so the outage is one shard's recovery rather than
+        # the whole window.
+        unavail_prob = min(1.0, args.fudge * prob_k_or_more_failures(
+            num_osds, failure_prob_per_disk, num_failures_for_unavailable))
+        unavail_events_per_year = (critical_windows_per_year
+                                   * max(1, num_failures_for_unavailable) * unavail_prob)
+        unavail_rate, unavail_method = mapping_loss_rate(
+            pgs, num_osds, num_failures_for_unavailable)
+        outage_events_per_year = unavail_events_per_year * unavail_rate
+        downtime_per_year = outage_events_per_year * recovery_time_per_pg
+        availability = max(0.0, 1.0 - downtime_per_year / SECONDS_PER_YEAR)
+
+        vprint(f"    Availability: min_size {min_size} of {pg_size}, so "
+               f"{num_failures_for_unavailable} concurrent failures take a PG below it")
+        vprint(f"      {num_failures_for_unavailable}+ failure events annually: {unavail_events_per_year:.3g}, "
+               f"of which {unavail_rate * 100:.3g}% hit a PG ({unavail_method})")
+        vprint(f"      Expected outages: {outage_events_per_year:.3g}/yr x "
+               f"{format_time(recovery_time_per_pg)} = {format_time(downtime_per_year)}/yr")
     else: # size == 1 (no redundancy)
         vprint("    No redundancy configured, data loss is certain on any failure.")
         expected_annual_events = num_osds * afr
@@ -1021,6 +1063,11 @@ def simulate(args, domains=None):
         critical_windows_per_year = None
         failure_prob_per_disk = None
         failure_prob = None
+        unavail_events_per_year = None
+        unavail_rate = None
+        outage_events_per_year = None
+        downtime_per_year = None
+        availability = None
 
 
 
@@ -1062,6 +1109,9 @@ def simulate(args, domains=None):
     min_expected_durability = max(0, 1 - (max_expected_pgs_lost_per_year / num_pgs))
     max_expected_durability = max(0, 1 - (min_expected_pgs_lost_per_year / num_pgs))
     print(f"    Durability: {count_nines(expected_durability)}")
+    if availability is not None:
+        print(f"    Availability: {count_nines(availability)} "
+              f"({format_time(downtime_per_year)} of downtime per year, min_size {min_size})")
     vprint(f"    (99.9% CI: {count_nines(min_expected_durability)} to {count_nines(max_expected_durability)})")
 
     expected_bytes_lost_per_year = expected_pgs_lost_per_year * bytes_per_pg
@@ -1102,6 +1152,14 @@ def simulate(args, domains=None):
         'expected_annual_events': expected_annual_events,
         'expected_pgs_lost_per_year': expected_pgs_lost_per_year,
         'durability': expected_durability,
+        # Availability: any PG below min_size takes the pool out of service
+        'min_size': min_size,
+        'failures_to_unavailable': num_failures_for_unavailable,
+        'unavail_events_per_year': unavail_events_per_year,
+        'outage_events_per_year': outage_events_per_year,
+        'downtime_sec_per_year': downtime_per_year,
+        'availability': availability,
+        'availability_nines': count_nines(availability) if availability is not None else None,
         # OSD distribution stats (optional, only for real pools)
         'osd_min_pgs': min_pgs,
         'osd_max_pgs': max_pgs,
@@ -1226,6 +1284,9 @@ def analyze_pool(args, pool, pg_dump):
 
     args.pg_num = pool['pg_num']
     pg_size = args.k + args.m if args.k is not None else args.size
+    if pool.get('min_size'):
+        args.min_size = pool['min_size']
+        vprint(f"    Pool min_size: {args.min_size}")
 
     pg_stats = pg_dump['pg_map']['pg_stats']
     pgs = [valid_osds(pg['acting']) for pg in pg_stats
@@ -1488,6 +1549,34 @@ def test_candidate_profiles():
 
     print("All candidate_profiles tests passed.")
 
+def test_default_min_size():
+    # 2 for replication, k+1 for erasure coding
+    for size in (2, 3, 4):
+        if default_min_size(size, None) != 2:
+            raise AssertionError(f"replicated min_size should be 2, got for size {size}")
+    for k in (2, 4, 8, 17):
+        if default_min_size(None, k) != k + 1:
+            raise AssertionError(f"erasure min_size should be k+1 for k={k}")
+
+    # a pool goes unavailable exactly one failure before it loses data, for
+    # both of those conventions
+    for size in (2, 3, 4):
+        width = size
+        to_unavailable = width - default_min_size(size, None) + 1
+        to_loss = size
+        if to_unavailable != to_loss - 1:
+            raise AssertionError(
+                f"{size}x: unavailable at {to_unavailable}, loss at {to_loss}")
+    for k in (2, 4, 8):
+        for m in (2, 3):
+            width = k + m
+            to_unavailable = width - default_min_size(None, k) + 1
+            to_loss = m + 1
+            if to_unavailable != m or to_unavailable != to_loss - 1:
+                raise AssertionError(
+                    f"{k}+{m}: unavailable at {to_unavailable}, loss at {to_loss}")
+    print("All default_min_size tests passed.")
+
 def test_rack_loss_fraction():
     # a rack holding fewer hosts than a PG needs shards cannot take the PG out
     if rack_loss_fraction(20, 2, 3, 3) != 0.0:
@@ -1510,6 +1599,7 @@ def run_tests(args):
     test_comb()
     test_candidate_profiles()
     test_rack_loss_fraction()
+    test_default_min_size()
     test_confidence_interval()
     test_prob_k_or_more_failures()
     test_expected_max_osd_load()
@@ -1758,6 +1848,7 @@ def evaluate_profiles(args, profiles, num_domains, osds_per_domain, failure_doma
         sub.num_domains, sub.osds_per_domain = num_domains, osds_per_domain
         sub.failure_domain = failure_domain
         sub.skip_monte_carlo = not args.monte_carlo
+        sub.min_size = None   # each profile takes the default for its type
         sub.seed = args.seed          # same failure draws for every profile
         captured = io.StringIO()
         try:
@@ -1829,18 +1920,19 @@ def _print_profile_table(args, host_rows, raw_bytes, rack_rows, hosts_per_rack):
     by_label = {row[0]['label']: row for row in (rack_rows or [])}
     racked = rack_rows is not None
 
-    cols = f"{'profile':<15}{'width':>6}{'usable':>10}{'eff':>6}{'durability':>12}{'MTTDL':>22}"
+    cols = (f"{'profile':<15}{'width':>6}{'min':>5}{'usable':>10}{'eff':>6}"
+            f"{'durability':>12}{'availability':>14}{'MTTDL':>22}")
     if racked:
         cols += f"{'rack outage':>13}{'racked':>12}"
-        print(f"{' ' * 37}{'--- failure domain = host ---':^34}"
+        print(f"{' ' * 42}{'--- failure domain = host ---':^50}"
               f"{'  --- rack ---':^25}")
     print(cols)
     print('-' * len(cols))
 
     for prof, r, _ in host_rows:
-        line = (f"{prof['label']:<15}{prof['width']:>6}"
+        line = (f"{prof['label']:<15}{prof['width']:>6}{r['min_size']:>5}"
                 f"{format_bytes(raw_bytes * prof['usable']):>10}{prof['usable'] * 100:>5.0f}%"
-                f"{r['nines']:>12}{r['mttdl']:>22}")
+                f"{r['nines']:>12}{r['availability_nines'] or '-':>14}{r['mttdl']:>22}")
         if racked:
             lost = rack_loss_fraction(args.num_hosts, hosts_per_rack,
                                       prof['width'], prof['tolerates'] + 1)
@@ -1850,12 +1942,14 @@ def _print_profile_table(args, host_rows, raw_bytes, rack_rows, hosts_per_rack):
         print(line)
 
     print()
-    print("    eff         = usable capacity as a fraction of raw")
-    print("    durability  = fraction of data surviving a year of independent OSD failures")
+    print("    min          = min_size, shards that must be up for a PG to serve IO")
+    print("    eff          = usable capacity as a fraction of raw")
+    print("    durability   = fraction of data surviving a year of independent OSD failures")
+    print("    availability = fraction of the year every PG has min_size shards up")
     if racked:
-        print("    rack outage = PGs lost if one whole rack fails, which only host-level")
-        print("                  placement is exposed to")
-        print("    racked      = durability with the failure domain at rack level instead")
+        print("    rack outage  = PGs lost if one whole rack fails, which only host-level")
+        print("                   placement is exposed to")
+        print("    racked       = durability with the failure domain at rack level instead")
 
 
 def _print_advice(args, rows, raw_bytes):
@@ -1899,9 +1993,19 @@ def _print_advice(args, rows, raw_bytes):
             print(f"      {prof['label']:<15} {format_bytes(raw_bytes * prof['usable']):>9} usable "
                   f"({prof['usable'] * 100:>3.0f}%)  {r['nines']:>9}  MTTDL {r['mttdl']}")
 
+    least_available = min(rows, key=lambda row: row[1]['availability']
+                          if row[1]['availability'] is not None else 1.0)
+    if least_available[1]['availability'] is not None:
+        print(f"    Least available: {least_available[0]['label']} at "
+              f"{least_available[1]['availability_nines']}, "
+              f"{format_time(least_available[1]['downtime_sec_per_year'])} of downtime a year. "
+              f"Availability runs well behind durability everywhere here, because a pool stops")
+        print("    serving IO one failure before it loses anything.")
+
     if any(row[0]['size'] == 2 for row in rows):
         print("    Warning: 2x replication tolerates a single OSD failure, so any second "
-              "failure during recovery loses data. Rarely appropriate for primary copies.")
+              "failure during recovery loses data, and with min_size 2 a single failure "
+              "already takes PGs offline. Rarely appropriate for primary copies.")
 
     bounded = [row[0]['label'] for row in rows if 'union bound' in row[2]]
     if bounded:
@@ -1980,6 +2084,9 @@ def add_shared_options(p, monte_carlo=True):
                    help='days to physically replace failed hardware, used as the\n'
                         'exposure window when too few failure domains survive for\n'
                         'recovery to run (default: 7.0)')
+    p.add_argument('--min-size', type=int, default=None,
+                   help='shards that must be up for a PG to serve IO\n'
+                        '(default: 2 replicated, k+1 erasure coded)')
     p.add_argument('--domains-down', type=int, default=0,
                    help='number of failure domains to take down in simulation (default: 0)')
     p.add_argument('--max-mc-runtime', type=int, default=30,
