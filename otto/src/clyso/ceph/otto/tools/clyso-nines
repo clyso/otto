@@ -39,6 +39,10 @@ SECONDS_PER_YEAR = 31_536_000
 # CRUSH_ITEM_NONE: placeholder used in pg 'up'/'acting' for a missing OSD
 CRUSH_ITEM_NONE = 0x7fffffff
 
+# Small-IO size the performance model assumes, below the EC stripe unit so a
+# fast-EC read can be served from one OSD.
+PERF_IO_SIZE = 4096
+
 # Per-OSD recovery ceilings by device class: MB/s and objects/s. Recovery
 # competes with client IO and is rarely allowed the device's full sequential
 # throughput, so these are working figures for a busy cluster rather than
@@ -47,9 +51,11 @@ CRUSH_ITEM_NONE = 0x7fffffff
 # and _ssd defaults, which is what an OSD of that class actually applies.
 DEVICE_CLASS_DEFAULTS = {
     'hdd':  {'recovery_rate':  50.0, 'recovery_iops':  100.0,
-             'osd_recovery_sleep': 0.1, 'osd_recovery_max_active': 3},
+             'osd_recovery_sleep': 0.1, 'osd_recovery_max_active': 3,
+             'osd_iops': 150.0, 'osd_latency': 0.010},
     'nvme': {'recovery_rate': 500.0, 'recovery_iops': 5000.0,
-             'osd_recovery_sleep': 0.0, 'osd_recovery_max_active': 10},
+             'osd_recovery_sleep': 0.0, 'osd_recovery_max_active': 10,
+             'osd_iops': 20000.0, 'osd_latency': 0.0005},
 }
 
 # ---------------------------- Utilities ----------------------------
@@ -366,6 +372,60 @@ UNION_BOUND_MAX_RATE = 0.01
 # Below this many observed losses a sampled rate is too noisy to build on: at
 # 6 losses the 99.9% interval spans a factor of ten.
 MIN_LOSSES_FOR_MC = 30
+
+def slowest_of(n):
+    """Expected slowest of n parallel operations, in units of one operation.
+
+    The harmonic number: fanning a write out to more OSDs costs latency even
+    though the subops go in parallel, because the client waits for the last one.
+    """
+    return sum(1.0 / i for i in range(1, max(1, int(n)) + 1))
+
+
+def pool_performance(size, k, m, num_osds, osd_iops, osd_latency, fast_ec=False):
+    """Small-IO client throughput and latency for one pool profile.
+
+    The cluster has num_osds * osd_iops operations a second to spend, and a
+    client IO costs several of them:
+
+    Replicated: a read is served by the primary alone, one op. A write costs an
+    op on the primary plus a subop on each replica, so `size` ops.
+
+    Classic erasure coding: the primary holds only one of the k data shards, so
+    a read of any size fans out to all k, assembles, and replies. A write reads
+    all k shards, updates locally, then sends k+m-1 write subops: two round
+    trips, and 2k+m ops.
+
+    Fast erasure coding: a read below the stripe unit is served from the single
+    OSD holding it. A write reads the affected data shard, then writes it and
+    the m parity shards, so m+2 ops in two round trips.
+
+    Returns ops per client read and write, cluster IOPS for each, and latency.
+    """
+    budget = num_osds * osd_iops
+
+    if k is None:
+        read_ops, write_ops = 1, size
+        read_trips = [1]
+        write_trips = [size]
+    elif fast_ec:
+        read_ops, write_ops = 1, m + 2
+        read_trips = [1]
+        write_trips = [1, m + 1]          # read the data shard, then write it and parity
+    else:
+        read_ops, write_ops = k, 2 * k + m
+        read_trips = [k]
+        write_trips = [k, k + m]          # read every data shard, then write them all
+
+    return {
+        'read_ops': read_ops,
+        'write_ops': write_ops,
+        'read_iops': budget / read_ops,
+        'write_iops': budget / write_ops,
+        'read_latency': osd_latency * sum(slowest_of(n) for n in read_trips),
+        'write_latency': osd_latency * sum(slowest_of(n) for n in write_trips),
+    }
+
 
 def default_min_size(size, k):
     """Ceph's min_size: shards that must be up for a PG to serve IO.
@@ -1108,21 +1168,44 @@ def simulate(args, domains=None):
     expected_durability = max(0, 1 - (expected_pgs_lost_per_year / num_pgs))
     min_expected_durability = max(0, 1 - (max_expected_pgs_lost_per_year / num_pgs))
     max_expected_durability = max(0, 1 - (min_expected_pgs_lost_per_year / num_pgs))
-    print(f"    Durability: {count_nines(expected_durability)}")
+    expected_bytes_lost_per_year = expected_pgs_lost_per_year * bytes_per_pg
+    min_expected_bytes_lost_per_year = min_expected_pgs_lost_per_year * bytes_per_pg
+    max_expected_bytes_lost_per_year = max_expected_pgs_lost_per_year * bytes_per_pg
+
+    print(f"    Durability: {count_nines(expected_durability)} "
+          f"({format_bytes(expected_bytes_lost_per_year)} of data lost per year)")
     if availability is not None:
         print(f"    Availability: {count_nines(availability)} "
               f"({format_time(downtime_per_year)} of downtime per year, min_size {min_size})")
     vprint(f"    (99.9% CI: {count_nines(min_expected_durability)} to {count_nines(max_expected_durability)})")
 
-    expected_bytes_lost_per_year = expected_pgs_lost_per_year * bytes_per_pg
-    min_expected_bytes_lost_per_year = min_expected_pgs_lost_per_year * bytes_per_pg
-    max_expected_bytes_lost_per_year = max_expected_pgs_lost_per_year * bytes_per_pg
 
     vprint(f"Expected annual data loss: {format_bytes(expected_bytes_lost_per_year)}")
     vprint(f"    (99.9% CI: {format_bytes(min_expected_bytes_lost_per_year)} - {format_bytes(max_expected_bytes_lost_per_year)})")
 
+    # --- client performance (independent of the failure model) -----------
+    perf = pool_performance(args.size, args.k, args.m, num_osds,
+                            args.osd_iops, args.osd_latency, fast_ec=False)
+    perf_fast = (pool_performance(args.size, args.k, args.m, num_osds,
+                                  args.osd_iops, args.osd_latency, fast_ec=True)
+                 if args.k is not None else None)
+    label = "classic EC" if args.k is not None else "replicated"
+    print(f"    Performance ({format_bytes(PERF_IO_SIZE)} IO, {label}): "
+          f"read {format_int(perf['read_iops'])} IOPS at {perf['read_latency']*1000:.1f}ms, "
+          f"write {format_int(perf['write_iops'])} IOPS at {perf['write_latency']*1000:.1f}ms")
+    vprint(f"      {perf['read_ops']} OSD op(s) per read, {perf['write_ops']} per write, "
+           f"out of {format_int(num_osds * args.osd_iops)} IOPS across {num_osds} OSDs")
+    if perf_fast:
+        print(f"    Performance ({format_bytes(PERF_IO_SIZE)} IO, fast EC): "
+              f"read {format_int(perf_fast['read_iops'])} IOPS at {perf_fast['read_latency']*1000:.1f}ms, "
+              f"write {format_int(perf_fast['write_iops'])} IOPS at {perf_fast['write_latency']*1000:.1f}ms")
+        vprint(f"      {perf_fast['read_ops']} OSD op(s) per read, {perf_fast['write_ops']} per write")
+
     return {
         'mttdl': format_time(mttdl_sec),
+        # Client performance, classic EC and fast EC where they differ
+        'perf': perf,
+        'perf_fast': perf_fast,
         'nines': count_nines(expected_durability),
         'mttdl_sec': mttdl_sec if mttdl_sec != float('inf') else None,
         'loss_rate': loss_rate,
@@ -1549,6 +1632,48 @@ def test_candidate_profiles():
 
     print("All candidate_profiles tests passed.")
 
+def test_pool_performance():
+    budget = 240 * 150.0
+    # replication: a read is one op, a write is one per copy
+    for size in (2, 3, 4):
+        d = pool_performance(size, None, None, 240, 150.0, 0.010)
+        if (d['read_ops'], d['write_ops']) != (1, size):
+            raise AssertionError(f"{size}x costs {d['read_ops']}/{d['write_ops']} ops")
+        if abs(d['write_iops'] - budget / size) > 1e-6:
+            raise AssertionError(f"{size}x write IOPS {d['write_iops']}")
+
+    for k in (2, 4, 8):
+        for m in (2, 3):
+            classic = pool_performance(None, k, m, 240, 150.0, 0.010, fast_ec=False)
+            fast = pool_performance(None, k, m, 240, 150.0, 0.010, fast_ec=True)
+            # classic reads every data shard; a write reads them all then writes k+m
+            if (classic['read_ops'], classic['write_ops']) != (k, 2 * k + m):
+                raise AssertionError(
+                    f"{k}+{m} classic costs {classic['read_ops']}/{classic['write_ops']}")
+            # fast reads one shard; a write touches the shard and the parities
+            if (fast['read_ops'], fast['write_ops']) != (1, m + 2):
+                raise AssertionError(f"{k}+{m} fast costs {fast['read_ops']}/{fast['write_ops']}")
+            # fast EC is never the slower of the two
+            for key in ('read_iops', 'write_iops'):
+                if fast[key] < classic[key]:
+                    raise AssertionError(f"{k}+{m} fast {key} below classic")
+            for key in ('read_latency', 'write_latency'):
+                if fast[key] > classic[key]:
+                    raise AssertionError(f"{k}+{m} fast {key} above classic")
+            # fast EC write cost depends on m alone, not on the stripe width
+            other = pool_performance(None, k * 2, m, 240, 150.0, 0.010, fast_ec=True)
+            if other['write_ops'] != fast['write_ops']:
+                raise AssertionError("fast EC write cost should not depend on k")
+
+    # a wider fan-out costs latency even though the subops are parallel
+    lat = [pool_performance(size, None, None, 240, 150.0, 0.010)['write_latency']
+           for size in (2, 3, 4, 6)]
+    if lat != sorted(lat):
+        raise AssertionError(f"write latency should grow with the fan-out, got {lat}")
+    if slowest_of(1) != 1.0:
+        raise AssertionError("one operation is its own slowest")
+    print("All pool_performance tests passed.")
+
 def test_default_min_size():
     # 2 for replication, k+1 for erasure coding
     for size in (2, 3, 4):
@@ -1600,6 +1725,7 @@ def run_tests(args):
     test_candidate_profiles()
     test_rack_loss_fraction()
     test_default_min_size()
+    test_pool_performance()
     test_confidence_interval()
     test_prob_k_or_more_failures()
     test_expected_max_osd_load()
@@ -1866,14 +1992,12 @@ def design(args):
     num_osds = args.num_hosts * args.osds_per_host
     raw_bytes = num_osds * args.tb_per_osd * 1024**4
 
-    print(f"Designing pool profiles for {args.num_hosts} hosts x {args.osds_per_host} OSDs "
-          f"= {num_osds} OSDs")
-    print(f"    Raw capacity: {format_bytes(raw_bytes)} at {args.tb_per_osd:.3g}TB per OSD, "
-          f"{args.device_class}")
-    print(f"    Assuming {format_bytes(args.object_size)} objects, {args.pgs_per_osd:.3g} PGs per OSD, "
+    print(f"{args.num_hosts} hosts x {args.osds_per_host} OSDs = {num_osds} OSDs, "
+          f"{format_bytes(raw_bytes)} raw, {args.device_class}")
+    print(f"    {format_bytes(args.object_size)} objects, {args.pgs_per_osd:.3g} PGs per OSD, "
           f"AFR {args.afr * 100:.3g}%, correlation factor {args.fudge}")
-    print(f"    Widths are capped at {args.num_hosts - args.min_spare_domains} to keep "
-          f"{args.min_spare_domains} spare domain(s) for re-placing a lost shard")
+    print(f"    k+m capped at {args.max_width}, and at {args.num_hosts - args.min_spare_domains} "
+          f"to keep {args.min_spare_domains} spare domain(s)")
     print()
 
     host_profiles = candidate_profiles(args.num_hosts, args.max_width, args.min_spare_domains)
@@ -1883,172 +2007,120 @@ def design(args):
             f"{args.min_spare_domains} spare; at least {2 + args.min_spare_domains} are needed.")
 
     host_rows = evaluate_profiles(args, host_profiles, args.num_hosts,
-                                 args.osds_per_host, 'host')
+                                  args.osds_per_host, 'host')
     if not host_rows:
         raise ValueError("No profile could be evaluated.")
 
     groupings = args.hosts_per_rack if args.hosts_per_rack else rack_groupings(args.num_hosts)
     groupings = [g for g in groupings if 1 < g < args.num_hosts and args.num_hosts % g == 0]
 
+    _print_profile_table(args, host_rows, raw_bytes, groupings[0] if groupings else None)
+    if len(groupings) > 1:
+        print()
+        print(f"    rack-loss at other groupings:")
+        for hosts_per_rack in groupings[1:]:
+            worst = max(host_rows, key=lambda row: rack_loss_fraction(
+                args.num_hosts, hosts_per_rack, row[0]['width'], row[0]['tolerates'] + 1))
+            print(f"      {hosts_per_rack} hosts/rack: up to "
+                  f"{rack_loss_fraction(args.num_hosts, hosts_per_rack, worst[0]['width'], worst[0]['tolerates'] + 1) * 100:.2f}%"
+                  f" ({worst[0]['label']})")
+    _print_advice(args, host_rows, raw_bytes, groupings)
     if not groupings:
-        _print_profile_table(args, host_rows, raw_bytes, None, None)
-        _print_advice(args, host_rows, raw_bytes)
         print()
-        print(f"    Note: {args.num_hosts} hosts do not divide into racks evenly, so there is "
-              "no rack grouping to compare. Pass --hosts-per-rack to force one.")
-        return 0
-
-    for hosts_per_rack in groupings:
-        num_racks = args.num_hosts // hosts_per_rack
-        rack_profiles = candidate_profiles(num_racks, args.max_width, args.min_spare_domains)
-        rack_rows = evaluate_profiles(args, rack_profiles, num_racks,
-                                      args.osds_per_host * hosts_per_rack, 'rack')
-        print(f"=== {hosts_per_rack} hosts per rack -> {num_racks} racks of "
-              f"{args.osds_per_host * hosts_per_rack} OSDs "
-              f"(rack-level widths capped at {num_racks - args.min_spare_domains})")
-        print()
-        _print_profile_table(args, host_rows, raw_bytes, rack_rows, hosts_per_rack)
-        print()
-
-    _print_advice(args, host_rows, raw_bytes)
-    _print_rack_verdict(args, host_rows, raw_bytes, groupings)
+        print(f"    {args.num_hosts} hosts do not divide into racks evenly; pass "
+              "--hosts-per-rack to compare a grouping.")
     return 0
 
 
-def _print_profile_table(args, host_rows, raw_bytes, rack_rows, hosts_per_rack):
-    """One row per profile, host-level placement beside rack-level."""
-    by_label = {row[0]['label']: row for row in (rack_rows or [])}
-    racked = rack_rows is not None
-
-    cols = (f"{'profile':<15}{'width':>6}{'min':>5}{'usable':>10}{'eff':>6}"
-            f"{'durability':>12}{'availability':>14}{'MTTDL':>22}")
-    if racked:
-        cols += f"{'rack outage':>13}{'racked':>12}"
-        print(f"{' ' * 42}{'--- failure domain = host ---':^50}"
-              f"{'  --- rack ---':^25}")
+def _print_profile_table(args, host_rows, raw_bytes, hosts_per_rack):
+    """One line per profile: capacity, safety, speed, rack exposure."""
+    cols = (f"{'profile':<15}{'usable':>10}{'eff':>5}{'durab':>7}{'avail':>6}"
+            f"{'loss/yr':>11}{'read':>9}{'write':>9}{'fast-wr':>9}")
+    if hosts_per_rack:
+        cols += f"{'rack-loss':>11}"
     print(cols)
     print('-' * len(cols))
 
     for prof, r, _ in host_rows:
-        line = (f"{prof['label']:<15}{prof['width']:>6}{r['min_size']:>5}"
-                f"{format_bytes(raw_bytes * prof['usable']):>10}{prof['usable'] * 100:>5.0f}%"
-                f"{r['nines']:>12}{r['availability_nines'] or '-':>14}{r['mttdl']:>22}")
-        if racked:
+        fast = r['perf_fast']
+        line = (f"{prof['label']:<15}{format_bytes(raw_bytes * prof['usable']):>10}"
+                f"{prof['usable'] * 100:>4.0f}%"
+                f"{r['nines'].split('-')[0]:>7}{r['availability_nines'].split('-')[0]:>6}"
+                f"{format_bytes(r['expected_bytes_lost_per_year']):>11}"
+                f"{format_int(r['perf']['read_iops']):>9}"
+                f"{format_int(r['perf']['write_iops']):>9}"
+                f"{format_int(fast['write_iops']) if fast else '-':>9}")
+        if hosts_per_rack:
             lost = rack_loss_fraction(args.num_hosts, hosts_per_rack,
                                       prof['width'], prof['tolerates'] + 1)
-            other = by_label.get(prof['label'])
-            racked_nines = other[1]['nines'] if other else 'too wide'
-            line += f"{lost * 100:>12.2f}%{racked_nines:>12}"
+            line += f"{lost * 100:>10.2f}%"
         print(line)
 
     print()
-    print("    min          = min_size, shards that must be up for a PG to serve IO")
-    print("    eff          = usable capacity as a fraction of raw")
-    print("    durability   = fraction of data surviving a year of independent OSD failures")
-    print("    availability = fraction of the year every PG has min_size shards up")
-    if racked:
-        print("    rack outage  = PGs lost if one whole rack fails, which only host-level")
-        print("                   placement is exposed to")
-        print("    racked       = durability with the failure domain at rack level instead")
+    print(f"    durab/avail  nines of durability and availability (min_size per profile type)")
+    print(f"    read/write   cluster IOPS at {format_bytes(PERF_IO_SIZE)}, classic EC; fast-wr "
+          f"is EC writing only the")
+    print(f"                 touched shard and parity. A fast-EC read is one op, so it matches "
+          f"the replicated read.")
+    if hosts_per_rack:
+        print("    rack-loss    PGs lost if one whole rack fails, host-level placement only")
 
 
-def _print_advice(args, rows, raw_bytes):
+def _print_advice(args, rows, raw_bytes, groupings):
     def nines_of(result):
         return int(result['nines'].split('-')[0])
 
-    print("Advice (host-level placement):")
+    print()
     best = max(rows, key=lambda row: row[1]['durability'])
-    print(f"    Most durable: {best[0]['label']} at {best[1]['nines']}, keeping "
-          f"{format_bytes(raw_bytes * best[0]['usable'])} usable "
-          f"({best[0]['usable'] * 100:.0f}% of raw)")
-
     if args.target_nines is not None:
         reaching = [row for row in rows if nines_of(row[1]) >= args.target_nines]
         if reaching:
             pick = max(reaching, key=lambda row: row[0]['usable'])
-            print(f"    Most space efficient at {args.target_nines}-nines or better: "
-                  f"{pick[0]['label']}, {format_bytes(raw_bytes * pick[0]['usable'])} usable "
-                  f"({pick[0]['usable'] * 100:.0f}% of raw), {pick[1]['nines']}")
+            print(f"Most space efficient at {args.target_nines}-nines or better: "
+                  f"{pick[0]['label']}, {pick[0]['usable'] * 100:.0f}% of raw usable, "
+                  f"{pick[1]['nines']}, {pick[1]['availability_nines']} available")
         else:
-            print(f"    Nothing on this shape reaches {args.target_nines}-nines; the best is "
+            print(f"Nothing here reaches {args.target_nines}-nines; the best is "
                   f"{best[1]['nines']} with {best[0]['label']}")
     else:
         def dominated(row):
             for other in rows:
                 if other is row:
                     continue
-                atleast = (other[1]['durability'] >= row[1]['durability']
-                           and other[0]['usable'] >= row[0]['usable'])
-                better = (other[1]['durability'] > row[1]['durability']
-                          or other[0]['usable'] > row[0]['usable'])
-                if atleast and better:
+                if (other[1]['durability'] >= row[1]['durability']
+                        and other[0]['usable'] >= row[0]['usable']
+                        and (other[1]['durability'] > row[1]['durability']
+                             or other[0]['usable'] > row[0]['usable'])):
                     return True
             return False
 
         frontier = sorted((row for row in rows if not dominated(row)),
                           key=lambda row: row[0]['usable'])
-        print("    Worth considering, in order of usable capacity; everything else here is")
-        print("    beaten on both capacity and durability by one of these:")
-        for prof, r, _ in frontier:
-            print(f"      {prof['label']:<15} {format_bytes(raw_bytes * prof['usable']):>9} usable "
-                  f"({prof['usable'] * 100:>3.0f}%)  {r['nines']:>9}  MTTDL {r['mttdl']}")
-
-    least_available = min(rows, key=lambda row: row[1]['availability']
-                          if row[1]['availability'] is not None else 1.0)
-    if least_available[1]['availability'] is not None:
-        print(f"    Least available: {least_available[0]['label']} at "
-              f"{least_available[1]['availability_nines']}, "
-              f"{format_time(least_available[1]['downtime_sec_per_year'])} of downtime a year. "
-              f"Availability runs well behind durability everywhere here, because a pool stops")
-        print("    serving IO one failure before it loses anything.")
+        chain = "  ".join(f"{row[0]['label'].split()[0]} ({row[0]['usable'] * 100:.0f}%/"
+                          f"{nines_of(row[1])}n)" for row in frontier)
+        print(f"Worth choosing between (capacity/durability); everything else is beaten on both:")
+        print(f"    {chain}")
 
     if any(row[0]['size'] == 2 for row in rows):
-        print("    Warning: 2x replication tolerates a single OSD failure, so any second "
-              "failure during recovery loses data, and with min_size 2 a single failure "
-              "already takes PGs offline. Rarely appropriate for primary copies.")
+        print("    2x replication: a single OSD failure already takes PGs below min_size, so it "
+              "is both the least durable and the least available option here.")
 
     bounded = [row[0]['label'] for row in rows if 'union bound' in row[2]]
     if bounded:
-        print(f"    Note: the loss rate for {', '.join(bounded)} is an upper bound; the exact "
-              "count was too large to enumerate.")
+        print(f"    Loss rate for {', '.join(bounded)} is an upper bound, not exact.")
 
-
-def _print_rack_verdict(args, host_rows, raw_bytes, groupings):
-    """Say plainly what the grouping does and does not buy."""
-    print()
-    print("Does racking change durability?")
-    print("    Against independent OSD failures, no. The loss rate depends on the PG count")
-    print("    and the OSD count, not on how the OSDs are grouped, so the durability columns")
-    print("    above match wherever a profile is feasible at both levels.")
-    print()
-    print("    What racking buys is surviving a whole-rack outage. Under host-level placement")
-    print("    a PG's shards land on distinct hosts that may share a rack, so one rack going")
-    print("    down takes several shards of the same PG:")
-    for hosts_per_rack in groupings:
-        worst = max(host_rows, key=lambda row: rack_loss_fraction(
-            args.num_hosts, hosts_per_rack, row[0]['width'], row[0]['tolerates'] + 1))
-        lost = rack_loss_fraction(args.num_hosts, hosts_per_rack,
-                                  worst[0]['width'], worst[0]['tolerates'] + 1)
-        pgs = worst[1]['num_pgs']
-        print(f"      at {hosts_per_rack} hosts per rack, {worst[0]['label']} loses "
-              f"{lost * 100:.2f}% of its PGs, about {round(lost * pgs)} of {pgs}")
-    print("    Any non-zero figure there means a rack outage is a data loss event, not a")
-    print("    degraded one. Rack-level placement puts at most one shard per rack, so the")
-    print("    same outage leaves every PG readable.")
-    print()
-    print("    The cost is width. Rack-level placement has far fewer domains to spread over:")
-    for hosts_per_rack in groupings:
-        num_racks = args.num_hosts // hosts_per_rack
-        rack_profiles = candidate_profiles(num_racks, args.max_width, args.min_spare_domains)
-        host_best = max(host_rows, key=lambda row: (row[0]['usable'], row[0]['tolerates']))
-        if rack_profiles:
-            rack_best = max(rack_profiles, key=lambda prof: (prof['usable'], prof['tolerates']))
-            print(f"      {hosts_per_rack} hosts per rack: widest usable profile drops from "
-                  f"{host_best[0]['label']} at {host_best[0]['usable'] * 100:.0f}% to "
-                  f"{rack_best['label']} at {rack_best['usable'] * 100:.0f}% of raw")
-        else:
-            print(f"      {hosts_per_rack} hosts per rack: {num_racks} racks leaves no feasible "
-                  f"profile at all with {args.min_spare_domains} spare")
+    if groupings:
+        print()
+        print("Racking makes no difference to durability against independent OSD failures: the")
+        print("loss rate follows the PG and OSD counts, not how the OSDs are grouped. It buys")
+        print("surviving a whole-rack outage, which the rack-loss column prices, at the cost of")
+        print("having far fewer domains to spread a stripe over:")
+        for hosts_per_rack in groupings:
+            num_racks = args.num_hosts // hosts_per_rack
+            feasible = candidate_profiles(num_racks, args.max_width, args.min_spare_domains)
+            names = ", ".join(prof['label'].split()[0] for prof in feasible) or "nothing"
+            print(f"    {hosts_per_rack} hosts/rack -> {num_racks} racks: rack-level placement "
+                  f"allows {names}")
 
 
 # ---------------------------- Main CLI ----------------------------
@@ -2084,6 +2156,11 @@ def add_shared_options(p, monte_carlo=True):
                    help='days to physically replace failed hardware, used as the\n'
                         'exposure window when too few failure domains survive for\n'
                         'recovery to run (default: 7.0)')
+    p.add_argument('--osd-iops', type=float, default=None,
+                   help='per-OSD client IOPS budget for small IO '
+                        '(default: by --device-class)')
+    p.add_argument('--osd-latency', type=float, default=None,
+                   help='per-OSD op latency in seconds (default: by --device-class)')
     p.add_argument('--min-size', type=int, default=None,
                    help='shards that must be up for a PG to serve IO\n'
                         '(default: 2 replicated, k+1 erasure coded)')
@@ -2157,8 +2234,10 @@ def main():
                      help="average object size in bytes (default: 4MB)")
     des.add_argument('--pgs-per-osd', type=float, default=100,
                      help="target PGs per OSD (default: 100)")
-    des.add_argument('--max-width', type=int, default=20,
-                     help='largest k+m to consider (default: 20)')
+    des.add_argument('--max-width', type=int, default=11,
+                     help='largest k+m to consider. Past 8+3 the stripe is wide\n'
+                          'enough that performance, not durability, decides\n'
+                          '(default: 11)')
     des.add_argument('--monte-carlo', action='store_true',
                      help='also run the Monte Carlo cross-check for each profile (slower)')
     des.add_argument('--target-nines', type=int, default=None,
