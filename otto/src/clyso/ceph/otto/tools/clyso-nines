@@ -2077,10 +2077,15 @@ def run_tests(args):
     ]
     for i, test_arg in enumerate(test_args):
         print(f"Running test case {i+1}...")
-        parser = argparse.ArgumentParser(prog='clyso-nines')
+        parser = build_parser()
+        # Start from the real simulate defaults and let the case override what
+        # it pins, so adding an option cannot leave these namespaces short of an
+        # attribute, and cannot change an expectation unless the case pins it.
+        defaults = parser.parse_args(['simulate'])
+        for key, value in vars(test_arg[0]).items():
+            setattr(defaults, key, value)
+        test_arg[0] = defaults
         test_arg[0].command = 'simulate'
-        # anything the case does not pin comes from its device class, so adding
-        # a device-class option cannot break these expectations
         apply_device_class_defaults(test_arg[0])
         cmdline = reconstruct_command_line(parser, test_arg[0])
         print(f"Command line: {cmdline}")
@@ -2439,7 +2444,8 @@ def add_cluster_shape_options(p):
                    help="target PGs per OSD (default: 100)")
 
 
-def main():
+def build_parser():
+    """Build the CLI. Separate from main so run_tests can read real defaults."""
     parser = argparse.ArgumentParser(
             prog='clyso-nines',
             description='Clyso Nines - Data Loss Risk Estimator for Ceph Clusters'
@@ -2499,7 +2505,11 @@ def main():
     test.add_argument('--verbose', action='store_true', help='enable verbose output')
     test.add_argument('--debug', action='store_true', help='enable debug output')
     test.set_defaults(func=run_tests)
+    return parser
 
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
