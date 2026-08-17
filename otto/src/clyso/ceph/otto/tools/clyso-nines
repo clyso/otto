@@ -1836,8 +1836,8 @@ def test_pool_performance():
                 raise AssertionError(
                     f"{k}+{m} fast write should cost {1 + proxied + 2 * m}, "
                     f"got {fast['write_ops']}")
-            # the data side costs what a read does; each parity shard then costs
-            # two, being read before it is rewritten
+            # the data side of a write costs what a read does; each parity shard
+            # then costs two, being read before it is rewritten
             if abs(fast['write_ops'] - fast['read_ops'] - 2 * m) > 1e-12:
                 raise AssertionError(
                     f"{k}+{m} fast write should exceed its read by exactly 2m")
@@ -2312,25 +2312,34 @@ def _print_profile_table(args, host_rows, raw_bytes):
 
 
 def _print_rack_table(args, host_rows, groupings):
-    """Rack exposure for every grouping: data at risk, and downtime."""
+    """What a rack outage costs, and where rack-level placement removes it."""
     print()
-    print("Rack outages, with the failure domain at host level. A switch failure takes the")
-    print("whole rack's OSDs away without destroying them, so it costs availability; losing")
-    print("a rack for good costs data. Rack-level placement puts one shard per rack, which")
-    print("makes both columns zero.")
+    print("Rack outages. A switch failure takes a whole rack's OSDs away without destroying")
+    print("them, so it costs availability; losing the rack for good costs data. Putting the")
+    print("failure domain at rack level gives a PG one shard per rack and neither can touch")
+    print("it, but k+m is then capped at the rack count. So a profile is either inside that")
+    print("cap - shown as safe - or it stays at host level and carries the figures instead.")
     print()
-    header = f"{'profile':<15}"
-    sub = f"{'':<15}"
+
+    # which profiles fit at rack level, per grouping
+    fits = {}
     for hosts_per_rack in groupings:
-        label = f"{hosts_per_rack}/rack, {args.num_hosts // hosts_per_rack} racks"
-        header += f"{label:^21}"
-        sub += f"{'PGs lost':>12}{'down/yr':>9}"
+        num_racks = args.num_hosts // hosts_per_rack
+        fits[hosts_per_rack] = {
+            prof['label'] for prof in
+            candidate_profiles(num_racks, args.max_width, args.min_spare_domains)}
+
+    header = f"{'profile':<15}"
+    for hosts_per_rack in groupings:
+        header += f"{f'{hosts_per_rack}/rack, {args.num_hosts // hosts_per_rack}':>14}"
     print(header)
-    print(sub)
     print('-' * len(header))
     for prof, r, _ in host_rows:
         line = f"{prof['label']:<15}"
         for hosts_per_rack in groupings:
+            if prof['label'] in fits[hosts_per_rack]:
+                line += f"{'safe':>14}"
+                continue
             num_racks = args.num_hosts // hosts_per_rack
             lost = rack_loss_fraction(args.num_hosts, hosts_per_rack,
                                       prof['width'], prof['tolerates'] + 1)
@@ -2338,68 +2347,122 @@ def _print_rack_table(args, host_rows, groupings):
                 num_racks, hosts_per_rack, args.rack_outage_rate, args.rack_outage_hours,
                 args.num_hosts, prof['width'],
                 prof['width'] - r['min_size'] + 1, r['num_pgs']) * SECONDS_PER_YEAR
-            line += f"{lost * 100:>11.2f}%{format_time(down):>9}"
+            line += f"{f'{lost * 100:.0f}% / {format_time(down)}':>14}"
         print(line)
 
     print()
-    print("    PGs      share of PGs lost for good if one rack is destroyed")
-    print(f"    down/yr  time offline from switch-style outages, {args.rack_outage_rate:.3g} per rack "
-          f"per year lasting {args.rack_outage_hours:.3g}h")
-    print()
-    print("    Choosing rack-level placement instead caps k+m at the rack count:")
-    for hosts_per_rack in groupings:
-        num_racks = args.num_hosts // hosts_per_rack
-        feasible = candidate_profiles(num_racks, args.max_width, args.min_spare_domains)
-        names = ", ".join(prof['label'].split()[0] for prof in feasible) or "nothing"
-        print(f"      {num_racks:>2} racks of {hosts_per_rack} hosts: {names}")
+    print("    safe      k+m fits the rack count, so rack-level placement removes both risks")
+    print(f"    x% / t    otherwise: share of PGs lost for good if a rack is destroyed, and")
+    print(f"              time offline a year from switch outages at {args.rack_outage_rate:.3g} "
+          f"per rack lasting {args.rack_outage_hours:.3g}h")
 
 
 def _print_advice(args, rows, raw_bytes, groupings):
-    def nines_of(result):
-        return int(result['nines'].split('-')[0])
+    """Compare the best erasure profiles against 3x replication."""
+    def nines_of(row):
+        return int(row[1]['nines'].split('-')[0])
+
+    def avail_nines_of(row):
+        return int(row[1]['availability_nines'].split('-')[0]) if row[1]['availability_nines'] else 0
 
     print()
-    best = max(rows, key=lambda row: row[1]['durability'])
-    if args.target_nines is not None:
-        reaching = [row for row in rows if nines_of(row[1]) >= args.target_nines]
-        if reaching:
-            pick = max(reaching, key=lambda row: row[0]['usable'])
-            print(f"Most space efficient at {args.target_nines}-nines or better: "
-                  f"{pick[0]['label']}, {pick[0]['usable'] * 100:.0f}% of raw usable, "
-                  f"{pick[1]['nines']}, {pick[1]['availability_nines']} available")
-        else:
-            print(f"Nothing here reaches {args.target_nines}-nines; the best is "
-                  f"{best[1]['nines']} with {best[0]['label']}")
+    print("Recommendations")
+
+    baseline = next((row for row in rows if row[0]['label'] == '3x replicated'), None)
+    if baseline is None:
+        best = max(rows, key=lambda row: row[1]['durability'])
+        print("    3x replication does not fit on this shape, so there is no usual baseline")
+        print(f"    to compare against. The most durable option is {best[0]['label']} at "
+              f"{best[1]['nines']}.")
+        return
+
+    bp, br = baseline[0], baseline[1]
+    print(f"    Baseline 3x replicated: {format_bytes(raw_bytes * bp['usable'])} usable "
+          f"({bp['usable'] * 100:.0f}% of raw), {br['nines']} durable, "
+          f"{br['availability_nines']} available,")
+    print(f"    {format_int(br['perf']['read_iops'])} read and "
+          f"{format_int(br['perf']['write_iops'])} write IOPS.")
+
+    erasure = [row for row in rows if row[0]['k'] is not None]
+    if not erasure:
+        print("    No erasure profile fits on this shape, so replication is the only option.")
+        return
+
+    # Prefer the ones that give up nothing on durability, most space first, and
+    # fall back to the most durable if none of them match.
+    target = args.target_nines if args.target_nines is not None else nines_of(baseline)
+    qualified = [row for row in erasure if nines_of(row) >= target]
+    if qualified:
+        picks = sorted(qualified, key=lambda row: -row[0]['usable'])[:3]
+        print()
+        print(f"    Erasure profiles reaching {target} nines or better, most space first:")
     else:
-        def dominated(row):
-            for other in rows:
-                if other is row:
-                    continue
-                if (other[1]['durability'] >= row[1]['durability']
-                        and other[0]['usable'] >= row[0]['usable']
-                        and (other[1]['durability'] > row[1]['durability']
-                             or other[0]['usable'] > row[0]['usable'])):
-                    return True
-            return False
+        picks = sorted(erasure, key=lambda row: -row[1]['durability'])[:3]
+        print()
+        print(f"    Nothing erasure coded reaches {target} nines here; the most durable are:")
 
-        frontier = sorted((row for row in rows if not dominated(row)),
-                          key=lambda row: row[0]['usable'])
-        chain = "  ".join(f"{row[0]['label'].split()[0]} ({row[0]['usable'] * 100:.0f}%/"
-                          f"{nines_of(row[1])}n)" for row in frontier)
-        print(f"Worth choosing between (capacity/durability); everything else is beaten on both:")
-        print(f"    {chain}")
+    print()
+    print(f"    {'':<37}{'classic EC':^18}{'fast EC':^18}")
+    print(f"    {'profile':<15}{'usable':>8}{'durab':>7}{'avail':>7}"
+          f"{'read':>9}{'write':>9}{'read':>9}{'write':>9}")
+    for prof, r, _ in picks:
+        fast = r['perf_fast']
+        d_diff = int(r['nines'].split('-')[0]) - nines_of(baseline)
+        a_diff = (int(r['availability_nines'].split('-')[0]) if r['availability_nines'] else 0)
+        a_diff -= avail_nines_of(baseline)
+        print(f"    {prof['label']:<15}"
+              f"{prof['usable'] / bp['usable']:>7.2f}x"
+              f"{d_diff:>+7d}{a_diff:>+7d}"
+              f"{r['perf']['read_iops'] / br['perf']['read_iops']:>8.2f}x"
+              f"{r['perf']['write_iops'] / br['perf']['write_iops']:>8.2f}x"
+              f"{fast['read_iops'] / br['perf']['read_iops'] if fast else 0:>8.2f}x"
+              f"{fast['write_iops'] / br['perf']['write_iops'] if fast else 0:>8.2f}x")
+    print()
+    print("    Read +1 as one nine better than the baseline, 0.20x as a fifth of its")
+    print("    throughput. The two pairs are the same profile on the classic and the fast")
+    print("    EC paths: classic reads every shard, fast reads only the one holding the")
+    print("    data, so the read column is where the two differ most.")
 
-    if any(row[0]['size'] == 2 for row in rows):
-        print("    2x replication: a single OSD failure already takes PGs below min_size, so it "
-              "is both the least durable and the least available option here.")
+    # anything else on the capacity/durability frontier, named but not detailed
+    def dominated(row):
+        for other in rows:
+            if other is row:
+                continue
+            if (other[1]['durability'] >= row[1]['durability']
+                    and other[0]['usable'] >= row[0]['usable']
+                    and (other[1]['durability'] > row[1]['durability']
+                         or other[0]['usable'] > row[0]['usable'])):
+                return True
+        return False
 
+    shown = {row[0]['label'] for row in picks} | {'3x replicated'}
+    others = [row for row in rows if not dominated(row) and row[0]['label'] not in shown
+              and row[0]['size'] != 2]
+
+    def listing(subset):
+        return ", ".join(f"{row[0]['label'].split()[0]} ({row[0]['usable'] * 100:.0f}%, "
+                         f"{nines_of(row)}n)" for row in sorted(subset,
+                                                                key=lambda r: r[0]['usable']))
+
+    safer = [row for row in others if nines_of(row) > nines_of(baseline)]
+    roomier = [row for row in others if nines_of(row) <= nines_of(baseline)]
+    if safer or roomier:
+        print()
+        print("    Also on the capacity/durability frontier:")
+        if safer:
+            print(f"      more durable than the baseline, less space: {listing(safer)}")
+        if roomier:
+            print(f"      more space, less durable: {listing(roomier)}")
+
+    print()
     bounded = [row[0]['label'] for row in rows if 'union bound' in row[2]]
     if bounded:
         print(f"    Loss rate for {', '.join(bounded)} is an upper bound, not exact.")
 
     if groupings:
-        print("    Racking changes no durability figure above: the loss rate follows the PG and")
-        print("    OSD counts, not how the OSDs are grouped. It buys surviving a rack outage.")
+        print("    Racking changes none of the durability above: the loss rate follows the PG")
+        print("    and OSD counts, not how the OSDs are grouped. What it buys is surviving a")
+        print("    rack outage, which the table above prices.")
 
 
 # ---------------------------- Main CLI ----------------------------
