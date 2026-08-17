@@ -39,9 +39,10 @@ SECONDS_PER_YEAR = 31_536_000
 # CRUSH_ITEM_NONE: placeholder used in pg 'up'/'acting' for a missing OSD
 CRUSH_ITEM_NONE = 0x7fffffff
 
-# Small-IO size the performance model assumes, below the EC stripe unit so a
-# fast-EC read can be served from one OSD.
+# Default client IO size the performance model prices, and the EC stripe unit
+# it is measured against (Ceph's osd_pool_erasure_code_stripe_unit default).
 PERF_IO_SIZE = 4096
+EC_STRIPE_UNIT = 4096
 
 # Per-OSD recovery ceilings by device class: MB/s and objects/s. Recovery
 # competes with client IO and is rarely allowed the device's full sequential
@@ -417,9 +418,23 @@ def slowest_of(n):
     return sum(1.0 / i for i in range(1, max(1, int(n)) + 1))
 
 
+def ec_shards_touched(k, io_size, stripe_unit):
+    """Data shards a client IO of io_size reaches in a k+m stripe.
+
+    Stripe units are handed round-robin to the k data shards, so an IO covering
+    more than one unit spreads over more than one shard, and one covering k or
+    more reaches the whole stripe. This is what bounds fast EC: its advantage is
+    touching a single shard, and it has none left once the IO spans the stripe.
+    """
+    if k is None or stripe_unit <= 0:
+        return 0
+    units = max(1, math.ceil(io_size / stripe_unit))
+    return min(k, units)
+
+
 def pool_performance(size, k, m, num_osds, read_bw, write_bw, read_iops,
                      write_iops, read_latency, write_latency,
-                     io_size=None, fast_ec=False):
+                     io_size=None, stripe_unit=EC_STRIPE_UNIT, fast_ec=False):
     """Small-IO client throughput and latency for one pool profile.
 
     The cluster has num_osds * osd_*_iops operations a second to spend, and a
@@ -454,16 +469,26 @@ def pool_performance(size, k, m, num_osds, read_bw, write_bw, read_iops,
         read_trips = [1]
         write_trips = [size]
     elif fast_ec:
-        # Chance the shard the IO lands on is not the primary's own.
-        proxied = (k - 1) / k
-        read_ops = 1 + proxied
+        # How much of the stripe this IO actually reaches. Once it spans every
+        # data shard there is nothing left for fast EC to skip, so it costs what
+        # the classic path costs and the caller is told there is no gain.
+        touched = ec_shards_touched(k, io_size, stripe_unit)
+        if touched >= k:
+            return pool_performance(size, k, m, num_osds, read_bw, write_bw,
+                                    read_iops, write_iops, read_latency,
+                                    write_latency, io_size, stripe_unit,
+                                    fast_ec=False)
+
+        # The primary holds one of the k data shards, so it is already among the
+        # ones touched with probability touched/k, and otherwise has to proxy.
+        proxied = 1 - touched / k
+        read_ops = touched + proxied
         # A parity shard cannot be updated blind: it has to be read before the
-        # new value can be written, so each of the m costs two operations, as
-        # does the data shard being modified.
-        write_ops = 1 + proxied + 2 * m
-        read_trips = [1]
-        # the data shard and the parities are read together, then written together
-        write_trips = [m + 1, m + 1]
+        # new value can be written, so each of the m costs two operations.
+        write_ops = touched + proxied + 2 * m
+        read_trips = [touched]
+        # the data shards and the parities are read together, then written together
+        write_trips = [touched + m, touched + m]
     else:
         read_ops, write_ops = k, 2 * k + m
         read_trips = [k]
@@ -1315,21 +1340,31 @@ def simulate(args, domains=None):
     perf_args = (args.size, args.k, args.m, num_osds,
                  args.osd_read_bw*1024*1024, args.osd_write_bw*1024*1024,
                  args.osd_read_iops, args.osd_write_iops,
-                 args.osd_read_latency, args.osd_write_latency)
+                 args.osd_read_latency, args.osd_write_latency,
+                 args.client_io_size, args.ec_stripe_unit)
     perf = pool_performance(*perf_args, fast_ec=False)
-    perf_fast = pool_performance(*perf_args, fast_ec=True) if args.k is not None else None
+    # Fast EC only differs while the IO stays inside one stripe unit; past that
+    # it reaches every data shard and there is nothing left to skip.
+    shards_touched = ec_shards_touched(args.k, args.client_io_size, args.ec_stripe_unit)
+    fast_helps = args.k is not None and shards_touched < args.k
+    perf_fast = pool_performance(*perf_args, fast_ec=True) if fast_helps else None
     label = "classic EC" if args.k is not None else "replicated"
-    print(f"    Performance ({format_bytes(PERF_IO_SIZE)} IO, {label}): "
+    print(f"    Performance ({format_bytes(args.client_io_size)} IO, {label}): "
           f"read {format_int(perf['read_iops'])} IOPS at {perf['read_latency']*1000:.1f}ms, "
           f"write {format_int(perf['write_iops'])} IOPS at {perf['write_latency']*1000:.1f}ms")
     vprint(f"      {perf['read_ops']} OSD op(s) per read, {perf['write_ops']} per write, "
            f"out of {format_int(num_osds * args.osd_read_iops)} read / "
            f"{format_int(num_osds * args.osd_write_iops)} write IOPS across {num_osds} OSDs")
     if perf_fast:
-        print(f"    Performance ({format_bytes(PERF_IO_SIZE)} IO, fast EC): "
+        print(f"    Performance ({format_bytes(args.client_io_size)} IO, fast EC): "
               f"read {format_int(perf_fast['read_iops'])} IOPS at {perf_fast['read_latency']*1000:.1f}ms, "
               f"write {format_int(perf_fast['write_iops'])} IOPS at {perf_fast['write_latency']*1000:.1f}ms")
-        vprint(f"      {perf_fast['read_ops']} OSD op(s) per read, {perf_fast['write_ops']} per write")
+        vprint(f"      {perf_fast['read_ops']:.3g} OSD op(s) per read, "
+               f"{perf_fast['write_ops']:.3g} per write, reaching "
+               f"{shards_touched} of {args.k} data shards")
+    elif args.k is not None:
+        print(f"    Fast EC makes no difference at {format_bytes(args.client_io_size)}: the IO "
+              f"spans all {args.k} data shards, so there is nothing to skip")
 
     return {
         'mttdl': format_time(mttdl_sec),
@@ -1801,6 +1836,25 @@ def test_recovery_read_amplification():
                 f"at {size}B both sides are bandwidth bound, so read IOPS is irrelevant")
     print("All recovery_read_amplification tests passed.")
 
+def test_ec_shards_touched():
+    # a stripe unit is one shard's worth, handed round-robin to the k data
+    # shards, so an IO reaches as many shards as it covers units, up to k
+    for k in (2, 4, 8):
+        if ec_shards_touched(k, 4096, 4096) != 1:
+            raise AssertionError(f"a single-unit IO touches one shard, k={k}")
+        if ec_shards_touched(k, 4096 * 2, 4096) != min(k, 2):
+            raise AssertionError(f"a two-unit IO touches two shards, k={k}")
+        if ec_shards_touched(k, 4096 * k, 4096) != k:
+            raise AssertionError(f"a k-unit IO reaches the whole stripe, k={k}")
+        if ec_shards_touched(k, 4096 * k * 4, 4096) != k:
+            raise AssertionError(f"nothing reaches more than k shards, k={k}")
+        # a part of a unit is still a unit
+        if ec_shards_touched(k, 512, 4096) != 1:
+            raise AssertionError(f"a sub-unit IO still touches one shard, k={k}")
+    if ec_shards_touched(None, 4096, 4096) != 0:
+        raise AssertionError("replication has no stripe")
+    print("All ec_shards_touched tests passed.")
+
 def test_pool_performance():
     # read and write budgets are deliberately different, as they are for an HDD
     perf = lambda size, k, m, fast=False: pool_performance(   # noqa: E731
@@ -1872,6 +1926,19 @@ def test_pool_performance():
             wider = perf(None, k * 2, m, fast=True)
             if wider['read_ops'] <= fast['read_ops']:
                 raise AssertionError("a wider stripe should proxy more of its reads")
+
+            # An IO spanning the whole stripe leaves fast EC nothing to skip, so
+            # it must fall back to the classic figures exactly.
+            spanning = pool_performance(None, k, m, 240, 250 * 1024**2, 250 * 1024**2,
+                                        120.0, 450.0, 0.008, 0.002,
+                                        io_size=4096 * k, fast_ec=True)
+            classic_same = pool_performance(None, k, m, 240, 250 * 1024**2, 250 * 1024**2,
+                                            120.0, 450.0, 0.008, 0.002,
+                                            io_size=4096 * k, fast_ec=False)
+            if spanning != classic_same:
+                raise AssertionError(
+                    f"{k}+{m} fast EC should be identical to classic once the IO "
+                    f"spans the stripe")
 
     # a wider fan-out costs latency even though the subops are parallel
     lat = [perf(size, None, None)['write_latency'] for size in (2, 3, 4, 6)]
@@ -1972,6 +2039,7 @@ def run_tests(args):
     test_rack_loss_fraction()
     test_default_min_size()
     test_outage_downtime_fraction()
+    test_ec_shards_touched()
     test_pool_performance()
     test_recovery_read_amplification()
     test_confidence_interval()
@@ -2303,12 +2371,15 @@ def _print_profile_table(args, host_rows, raw_bytes):
 
     print()
     print("    durab/avail  nines of durability and availability; loss/yr and down/yr are the")
-    print("                 same two figures as bytes lost and time with a PG below min_size")
-    print(f"    read/write   cluster IOPS at {format_bytes(PERF_IO_SIZE)}. The left pair is what a "
-          f"replicated pool gets,")
-    print("                 and what an EC pool gets without fast EC: every shard read, 2k+m")
-    print("                 written. The right pair exists only for EC, and touches one shard,")
-    print("                 though just 1 read in k is local and the rest are proxied.")
+    print("                 same two figures as bytes lost and time with a PG below min_size,")
+    print("                 counting OSD and whole-host failures. Rack outages are priced")
+    print("                 separately below, depending as they do on how the hosts are racked")
+    print(f"    read/write   cluster IOPS at {format_bytes(args.client_io_size)}, "
+          f"--client-io-size. The left pair is")
+    print("                 what a replicated pool gets, and an EC pool without fast EC: every")
+    print("                 shard read, 2k+m written. The right pair is fast EC, which touches")
+    print("                 only the shards the IO lands on, and is empty when the IO spans the")
+    print("                 whole stripe and there is nothing left for it to skip")
 
 
 def _print_rack_table(args, host_rows, groupings):
@@ -2526,6 +2597,13 @@ def add_shared_options(p, monte_carlo=True):
                         '(default: 0.02)')
     p.add_argument('--rack-outage-hours', type=float, default=4.0,
                    help='hours a rack outage lasts (default: 4.0)')
+    p.add_argument('--client-io-size', type=int, default=PERF_IO_SIZE,
+                   help='client IO size the performance figures are for. Separate from\n'
+                        '--object-size, which is how the data is stored '
+                        '(default: 4kB)')
+    p.add_argument('--ec-stripe-unit', type=int, default=EC_STRIPE_UNIT,
+                   help='EC stripe unit, as osd_pool_erasure_code_stripe_unit. Fast EC\n'
+                        'only helps while an IO fits inside one (default: 4kB)')
     p.add_argument('--min-size', type=int, default=None,
                    help='shards that must be up for a PG to serve IO\n'
                         '(default: 2 replicated, k+1 erasure coded)')
