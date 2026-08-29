@@ -17,6 +17,7 @@ from clyso.ceph.api.loaders import load_ceph_report, load_config_dump
 from clyso.ceph.ai.data import CephData
 from clyso.ceph.ai.pg import add_command_pg
 from clyso.ceph.otto.upmap import add_command_upmap_remapped
+from clyso.ceph.otto.prometheus import render_prometheus
 from clyso.__version__ import __version__
 from clyso.ceph.ai.cephfs import add_command_cephfs
 from clyso.ceph.ai.rgw import add_command_rgw
@@ -221,8 +222,9 @@ def subcommand_checkup(args: argparse.Namespace) -> None:
     else:
         warnings.append("Config dump analysis skipped - using static report")
 
+    machine_format = args.format in ("json", "prometheus")
     if args.verbose or args.summary:
-        warning_stream = sys.stderr if args.format == "json" else None
+        warning_stream = sys.stderr if machine_format else None
         for warning in warnings:
             print(f"Warning: {warning}", file=warning_stream)
 
@@ -230,6 +232,8 @@ def subcommand_checkup(args: argparse.Namespace) -> None:
 
     if args.format == "json":
         print(result.dump())
+    elif args.format == "prometheus":
+        print(render_prometheus(result.dump()), end="")
     elif args.summary:
         compact_result_summary(result.dump())
     elif args.verbose:
@@ -526,10 +530,11 @@ def main():
     parser_checkup.add_argument("--verbose", action="store_true", help="Verbose output")
     parser_checkup.add_argument(
         "--format",
-        choices=["text", "json"],
+        choices=["text", "json", "prometheus"],
         default="text",
-        help="Output format: 'text' (default, honors --summary/--verbose) "
-        "or 'json' (machine-readable, full result document)",
+        help="Output format: 'text' (default, honors --summary/--verbose), "
+        "'json' (machine-readable, full result document), or 'prometheus' "
+        "(text exposition format for node_exporter's textfile collector)",
     )
     parser_checkup.set_defaults(func=subcommand_checkup)
 
