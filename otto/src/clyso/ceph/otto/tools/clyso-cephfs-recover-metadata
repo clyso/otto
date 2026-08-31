@@ -204,7 +204,10 @@ get_datapools() {
     done
 }
 
-run() {
+# Run $@, tee'ing its output to ${LOGDIR}/<name>.log and passing it
+# through on stdout, so that the caller can process it (e.g. pipe it to
+# awk to count the progress).
+run_pipe() {
     local name="$1"; shift
     local dry=
 
@@ -216,7 +219,14 @@ run() {
 
     test "${DRY_RUN}" = "YES" && return
 
-    "$@" 2>&1 | tee -a "${LOGDIR}/${name}.log" >&2
+    "$@" 2>&1 | tee -a "${LOGDIR}/${name}.log"
+}
+
+# Same as run_pipe, but for the commands the output of which is not
+# processed by the caller: it is sent to stderr, to be shown on the
+# console together with the progress messages.
+run() {
+    run_pipe "$@" >&2
 }
 
 # Run $@ and print its stdout, honoring --dry-run the same way run() does,
@@ -272,7 +282,7 @@ cephfs_data_scan() {
 
     echo "${cmd} ${worker} running" >&2
 
-    run cephfs-data-scan."${cmd}"."${worker}" \
+    run_pipe cephfs-data-scan."${cmd}"."${worker}" \
         cephfs-data-scan "${cmd}" --worker_n "${worker}" \
         --worker_m "${NWORKERS}" --filesystem "${CEPHFS}" \
         --debug-mds ${debug_mds} "$@" ${datapools}
@@ -292,7 +302,7 @@ scan_extents() {
         BEGIN {
             n = n0 = 0
             print(n) > f; close(f)
-            print(n0) > f0; close(0)
+            print(n0) > f0; close(f0)
         }
 
         /handling object/ {
@@ -349,7 +359,7 @@ scan_inodes() {
 scan_links() {
     local tag="${1:-1}"; shift || true
 
-    run cephfs-data-scan.scan_links.${tag} \
+    run_pipe cephfs-data-scan.scan_links.${tag} \
         cephfs-data-scan scan_links --filesystem "${CEPHFS}" --debug-mds 10 "$@" |
     awk -v f=${LOGDIR}/num_scan_links.${tag}.dat \
         -v d=${LOGDIR}/num_scan_links_dups.${tag}.dat \
@@ -374,30 +384,38 @@ scan_links() {
             print(n) > f; close(f)
             sub(/^.*datascan.scan_links: /, "")
             print > d; close(d)
+            have_d = 1
         }
 
         /removing dup dentries/ {
             sub(/^.*datascan.scan_links: /, "")
             print > r; close(r)
+            have_r = 1
         }
 
         /processing .* bad_nlink_inos/ {
             sub(/^.*datascan.scan_links: /, "")
             print > b; close(b)
+            have_b = 1
         }
 
         /processing .* injected_inos/ {
             sub(/^.*datascan.scan_links: /, "")
             print > i; close(i)
+            have_i = 1
         }
 
         END {
-            # ensure all files are created even if no matches
-            printf("") > f; close(f)
-            printf("") > d; close(d)
-            printf("") > r; close(r)
-            printf("") > b; close(b)
-            printf("") > i; close(i)
+            print(n) > f; close(f)
+
+            # ensure all files are created even if no matches, but do
+            # not truncate those we have already written to: the wait
+            # function reports them and uses their existence to track
+            # the scan_links progress
+            if (!have_d) { printf("") > d; close(d) }
+            if (!have_r) { printf("") > r; close(r) }
+            if (!have_b) { printf("") > b; close(b) }
+            if (!have_i) { printf("") > i; close(i) }
         }
     '
 }
@@ -420,7 +438,7 @@ scan_frags() {
     # filtering is done by the client). Note that the objects filtered
     # out by the OSD are not counted, so the reported progress may stop
     # short of 100%.
-    run cephfs-data-scan.scan_frags \
+    run_pipe cephfs-data-scan.scan_frags \
         cephfs-data-scan scan_frags --filesystem "${CEPHFS}" --debug-mds 20 ${extra_args} |
     awk -v f=${LOGDIR}/num_scan_frags.dat \
     '
