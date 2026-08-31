@@ -898,7 +898,7 @@ set_recovery_step init
 for rank in `seq 0 $((NRANKS - 1))`; do
     # try to recover whatever is possible from journal and reset it
     journal_recover_dentries "${rank}"
-    run journal_reset.${rank}.log \
+    run journal_reset.${rank} \
         cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
         ${JOURNAL_RESET_COMPAT_FLAGS}
 
