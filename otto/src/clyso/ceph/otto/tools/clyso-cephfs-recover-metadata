@@ -298,8 +298,14 @@ reset_tables() {
 
 # Wait for all the given background jobs, failing if any of them failed.
 # Unlike a bare "wait", this does not stop at the first failure, so every
-# rank is left in a predictable state before we bail out.
-wait_ranks() {
+# job is given a chance to complete before we bail out.
+#
+# Note that "wait" looks the pid up in the shell job table, so it is fine
+# to call it long after the job has completed. The only (very unlikely)
+# exception would be the pid counter wrapping around meanwhile and the
+# shell starting a new child with the same pid: the status of the old job
+# is dropped then and its failure would go unnoticed.
+wait_jobs() {
     local pid rc=0
 
     for pid in "$@"; do
@@ -341,7 +347,7 @@ run_for_ranks() {
         pids="${pids} $!"
     done
 
-    wait_ranks ${pids}
+    wait_jobs ${pids}
 }
 
 cephfs_data_scan() {
@@ -571,6 +577,7 @@ cleanup() {
 
 wait_scan_extents_complete() {
     local objnum eobjnum sobjnum
+    local pids="$@"
 
     objnum=$(ceph df --format json |
                  jq -r '.pools[] | select(.name == "'${DATAPOOL}'").stats.objects')
@@ -581,7 +588,7 @@ wait_scan_extents_complete() {
     done
 
     if [ -z "${objnum}" ] || [ "${objnum}" -eq 0 ]; then
-        wait
+        wait_jobs ${pids}
         return
     fi
 
@@ -593,15 +600,18 @@ wait_scan_extents_complete() {
         jobs > "${LOGDIR}"/jobs
         test $(wc -l < "${LOGDIR}"/jobs) -eq 0 && break
     done
+
+    wait_jobs ${pids}
 }
 
 wait_scan_inodes_complete() {
     local objnum sobjnum
+    local pids="$@"
 
     objnum=$(awk '{s += $1} END{print s}' "${LOGDIR}"/num_0_scan_extents.*.dat)
 
     if [ -z "${objnum}" ] || [ "${objnum}" -eq 0 ]; then
-        wait
+        wait_jobs ${pids}
         return
     fi
 
@@ -613,10 +623,13 @@ wait_scan_inodes_complete() {
         jobs > "${LOGDIR}"/jobs
         test $(wc -l < "${LOGDIR}"/jobs) -eq 0 && break
     done
+
+    wait_jobs ${pids}
 }
 
 wait_scan_links_complete() {
-    local tag="${1:-1}"
+    local tag="${1:-1}"; shift || true
+    local pids="$@"
     local objnum sobjnum
     local scan_done dup_done rem_dup_done bad_done
     local sleep_interval=${WAIT_SLEEP_INTERVAL}
@@ -626,7 +639,7 @@ wait_scan_links_complete() {
                  jq -r '.pools[] | select(.name == "'${METADATAPOOL}'").stats.objects')
 
     if [ -z "${objnum}" ] || [ "${objnum}" -eq 0 ]; then
-        wait
+        wait_jobs ${pids}
         return
     fi
 
@@ -637,7 +650,7 @@ wait_scan_links_complete() {
         if [ -n "${bad_done}" ]; then
             test -f ${LOGDIR}/num_scan_links_injected.${tag}.dat || continue
             cat ${LOGDIR}/num_scan_links_injected.${tag}.dat >&2
-            wait
+            wait_jobs ${pids}
             break
         fi
 
@@ -676,12 +689,13 @@ wait_scan_links_complete() {
 
 wait_scan_frags_complete() {
     local objnum sobjnum
+    local pids="$@"
 
     objnum=$(ceph df --format json |
                  jq -r '.pools[] | select(.name == "'${METADATAPOOL}'").stats.objects')
 
     if [ -z "${objnum}" ] || [ "${objnum}" -eq 0 ]; then
-        wait
+        wait_jobs ${pids}
         return
     fi
 
@@ -693,10 +707,13 @@ wait_scan_frags_complete() {
         jobs > "${LOGDIR}"/jobs
         test $(wc -l < "${LOGDIR}"/jobs) -eq 0 && break
     done
+
+    wait_jobs ${pids}
 }
 
 wait_cleanup_complete() {
     local objnum sobjnum
+    local pids="$@"
 
     # Ancillary data generated during recovery stored as xattrs in
     # zeroth object of each inode in the main data pool. So, cleanup
@@ -705,7 +722,7 @@ wait_cleanup_complete() {
                  jq -r '.pools[] | select(.name == "'${DATAPOOL}'").stats.objects')
 
     if [ -z "${objnum}" ] || [ "${objnum}" -eq 0 ]; then
-        wait
+        wait_jobs ${pids}
         return
     fi
 
@@ -717,6 +734,8 @@ wait_cleanup_complete() {
         jobs > "${LOGDIR}"/jobs
         test $(wc -l < "${LOGDIR}"/jobs) -eq 0 && break
     done
+
+    wait_jobs ${pids}
 }
 
 # Poll until mds.<fs>:0 reports state "active". Loops indefinitely unless
@@ -1048,10 +1067,12 @@ extra_args=
 if [ "${FORCE_POOL}" = "YES" ]; then
     extra_args="--force-pool"
 fi
+pids=
 for worker in `seq 0 $((NWORKERS - 1))`; do
     scan_extents ${worker} ${extra_args} &
+    pids="${pids} $!"
 done
-wait_scan_extents_complete
+wait_scan_extents_complete ${pids}
 
 # Scan all {inode}.0 objects in the data pool, fetching previously
 # accumulated data ("scan_ceiling", "scan_max_size", and
@@ -1068,10 +1089,12 @@ fi
 if [ "${FORCE_POOL}" = "YES" ]; then
     extra_args="--force-pool ${extra_args}"
 fi
+pids=
 for worker in `seq 0 $((NWORKERS - 1))`; do
     scan_inodes ${worker} ${extra_args} &
+    pids="${pids} $!"
 done
-wait_scan_inodes_complete
+wait_scan_inodes_complete ${pids}
 
 # Check inode linkages and fix found error. On the first step
 # (SCAN_INOS) all inodes in metadata pool are scanned. If it is a
@@ -1081,7 +1104,7 @@ wait_scan_inodes_complete
 # inconsitencies.
 set_recovery_step scan_links
 scan_links 1 &
-wait_scan_links_complete 1
+wait_scan_links_complete 1 $!
 
 if [ "${SCAN_FRAGS}" = "YES" ]; then
     # Relink orphaned directory inodes whose own dirfrag object survived
@@ -1096,19 +1119,21 @@ if [ "${SCAN_FRAGS}" = "YES" ]; then
         extra_args="--force-corrupt"
     fi
     scan_frags ${extra_args} &
-    wait_scan_frags_complete
+    wait_scan_frags_complete $!
 
     set_recovery_step scan_links_2
     scan_links 2 &
-    wait_scan_links_complete 2
+    wait_scan_links_complete 2 $!
 fi
 
 # Delete ancillary data generated during recovery (xattrs).
 set_recovery_step cleanup
+pids=
 for worker in `seq 0 $((NWORKERS - 1))`; do
     cleanup ${worker} &
+    pids="${pids} $!"
 done
-wait_cleanup_complete
+wait_cleanup_complete ${pids}
 
 if [ "${ACTIVATE_AND_SCRUB}" = "YES" ]; then
     set_recovery_step activate_and_scrub

@@ -152,7 +152,16 @@ recover_journal() {
             ${JOURNAL_RESET_COMPAT_FLAGS}
 }
 
-wait_ranks() {
+# Wait for all the given background jobs, failing if any of them failed.
+# Unlike a bare "wait", this does not stop at the first failure, so every
+# job is given a chance to complete before we bail out.
+#
+# Note that "wait" looks the pid up in the shell job table, so it is fine
+# to call it long after the job has completed. The only (very unlikely)
+# exception would be the pid counter wrapping around meanwhile and the
+# shell starting a new child with the same pid: the status of the old job
+# is dropped then and its failure would go unnoticed.
+wait_jobs() {
     local pid rc=0
 
     for pid in "$@"; do
@@ -194,7 +203,7 @@ run_for_ranks() {
         pids="${pids} $!"
     done
 
-    wait_ranks ${pids}
+    wait_jobs ${pids}
 }
 
 run() {
