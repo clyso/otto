@@ -30,6 +30,7 @@ JOURNAL_RESET_COMPAT_FLAGS=
 : ${FORCE_CORRUPT:=}
 : ${FORCE_POOL:=}
 : ${DRY_RUN:=}
+: ${CONCURRENCY:=}
 : ${FAIL_FS:=}
 : ${BACKUP_DIR:=}
 : ${SCAN_FRAGS:=}
@@ -69,6 +70,11 @@ usage() {
     echo "                                re-allow client sessions if none is found"
     echo "  -b | --backup-dir <dir>       export the metadata pool to <dir> before any"
     echo "                                destructive step (table resets, data-scan)"
+    echo "  -c | --concurrent-journal-recover <N>"
+    echo "                                recover and reset the journals of at most"
+    echo "                                <N> ranks concurrently (<N> = 0 means all"
+    echo "                                of them); implies"
+    echo "                                --proceed-on-journal-recover-failure"
     echo "  -d | --scan-frags             also run 'cephfs-data-scan scan_frags' and"
     echo "                                re-run scan_links afterwards"
     echo "  -f | --fail-fs                mark the filesystem failed before recovery"
@@ -261,6 +267,81 @@ journal_recover_dentries() {
     echo "recover_dentries failed for rank ${rank}" >&2
     echo "re-run with --proceed-on-journal-recover-failure to continue anyway" >&2
     return 1
+}
+
+recover_journal() {
+    local rank="$1"
+
+    # try to recover whatever is possible from journal and reset it
+    journal_recover_dentries "${rank}"
+
+    run journal_reset.${rank} \
+        cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
+        ${JOURNAL_RESET_COMPAT_FLAGS}
+}
+
+reset_tables() {
+    local rank="$1"
+
+    # reset session table
+    run table_reset_session.${rank} \
+        cephfs-table-tool ${CEPHFS}:${rank} reset session
+
+    # reset SnapServer
+    run table_reset_snap.${rank} \
+        cephfs-table-tool ${CEPHFS}:${rank} reset snap
+
+    # reset InoTable
+    run table_reset_inode.${rank} \
+        cephfs-table-tool ${CEPHFS}:${rank} reset inode
+}
+
+# Wait for all the given background jobs, failing if any of them failed.
+# Unlike a bare "wait", this does not stop at the first failure, so every
+# rank is left in a predictable state before we bail out.
+wait_ranks() {
+    local pid rc=0
+
+    for pid in "$@"; do
+        wait "${pid}" || rc=1
+    done
+
+    return ${rc}
+}
+
+# Wait until less than ${CONCURRENCY} jobs are running.
+throttle_jobs() {
+    test "${CONCURRENCY}" -gt 0 || return 0
+
+    while true; do
+        jobs -r > "${LOGDIR}"/jobs
+        test $(wc -l < "${LOGDIR}"/jobs) -lt "${CONCURRENCY}" && break
+        sleep 1
+    done
+}
+
+# Run the given function for every rank, sequentially, or, if
+# --concurrent is specified, concurrently, running at most ${CONCURRENCY}
+# jobs at a time (all the ranks if it is 0).
+run_for_ranks() {
+    local fn="$1"
+    local rank pids=
+
+    if [ -z "${CONCURRENCY}" ]; then
+        for rank in `seq 0 $((NRANKS - 1))`; do
+            "${fn}" "${rank}"
+        done
+
+        return 0
+    fi
+
+    for rank in `seq 0 $((NRANKS - 1))`; do
+        throttle_jobs
+        "${fn}" "${rank}" &
+        pids="${pids} $!"
+    done
+
+    wait_ranks ${pids}
 }
 
 cephfs_data_scan() {
@@ -752,7 +833,7 @@ activate_and_scrub() {
 #
 
 
-OPTIONS=$(getopt -o ab:dfhjl:mnr:s:t:w:CIP: --long activate-and-scrub,backup-dir:,scan-frags,fail-fs,help,proceed-on-journal-recover-failure,log-dir:,reset-fs,dry-run,ranks:,wait-sleep:,activate-timeout:,workers:,force-corrupt,force-init,force-pool: -- "$@")
+OPTIONS=$(getopt -o ab:c:dfhjl:mnr:s:t:w:CIP: --long activate-and-scrub,backup-dir:,concurrent-journal-recover:,scan-frags,fail-fs,help,proceed-on-journal-recover-failure,log-dir:,reset-fs,dry-run,ranks:,wait-sleep:,activate-timeout:,workers:,force-corrupt,force-init,force-pool: -- "$@")
 
 eval set -- "$OPTIONS"
 while true; do
@@ -767,6 +848,11 @@ while true; do
                 exit 1
             fi
             BACKUP_DIR="$2"
+            shift 2
+            ;;
+        -c|--concurrent-journal-recover)
+            CONCURRENCY="$2"
+            PROCEED_ON_JOURNAL_RECOVER_FAILURE=YES
             shift 2
             ;;
         -d|--scan-frags)
@@ -875,6 +961,11 @@ if ! [ ${NWORKERS} -gt 0 -a ${NWORKERS} -le 512 ]; then
     usage >&2
     exit 1
 fi
+if [ -n "${CONCURRENCY}" ] && ! [ "${CONCURRENCY}" -ge 0 ] 2>/dev/null; then
+    echo "invalid concurrency: ${CONCURRENCY}" >&2
+    usage >&2
+    exit 1
+fi
 
 if [ -n "${ACTIVATE_TIMEOUT}" ] && ! [ "${ACTIVATE_TIMEOUT}" -gt 0 ] 2>/dev/null; then
     echo "invalid activate-timeout: ${ACTIVATE_TIMEOUT}" 2>&2
@@ -913,25 +1004,10 @@ fi
 
 set_recovery_step init
 
+run_for_ranks recover_journal
+
 for rank in `seq 0 $((NRANKS - 1))`; do
-    # try to recover whatever is possible from journal and reset it
-    journal_recover_dentries "${rank}"
-    run journal_reset.${rank} \
-        cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
-        ${JOURNAL_RESET_COMPAT_FLAGS}
-
-    # reset session table
-    run table_reset_session.${rank} \
-        cephfs-table-tool ${CEPHFS}:${rank} reset session
-
-    # reset SnapServer
-    run table_reset_snap.${rank} \
-        cephfs-table-tool ${CEPHFS}:${rank} reset snap
-
-    # reset InoTable
-    run table_reset_inode.${rank} \
-        cephfs-table-tool ${CEPHFS}:${rank} reset inode
-
+    reset_tables ${rank}
 done
 
 if [ "${RESET_FS_COUNT}" -ge 1 ]; then

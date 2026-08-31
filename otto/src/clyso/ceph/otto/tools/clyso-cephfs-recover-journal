@@ -17,12 +17,14 @@ LOGDIR=recover_journal_logs
 BACKUP_JOURNAL="${BACKUP_JOURNAL:-}"
 JOURNAL_RESET_COMPAT_FLAGS=
 : ${DRY_RUN:=}
+: ${CONCURRENCY:=}
 : ${PROCEED_ON_RECOVER_FAILURE:=}
 
 declare -A RECOVERY_STEPS=(
   [backup]="BACKING JOURNAL UP TO ${BACKUP_JOURNAL}"
   [recover_journal_dentries]="RECOVERING JOURNAL DENTRIES"
   [reset_journal]="RESETTING JOURNAL"
+  [recover_journal]="RECOVERING JOURNAL DENTRIES AND RESETTING JOURNAL"
   [end]="RECOVERY COMPLETE"
 )
 CURRENT_RECOVERY_STEP=""
@@ -38,6 +40,11 @@ usage() {
     echo "Options:"
     echo
     echo "  -b | --backup-journal <path>  export journals to <path>.<rank>"
+    echo "  -c | --concurrent <N>         process at most <N> ranks concurrently"
+    echo "                                (<N> = 0 means all of them); the journal"
+    echo "                                backup, if requested, is done concurrently"
+    echo "                                as well; implies"
+    echo "                                --proceed-on-recover-failure"
     echo "  -d | --log-dir <dir>          directory to store logs"
     echo "                                (default: ${LOGDIR})"
     echo "  -f | --proceed-on-recover-failure"
@@ -124,6 +131,72 @@ recover_dentries() {
     return 1
 }
 
+backup_journal() {
+    local rank="$1"
+
+    echo "Backing journal up for rank ${rank}" >&2
+
+    run journal_export.${rank} \
+        cephfs-journal-tool --rank=${CEPHFS}:${rank} journal export \
+            "${BACKUP_JOURNAL}".${rank}
+}
+
+recover_journal() {
+    local rank="$1"
+
+    # try to recover whatever is possible from journal and reset it
+    recover_dentries "${rank}"
+
+    run journal_reset.${rank} \
+        cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
+            ${JOURNAL_RESET_COMPAT_FLAGS}
+}
+
+wait_ranks() {
+    local pid rc=0
+
+    for pid in "$@"; do
+        wait "${pid}" || rc=1
+    done
+
+    return ${rc}
+}
+
+# Wait until less than ${CONCURRENCY} jobs are running.
+throttle_jobs() {
+    test "${CONCURRENCY}" -gt 0 || return 0
+
+    while true; do
+        jobs -r > "${LOGDIR}"/jobs
+        test $(wc -l < "${LOGDIR}"/jobs) -lt "${CONCURRENCY}" && break
+        sleep 1
+    done
+}
+
+# Run the given function for every rank, sequentially, or, if
+# --concurrent is specified, concurrently, running at most ${CONCURRENCY}
+# jobs at a time (all the ranks if it is 0).
+run_for_ranks() {
+    local fn="$1"
+    local rank pids=
+
+    if [ -z "${CONCURRENCY}" ]; then
+        for rank in ${RANKS}; do
+            "${fn}" "${rank}"
+        done
+
+        return 0
+    fi
+
+    for rank in ${RANKS}; do
+        throttle_jobs
+        "${fn}" "${rank}" &
+        pids="${pids} $!"
+    done
+
+    wait_ranks ${pids}
+}
+
 run() {
     local name="$1"; shift
     local dry=
@@ -143,13 +216,18 @@ run() {
 # Main
 #
 
-OPTIONS=$(getopt -o b:d:fhn --long backup-journal:,log-dir:,proceed-on-recover-failure,help,dry-run -- "$@")
+OPTIONS=$(getopt -o b:c:d:fhn --long backup-journal:,concurrent:,log-dir:,proceed-on-recover-failure,help,dry-run -- "$@")
 
 eval set -- "$OPTIONS"
 while true; do
     case "$1" in
         -b|--backup-journal)
             BACKUP_JOURNAL="$2"
+            shift 2
+            ;;
+        -c|--concurrent)
+            CONCURRENCY="$2"
+            PROCEED_ON_RECOVER_FAILURE=YES
             shift 2
             ;;
         -d|--log-dir)
@@ -197,6 +275,12 @@ if [ -z "${CEPHFS}" ]; then
     exit 1
 fi
 
+if [ -n "${CONCURRENCY}" ] && ! [ "${CONCURRENCY}" -ge 0 ] 2>/dev/null; then
+    echo "invalid concurrency: ${CONCURRENCY}" >&2
+    usage >&2
+    exit 1
+fi
+
 RANKS="$@"
 set_ranks
 
@@ -207,26 +291,26 @@ trap on_exit EXIT
 
 if [ -n "${BACKUP_JOURNAL}" ]; then
     set_recovery_step backup
-    for rank in ${RANKS}; do
-	echo "Backing journal up for rank ${rank}" 2>&2
-        run journal_export.${rank} \
-            cephfs-journal-tool --rank=${CEPHFS}:${rank} journal export \
-                "${BACKUP_JOURNAL}".${rank}
-    done
+    run_for_ranks backup_journal
 fi
 
-set_recovery_step recover_journal_dentries
-for rank in ${RANKS}; do
+if [ -n "${CONCURRENCY}" ]; then
+    set_recovery_step recover_journal
+    run_for_ranks recover_journal
+else
+    set_recovery_step recover_journal_dentries
+    for rank in ${RANKS}; do
 
-    # try to recover whatever is possible from journal and reset it
-    recover_dentries "${rank}"
-done
+        # try to recover whatever is possible from journal
+        recover_dentries "${rank}"
+    done
 
-set_recovery_step reset_journal
-for rank in ${RANKS}; do
-    run journal_reset.${rank} \
-        cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
-            ${JOURNAL_RESET_COMPAT_FLAGS}
-done
+    set_recovery_step reset_journal
+    for rank in ${RANKS}; do
+        run journal_reset.${rank} \
+            cephfs-journal-tool --rank=${CEPHFS}:${rank} journal reset --force \
+                ${JOURNAL_RESET_COMPAT_FLAGS}
+    done
+fi
 
 set_recovery_step end
