@@ -17,7 +17,7 @@ LOGDIR=recover_journal_logs
 BACKUP_JOURNAL="${BACKUP_JOURNAL:-}"
 JOURNAL_RESET_COMPAT_FLAGS=
 : ${DRY_RUN:=}
-: ${PROCEED_ON_RECOVER_DENTRIES_FAILURE:=}
+: ${PROCEED_ON_RECOVER_FAILURE:=}
 
 declare -A RECOVERY_STEPS=(
   [backup]="BACKING JOURNAL UP TO ${BACKUP_JOURNAL}"
@@ -40,7 +40,7 @@ usage() {
     echo "  -b | --backup-journal <path>  export journals to <path>.<rank>"
     echo "  -d | --log-dir <dir>          directory to store logs"
     echo "                                (default: ${LOGDIR})"
-    echo "  -f | --proceed-on-recover-dentries-failure"
+    echo "  -f | --proceed-on-recover-failure"
     echo "                                continue to journal reset even if"
     echo "                                recover_dentries fails"
     echo "  -h | --help                   show this help message and exit"
@@ -114,13 +114,13 @@ recover_dentries() {
         return 0
     fi
 
-    if [ "${PROCEED_ON_RECOVER_DENTRIES_FAILURE}" = "YES" ]; then
+    if [ "${PROCEED_ON_RECOVER_FAILURE}" = "YES" ]; then
         echo "recover_dentries failed for rank ${rank}, proceeding with journal reset" >&2
         return 0
     fi
 
     echo "recover_dentries failed for rank ${rank}" >&2
-    echo "re-run with --proceed-on-recover-dentries-failure to continue anyway" >&2
+    echo "re-run with --proceed-on-recover-failure to continue anyway" >&2
     return 1
 }
 
@@ -143,7 +143,7 @@ run() {
 # Main
 #
 
-OPTIONS=$(getopt -o b:d:fhn --long backup-journal:,log-dir:,proceed-on-recover-dentries-failure,help,dry-run -- "$@")
+OPTIONS=$(getopt -o b:d:fhn --long backup-journal:,log-dir:,proceed-on-recover-failure,help,dry-run -- "$@")
 
 eval set -- "$OPTIONS"
 while true; do
@@ -164,8 +164,8 @@ while true; do
             DRY_RUN=YES
             shift
             ;;
-        -f|--proceed-on-recover-dentries-failure)
-            PROCEED_ON_RECOVER_DENTRIES_FAILURE=YES
+        -f|--proceed-on-recover-failure)
+            PROCEED_ON_RECOVER_FAILURE=YES
             shift
             ;;
         -h|--help)
