@@ -171,6 +171,56 @@ def _handle_non_recommended_version(result, ver, rec_versions, rec_minor) -> Non
 
 
 @add_check
+def check_elastic_shared_blob_affected_osds(result: AIResult, data: CephData) -> None:
+    if data.ceph_report is None:
+        return
+    report = data.ceph_report
+    section = "OSD Health"
+    check = "Elastic Shared Blob Bug"
+    affected_osds = []
+    osd_metadata = report.osd_metadata
+
+    for osd in osd_metadata:
+        created_ver_str = getattr(osd, "ceph_version_when_created", None)
+        if not created_ver_str:
+            continue
+        try:
+            created_ver = created_ver_str.split()[2]
+            created_ver_parsed = version.parse(created_ver)
+            if version.parse("19.2.0") <= created_ver_parsed < version.parse(
+                "19.2.4"
+            ) or created_ver_parsed == version.parse("20.2.0"):
+                affected_osds.append(f"osd.{osd.id}")
+        except Exception:
+            continue
+
+    if not affected_osds:
+        passfail = "PASS"
+        summary = "No OSDs created during versions affected by Elastic Shared Blob bug"
+        detail = [
+            "No OSDs were created during Squid 19.2.0–19.2.3 or Tentacle 20.2.0, which are affected by "
+            "the Elastic Shared Blob (ESB) bug (https://tracker.ceph.com/issues/70390)."
+        ]
+        recommend = []
+    else:
+        passfail = "WARN"
+        summary = f"{len(affected_osds)} OSD(s) may be affected by the Elastic Shared Blob bug"
+        detail = [
+            f"The following OSD(s) were created during an affected version (Squid 19.2.0–19.2.3 or "
+            f"Tentacle 20.2.0) and may be affected by the Elastic Shared Blob (ESB) bug "
+            f"(https://tracker.ceph.com/issues/70390): {', '.join(affected_osds)}. "
+            f"This bug can cause OSD crashes and potential data corruption. "
+            f"Note that v19.2.4 and v20.2.1 prevent new corruptions but cannot detect or repair existing ones."
+        ]
+        recommend = [
+            'Run "ceph config set osd bluestore_elastic_shared_blobs 0" to prevent new corruptions. '
+            "OSDs created during affected versions should be completely recreated to ensure data integrity."
+        ]
+
+    result.add_check_result(section, check, passfail, summary, detail, recommend)
+
+
+@add_check
 def check_report_known_bugs(result: AIResult, data: CephData) -> None:
     if data.ceph_report is None:
         return
