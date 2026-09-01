@@ -1,0 +1,2851 @@
+#!/usr/bin/env python3
+#
+#   clyso-nines - A tool to estimate data loss risk in Ceph clusters
+#
+#   Copyright (C) 2025 Dan van der Ster <dan.vanderster@clyso.com>
+#
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU Affero General Public License as
+#   published by the Free Software Foundation, either version 3 of the
+#   License, or (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU Affero General Public License for more details.
+#
+#   You should have received a copy of the GNU Affero General Public License
+#   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import argparse
+import contextlib
+import io
+import itertools
+import json
+import math
+import os
+import random
+import shlex
+import subprocess
+import sys
+import time
+from collections import defaultdict
+
+VERBOSE = False
+DEBUG = False
+
+SECONDS_PER_YEAR = 31_536_000
+
+# CRUSH_ITEM_NONE: placeholder used in pg 'up'/'acting' for a missing OSD
+CRUSH_ITEM_NONE = 0x7fffffff
+
+# The EC stripe unit an IO is measured against, being Ceph's
+# osd_pool_erasure_code_stripe_unit default.
+EC_STRIPE_UNIT = 4096
+
+# Object size and client IO size are different quantities and the gap between
+# them depends entirely on the workload: RBD stores 4MB objects and reads 4kB of
+# them, S3 stores and reads whole objects, CephFS stores much smaller objects
+# than either but is read like RBD. Recovery moves whole objects, so the object
+# size drives that while the IO size drives client throughput.
+WORKLOAD_DEFAULTS = {
+    'rbd':    {'object_size': 4 * 1024 * 1024, 'client_io_size': 4096},
+    'cephfs': {'object_size': 64 * 1024,       'client_io_size': 4096},
+    's3':     {'object_size': 4 * 1024 * 1024, 'client_io_size': 4 * 1024 * 1024},
+}
+
+# Per-OSD recovery ceilings by device class: MB/s and objects/s. Recovery
+# competes with client IO and is rarely allowed the device's full sequential
+# throughput, so these are working figures for a busy cluster rather than
+# datasheet numbers. Override either with --recovery-rate/--recovery-iops.
+# The recovery tunables mirror Ceph's own osd_recovery_{sleep,max_active}_hdd
+# and _ssd defaults, which is what an OSD of that class actually applies.
+DEVICE_CLASS_DEFAULTS = {
+    # One set of figures per device class describes the OSD, and both client IO
+    # and recovery are costed against them. Reads and writes differ because an
+    # HDD in write-through mode using its media cache - the recommended Ceph OSD
+    # configuration - serves sync writes at ~450 IOPS while a random read still
+    # pays a seek, and both stream at ~250MBps.
+    'hdd':  {'osd_read_bw': 250.0, 'osd_write_bw': 250.0,
+             'osd_read_iops': 120.0, 'osd_write_iops': 450.0,
+             'osd_read_latency': 0.008, 'osd_write_latency': 0.002,
+             'osd_recovery_sleep': 0.1, 'osd_recovery_max_active': 3},
+    # NVMe is symmetric and CPU bound in the OSD rather than device bound; the
+    # bandwidth figure is per OSD and assumes the network is not the limit.
+    'nvme': {'osd_read_bw': 500.0, 'osd_write_bw': 500.0,
+             'osd_read_iops': 20000.0, 'osd_write_iops': 20000.0,
+             'osd_read_latency': 0.0005, 'osd_write_latency': 0.0005,
+             'osd_recovery_sleep': 0.0, 'osd_recovery_max_active': 10},
+}
+
+# ---------------------------- Utilities ----------------------------
+
+def vprint(*args, **kwargs):
+    if VERBOSE or DEBUG:
+        print(*args, **kwargs)
+
+def dprint(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
+
+def reconstruct_command_line(parser, args):
+    command_parts = [parser.prog, args.command]
+
+    for arg in vars(args):
+        if arg == 'command' or arg == 'func':
+            continue
+        value = getattr(args, arg)
+        if isinstance(value, bool):
+            if value:
+                command_parts.append(f"--{arg.replace('_', '-')}")
+        elif isinstance(value, (list, tuple)):
+            command_parts.append(f"--{arg.replace('_', '-')}")
+            command_parts.extend(shlex.quote(str(v)) for v in value)
+        elif value is not None:
+            command_parts.append(f"--{arg.replace('_', '-')}")
+            command_parts.append(shlex.quote(str(value)))
+    return ' '.join(command_parts)
+
+def round_to_nearest_power_of_two(n):
+    if n <= 0:
+        raise ValueError("Input must be a positive number.")
+    lower = 2 ** math.floor(math.log2(n))
+    upper = 2 ** math.ceil(math.log2(n))
+    return lower if (n - lower) < (upper - n) else upper
+
+def count_nines(value, max_digits=20):
+    if value < 0 or value > 1:
+        raise ValueError(f"Value {value} must be between 0 and 1")
+
+    # Round to given precision
+    rounded = round(value, max_digits)
+    s = f"{rounded:.{max_digits}f}"
+
+    if not s.startswith("0."):
+        return f"{max_digits}-nines"  # Treat 1.0 as "max nines"
+
+    decimal_part = s.split('.')[1]
+    count = 0
+    for c in decimal_part:
+        if c == '9':
+            count += 1
+        else:
+            break
+    return f"{count}-nines" if count > 0 else "0-nines (0.0)"
+
+def inv(x):
+    """Return 1/x, or infinity for x == 0, so reporting never divides by zero."""
+    return 1.0 / x if x else float('inf')
+
+def comb(n, k):
+    """Return C(n, k) with math.comb-like semantics."""
+    if not (isinstance(n, int) and isinstance(k, int)):
+        raise TypeError("n and k must be integers")
+    if n < 0:
+        raise ValueError("n must be non-negative")
+    if k < 0 or k > n:
+        return 0
+    k = min(k, n - k)  # symmetry
+    c = 1
+    for i in range(1, k + 1):
+        c = c * (n - i + 1) // i
+    return c
+
+def mttdl(N, k, osd_failure_rate, correlation, recovery_time_sec):
+    p = osd_failure_rate * recovery_time_sec / SECONDS_PER_YEAR
+    prob_k_failures = correlation*comb(N, k) * (p ** k)
+    if prob_k_failures <= 0:
+        # k > N, or a zero AFR: k concurrent failures never happen
+        return float('inf')
+    # comb(N,k)*p^k over-counts as p grows, and the correlation factor scales
+    # it further, so this can exceed 1. Clamp: at certainty the k-down state
+    # recurs as fast as it can be left, and never faster.
+    prob_k_failures = min(1.0, prob_k_failures)
+    # The k-down state lasts recovery_time/k, not recovery_time, since it ends
+    # when any one of the k OSDs finishes recovering. See the matching note in
+    # simulate(): without this the rate is a factor of k too low.
+    mean_state_duration = recovery_time_sec / max(1, k)
+    mttdl_seconds = mean_state_duration / prob_k_failures
+    return mttdl_seconds
+
+# https://en.wikipedia.org/wiki/Binomial_distribution
+def log_prob_exact_k_failures(n, p, k):
+    if p == 0:
+        return float('-inf') if k > 0 else 0.0
+    if p == 1:
+        return float('-inf') if k < n else 0.0
+    return (
+        math.log(comb(n, k))
+        + k * math.log(p)
+        + (n - k) * math.log1p(-p)
+    )
+
+def prob_k_or_more_failures(n, p, k, cutoff=1e-30):
+    """Stable + fast binomial tail probability P(X>=k)."""
+    logs = []
+    max_log = -float('inf')
+
+    # Only go forward until terms become negligible
+    for i in range(k, n + 1):
+        lp = log_prob_exact_k_failures(n, p, i)
+
+        # Track maximum for log-sum-exp normalization
+        if lp > max_log:
+            max_log = lp
+
+        logs.append(lp)
+
+        # Stop when next term is extremely small
+        if len(logs) > 5:
+            # Compare last 5 terms with peak
+            if all((max_log - x) > -math.log(cutoff) for x in logs[-5:]):
+                break
+
+    if max_log == float('-inf'):
+        # every term has probability zero (e.g. p == 0 with k > 0)
+        return 0.0
+
+    # log-sum-exp
+    return math.exp(max_log) * sum(math.exp(x - max_log) for x in logs)
+
+def expected_max_osd_load(n_osds, n_pgs):
+    """Estimate the PG count of the most loaded OSD (balls-in-bins max load)."""
+    if n_osds <= 0:
+        return float('inf')  # nowhere left to recover to
+    if n_pgs <= 0:
+        return 0
+
+    log_n = math.log(n_osds) if n_osds > 1 else 0.0
+
+    # Dense case (Raab & Steger): average load + deviation
+    avg = n_pgs / n_osds
+    dense = avg + math.sqrt(2 * avg * log_n)
+
+    # Sparse case: log(n) / log(n*log(n)/m). The log(n) factor inside the
+    # denominator matters: a plain log(n/m) diverges as m approaches n from
+    # below (e.g. 999 PGs on 1000 OSDs would estimate ~6900 PGs on one OSD).
+    if n_pgs < n_osds:
+        denominator = math.log(n_osds * log_n / n_pgs) if n_osds * log_n > n_pgs else 0.0
+        if denominator > 0:
+            # both estimates are approximations here; keep the pessimistic one
+            return max(1, math.ceil(log_n / denominator), math.ceil(dense))
+
+    return max(1, math.ceil(dense))
+
+def format_bytes(val):
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    thresholds = [1, 1024, 1024**2, 1024**3, 1024**4, 1024**5]
+
+    if not math.isfinite(val):
+        return "∞" if val > 0 else "?"
+    for i in reversed(range(1, len(units))):
+        if val >= thresholds[i]:
+            return f"~{val / thresholds[i]:.1f}{units[i]}"
+    return f"~{round(val)}B"
+
+def format_int(val):
+    units = ["", "K", "M", "B"]
+    thresholds = [1, 1000, 1000**2, 1000**3]
+
+    if not math.isfinite(val):
+        return "∞" if val > 0 else "?"
+    for i in reversed(range(1, len(units))):
+        if val >= thresholds[i]:
+            return f"~{val / thresholds[i]:.1f}{units[i]}"
+    return f"~{round(val)}"
+
+def format_time(seconds):
+    units = ["s", "m", "h", "d", "y", "thousand years", "million years", "billion years"]
+    thresholds = [1, 60, 3600, 86400, 86400*365, 86400*365*1000, 86400*365*10**6, 86400*365*10**9]
+
+    if not math.isfinite(seconds):
+        return "∞" if seconds > 0 else "?"
+    for i in reversed(range(1, len(units))):
+        if seconds >= thresholds[i]:
+            return f"{round(seconds / thresholds[i], 1)} {units[i]}"
+    # Keep sub-second values legible: rounding them to "0 s" hides the
+    # difference between an eight-nines pool and a perfect one.
+    if seconds <= 0:
+        return "0 s"
+    if seconds < 0.1:
+        return "<0.1 s"
+    if seconds < 10:
+        return f"{seconds:.1f} s"
+    return f"{round(seconds)} s"
+
+def simple_crush(osd_ids, num_domains, pg_size, num_pgs):
+    if pg_size > num_domains:
+        raise ValueError("PG size cannot be greater than num failure domains.")
+
+    # Group OSDs into failure domains
+    domains = defaultdict(list)
+    for i, osd in enumerate(osd_ids):
+        domain = i % num_domains
+        domains[domain].append(osd)
+
+    domain_ids = list(domains.keys())
+    if DEBUG:
+        for domain in domain_ids:
+            dprint(f"Domain {domain}: OSDs {domains[domain]}")
+
+    pgs = []
+    for _ in range(num_pgs):
+        # Randomly choose failure domains for this PG
+        chosen_domains = random.sample(domain_ids, pg_size)
+        pg_osds = []
+        for domain in chosen_domains:
+            # Pick a random OSD from the selected domain
+            pg_osds.append(random.choice(domains[domain]))
+        pgs.append(tuple(pg_osds))
+        if DEBUG: dprint(f"Generated PG: {pgs[-1]} from domains {chosen_domains}")
+
+    return domains, pgs
+
+def confidence_interval(successes, trials):
+    """99.9% Wilson score interval for a binomial proportion.
+
+    The plain normal approximation collapses to zero width at 0 and 1
+    successes, which is exactly where a Monte Carlo run of a rare event lands,
+    and it is a poor fit anywhere near those ends.
+    """
+    if trials == 0:
+        return (0, 0)
+    p_hat = successes / trials
+    z = 3.2905  # z-score for 99.9% confidence
+    z2 = z * z
+    centre = (p_hat + z2 / (2 * trials)) / (1 + z2 / trials)
+    margin = (z * math.sqrt(p_hat * (1 - p_hat) / trials + z2 / (4 * trials * trials))
+              / (1 + z2 / trials))
+    return (max(0.0, centre - margin), min(1.0, centre + margin))
+
+
+def recovery_read_amplification(k):
+    """Objects read per object written while recovering.
+
+    Replication copies a surviving replica, one read per write. Erasure coding
+    cannot copy anything: a lost shard has to be reconstructed from k surviving
+    shards, so it reads k for every one it writes and the devices move k+1 times
+    the bytes being restored.
+    """
+    return 1 if k is None else k
+
+
+def effective_recovery_rate(object_size_bytes, read_amplification,
+                            read_bw, write_bw, read_iops, write_iops,
+                            osd_recovery_sleep=0.0, osd_recovery_max_active=0):
+    """Bytes per second of data restored, per OSD taking part in recovery.
+
+    Restoring an object is a read from a surviving copy and a write to the
+    replacement, and both land on OSDs drawing from the same device budget,
+    since every OSD is a source for the PGs it still holds and a destination for
+    those it is rebuilding. So the two sides are costed separately and added:
+
+      read side   read_amplification objects, at the read ceilings
+      write side  one object, at the write ceilings
+
+    read_amplification is 1 for replication, which copies a replica, and k for a
+    k+m erasure profile, which must pull a whole stripe to rebuild one shard.
+    That makes erasure coded recovery read-dominated. Where the object rate is
+    what binds - small objects - a device whose reads are slower than its writes,
+    which is any HDD, is slower again for that reason. For large objects both
+    sides are bandwidth bound and the asymmetry does not show.
+
+    Within each side the bandwidth and object-rate ceilings apply at once, so
+    the binding one sets the cost. osd_recovery_sleep is charged on top, shared
+    across the operations in flight.
+    """
+    if object_size_bytes <= 0:
+        return min(read_bw, write_bw)
+
+    amp = max(0, read_amplification)
+    read_cost = max(amp * object_size_bytes / read_bw, amp / read_iops)
+    write_cost = max(object_size_bytes / write_bw, 1.0 / write_iops)
+
+    per_object = read_cost + write_cost
+    per_object += osd_recovery_sleep / max(1, osd_recovery_max_active)
+
+    return object_size_bytes / per_object
+
+
+def infer_failure_domains(pgs):
+    """Infer failure domains from the OSD distribution across PGs.
+
+    CRUSH places each PG on OSDs in distinct failure domains, so two OSDs can
+    only share a domain if they never appear together in the same PG. Build the
+    graph of OSD pairs that do appear together and colour it: every colour
+    class is then a set of OSDs that could be co-located, i.e. a domain.
+
+    Accuracy grows with the number of PGs supplied, so callers should pass
+    every PG in the cluster rather than those of a single pool. A pool whose
+    PGs cover few OSDs cannot pin down the real topology on its own, and the
+    result will have fewer domains than the cluster really has.
+    """
+    osds = sorted({osd for pg in pgs for osd in pg})
+
+    # OSD pairs that share a PG, and therefore cannot share a failure domain
+    conflicts = {osd: set() for osd in osds}
+    for pg in pgs:
+        for a, b in itertools.combinations(set(pg), 2):
+            conflicts[a].add(b)
+            conflicts[b].add(a)
+
+    # Greedily colour the conflict graph, most-constrained OSD first. Each
+    # domain is an independent set, so every PG is guaranteed to land in as
+    # many distinct domains as it has shards.
+    domains = []
+    for osd in sorted(osds, key=lambda o: (-len(conflicts[o]), o)):
+        for domain in domains:
+            if domain.isdisjoint(conflicts[osd]):
+                domain.add(osd)
+                break
+        else:
+            domains.append({osd})
+
+    osd_tree = [sorted(domain) for domain in domains]
+
+    dprint("Inferred failure domains:")
+    for idx, host in enumerate(osd_tree):
+        dprint(f"  Domain {idx}: OSDs {host}")
+
+    return osd_tree
+
+
+# A union bound over PG subsets is tight while the loss rate is small (under
+# 2% high on real pools) and useless once PGs start sharing failure sets, so it
+# is only trusted below this rate.
+UNION_BOUND_MAX_RATE = 0.01
+
+# Below this many observed losses a sampled rate is too noisy to build on: at
+# 6 losses the 99.9% interval spans a factor of ten.
+MIN_LOSSES_FOR_MC = 30
+
+def slowest_of(n):
+    """Expected slowest of n parallel operations, in units of one operation.
+
+    The harmonic number: fanning a write out to more OSDs costs latency even
+    though the subops go in parallel, because the client waits for the last one.
+    """
+    return sum(1.0 / i for i in range(1, max(1, int(n)) + 1))
+
+
+def ec_shards_touched(k, io_size, stripe_unit):
+    """Data shards a client IO of io_size reaches in a k+m stripe.
+
+    Stripe units are handed round-robin to the k data shards, so an IO covering
+    more than one unit spreads over more than one shard, and one covering k or
+    more reaches the whole stripe. This is what bounds fast EC: its advantage is
+    touching a single shard, and it has none left once the IO spans the stripe.
+    """
+    if k is None or stripe_unit <= 0:
+        return 0
+    units = max(1, math.ceil(io_size / stripe_unit))
+    return min(k, units)
+
+
+def pool_performance(size, k, m, num_osds, read_bw, write_bw, read_iops,
+                     write_iops, read_latency, write_latency,
+                     io_size=None, stripe_unit=EC_STRIPE_UNIT, fast_ec=False):
+    """Small-IO client throughput and latency for one pool profile.
+
+    The cluster has num_osds * osd_*_iops operations a second to spend, and a
+    client IO costs several of them:
+
+    Replicated: a read is served by the primary alone, one op. A write costs an
+    op on the primary plus a subop on each replica, so `size` ops.
+
+    Classic erasure coding: the primary holds only one of the k data shards, so
+    a read of any size fans out to all k, assembles, and replies. A write reads
+    all k shards, updates locally, then sends k+m-1 write subops: two round
+    trips, and 2k+m ops.
+
+    Fast erasure coding: a read below the stripe unit is served from the single
+    OSD holding it. A write reads the affected data shard, then writes it and
+    the m parity shards, so m+2 ops in two round trips.
+
+    Reads and writes are costed against separate per-OSD budgets, because an
+    HDD in write-through mode serves sync writes from its media cache at a
+    multiple of what a random read costs it in seeks.
+
+    Returns ops per client read and write, cluster IOPS for each, and latency.
+    """
+    # An op is limited by the object rate or by bandwidth, whichever binds at
+    # this IO size. At 4kB the object rate binds on every device class here.
+    io_size = io_size or WORKLOAD_DEFAULTS['rbd']['client_io_size']
+    read_budget = num_osds * min(read_iops, read_bw / io_size)
+    write_budget = num_osds * min(write_iops, write_bw / io_size)
+
+    if k is None:
+        read_ops, write_ops = 1, size
+        read_trips = [1]
+        write_trips = [size]
+    elif fast_ec:
+        # How much of the stripe this IO actually reaches. Once it spans every
+        # data shard there is nothing left for fast EC to skip, so it costs what
+        # the classic path costs and the caller is told there is no gain.
+        touched = ec_shards_touched(k, io_size, stripe_unit)
+        if touched >= k:
+            return pool_performance(size, k, m, num_osds, read_bw, write_bw,
+                                    read_iops, write_iops, read_latency,
+                                    write_latency, io_size, stripe_unit,
+                                    fast_ec=False)
+
+        # The primary holds one of the k data shards, so it is already among the
+        # ones touched with probability touched/k, and otherwise has to proxy.
+        proxied = 1 - touched / k
+        read_ops = touched + proxied
+        # A parity shard cannot be updated blind: it has to be read before the
+        # new value can be written, so each of the m costs two operations.
+        write_ops = touched + proxied + 2 * m
+        read_trips = [touched]
+        # the data shards and the parities are read together, then written together
+        write_trips = [touched + m, touched + m]
+    else:
+        read_ops, write_ops = k, 2 * k + m
+        read_trips = [k]
+        write_trips = [k, k + m]          # read every data shard, then write them all
+
+    # A proxied op waits for a hop out and back on top of the op itself. The
+    # OSD latency stands in for a hop, as it does for the subops elsewhere.
+    proxy = 1 + (proxied if fast_ec and k is not None else 0.0)
+
+    # A classic EC write reads every data shard before writing, so its first
+    # round trip is a read and pays read latency.
+    write_lat = write_latency * sum(slowest_of(n) for n in write_trips[-1:])
+    if len(write_trips) > 1:
+        write_lat += proxy * read_latency * sum(slowest_of(n) for n in write_trips[:-1])
+
+    return {
+        'read_ops': read_ops,
+        'write_ops': write_ops,
+        'read_iops': read_budget / read_ops,
+        'write_iops': write_budget / write_ops,
+        'read_latency': proxy * read_latency * sum(slowest_of(n) for n in read_trips),
+        'write_latency': write_lat,
+    }
+
+
+def outage_downtime_fraction(num_groups, group_size, outage_rate, outage_hours,
+                             num_hosts, width, threshold, num_pgs):
+    """Fraction of the year a pool is unavailable because whole groups went down.
+
+    A host losing its CPU, memory or PSU, or a rack losing its switch, takes
+    every OSD in it away at once without destroying anything: the data comes
+    back when the hardware does. So these contribute downtime and no data loss.
+
+    The fraction of time in a state is just its probability, so no rate and
+    duration decomposition is needed: work out how likely it is that enough
+    groups are down at once to take some PG below min_size, and that is the
+    answer.
+
+    num_groups groups each fail outage_rate times a year and stay down
+    outage_hours, so each is down for outage_rate*outage_hours/8760 of the time.
+    A PG needs `threshold` of its shards gone to stop serving, and it holds one
+    shard per failure domain, so `threshold` domains have to be down together.
+    group_size is how many domains one group takes with it: 1 for a host that is
+    itself the failure domain, hosts_per_rack for a rack under host-level
+    placement.
+    """
+    if outage_rate <= 0 or outage_hours <= 0 or num_groups < 1:
+        return 0.0
+
+    down_fraction = min(1.0, outage_rate * outage_hours / (365.0 * 24.0))
+
+    # How many groups have to be down at once, and how many domains that is.
+    groups_needed = max(1, math.ceil(threshold / max(1, group_size)))
+    if groups_needed > num_groups:
+        return 0.0
+    domains_down = groups_needed * group_size
+
+    time_in_state = prob_k_or_more_failures(num_groups, down_fraction, groups_needed)
+    if time_in_state <= 0:
+        return 0.0
+
+    # Given that many domains are down, does any PG lose `threshold` shards?
+    per_pg = rack_loss_fraction(num_hosts, domains_down, width, threshold)
+    if per_pg <= 0:
+        return 0.0
+    any_pg = 1.0 - math.exp(num_pgs * math.log1p(-per_pg)) if per_pg < 1 else 1.0
+
+    return min(1.0, time_in_state * any_pg)
+
+
+def default_min_size(size, k):
+    """Ceph's min_size: shards that must be up for a PG to serve IO.
+
+    2 for a replicated pool, k+1 for an erasure coded one, which leaves an EC
+    pool one parity shard of headroom before it stops accepting writes.
+    """
+    return 2 if k is None else k + 1
+
+
+def mapping_loss_rate(pgs, num_osds, num_failures, max_subsets=2_000_000):
+    """Probability that num_failures random OSD failures destroy at least one PG.
+
+    Derived from the actual PG->OSD mapping, so it holds for any CRUSH map:
+    uneven failure domains, multi-level hierarchies, device-class restricted
+    pools, reweighted OSDs. A failure set is fatal for a PG when it contains
+    num_failures of that PG's OSDs, so the answer is a count of fatal failure
+    sets over the C(num_osds, num_failures) equally likely ones.
+
+    Returns (rate, method). Deduplicating the fatal sets gives the exact rate.
+    When there are too many to hold, the sum of the per-PG counts is used: a
+    union bound that over-counts failure sets fatal for more than one PG. That
+    is under 2% high on real pools, but grows once PGs start sharing subsets,
+    so it is reported as a bound and the caller should only trust it while it
+    is small (see UNION_BOUND_MAX_RATE).
+    """
+    if num_failures <= 0:
+        return 1.0, 'certain'
+    denominator = comb(int(num_osds), int(num_failures))
+    if denominator == 0:
+        # fewer OSDs in the cluster than it takes to lose data
+        return 1.0, 'certain'
+
+    shards = [sorted(set(pg)) for pg in pgs]
+    total = sum(comb(len(osds), num_failures) for osds in shards)
+    if total == 0:
+        return 0.0, 'exact'
+
+    if total <= max_subsets:
+        fatal = set()
+        for osds in shards:
+            if len(osds) >= num_failures:
+                fatal.update(itertools.combinations(osds, num_failures))
+        return min(1.0, len(fatal) / denominator), 'exact'
+
+    return min(1.0, total / denominator), 'union bound'
+
+
+def calculate_pg_loss_rate(num_domains,
+                           osds_per_domain,
+                           pg_size,
+                           num_pgs,
+                           num_failures_for_data_loss,
+                           num_osds,
+                           prefailed_domains=0):
+
+    vprint(f"---------------------------")
+    vprint(f"Theoretical loss rate calculation (with {prefailed_domains} pre-failed domains):")
+
+    H = int(num_domains)
+    f_total_threshold = int(num_failures_for_data_loss)
+    f_new = max(0, f_total_threshold - int(prefailed_domains))
+
+    H_dead = int(prefailed_domains)
+    # the model assumes a uniform number of OSDs per domain; round rather than
+    # truncate so e.g. 15.8 OSDs per domain does not become 15
+    n = max(1, round(osds_per_domain))
+    r = int(pg_size)
+
+    if H_dead >= H: return 1.0
+    if r > H:
+        # a PG cannot be spread over distinct domains at all: assume the worst
+        vprint(f"  PG size {r} exceeds {H} failure domains, assuming certain loss")
+        return 1.0
+
+    H_alive = H - H_dead
+    N_alive = H_alive * n
+
+    # 1. Eligibility (Global)
+    if f_new == 0:
+        eligibility = 1.0
+    elif f_new > H_alive:
+        eligibility = 0.0
+    else:
+        denominator = comb(N_alive, f_new)
+        eligibility = (comb(H_alive, f_new) * (n ** f_new)) / denominator if denominator else 0.0
+
+    vprint(f"  1. Eligibility (New failures on distinct alive hosts): {eligibility:.3g}")
+
+    # 2. Iterate through PG "Vulnerability Buckets"
+    prob_pool_survives = 1.0
+
+    # number of ways a PG can pick r distinct domains out of H; non-zero
+    # because r <= H is checked above
+    pg_placements = comb(H, r)
+
+    for k in range(r + 1):
+        # Safety checks
+        if k > H_dead: continue
+        if (r - k) > H_alive: continue
+
+        # Proportion of PGs in this state
+        prob_pg_state_k = (comb(H_dead, k) * comb(H_alive, r - k)) / pg_placements
+
+        if prob_pg_state_k == 0: continue
+
+        num_pgs_in_state = num_pgs * prob_pg_state_k
+
+        # The number of *additional* shards we need to lose to kill this PG
+        needed = max(0, f_total_threshold - k)
+
+        p_kill_pg = 0.0
+
+        if needed <= 0:
+            p_kill_pg = 1.0
+        elif f_new < needed:
+            p_kill_pg = 0.0
+        else:
+            # For EC, we might lose 'x' shards, where 'needed' <= x <= 'f_new'.
+            # Any overlap >= needed is fatal.
+            # We sum the probabilities of all fatal overlap sizes.
+
+            r_alive = r - k  # Healthy legs of this PG
+
+            # The denominator for picking hosts (how many ways to pick f_new hosts from H_alive)
+            total_host_combos = comb(H_alive, f_new)
+
+            # We iterate x (the number of hits on this PG's healthy legs)
+            # Max hits is min(f_new, r_alive) because we can't hit more hosts than we failed,
+            # and we can't hit more legs than the PG has.
+            for x in range(needed, min(f_new, r_alive) + 1):
+                # 1. Choose 'x' hosts that are part of the PG (from r_alive)
+                ways_hit_pg = comb(r_alive, x)
+
+                # 2. Choose the remaining 'f_new - x' failures from non-PG hosts (H_alive - r_alive)
+                ways_miss_pg = comb(H_alive - r_alive, f_new - x)
+
+                if total_host_combos > 0:
+                    prob_hosts = (ways_hit_pg * ways_miss_pg) / total_host_combos
+                else:
+                    prob_hosts = 0
+
+                # 3. Probability that we hit the specific OSDs on those 'x' hosts
+                # Since we assume 1 failure per host (eligibility), simply (1/n)^x
+                prob_osds = (1 / n) ** x
+
+                p_kill_pg += prob_hosts * prob_osds
+
+        # Aggregate risk for this bucket. Each of the num_pgs PGs independently
+        # lands in this bucket and dies, with probability prob_pg_state_k *
+        # p_kill_pg, so the pool survives it with (1 - that)**num_pgs. Working
+        # per PG rather than per bucket member keeps the certain case exact:
+        # exp(-num_pgs_in_state) approximates that only for a small kill
+        # probability, and claimed a 1.8% survival for four PGs that were all
+        # certain to die.
+        p_pg_dies = prob_pg_state_k * p_kill_pg
+        if p_pg_dies >= 1.0:
+            prob_survive_bucket = 0.0
+        elif p_pg_dies <= 0.0:
+            prob_survive_bucket = 1.0
+        else:
+            # High precision aggregation
+            prob_survive_bucket = math.exp(num_pgs * math.log1p(-p_pg_dies))
+
+        vprint(f"    Bucket [Overlap={k}]: {prob_pg_state_k*100:.1f}% of PGs. Kill Prob: {p_kill_pg:.4g}")
+        prob_pool_survives *= prob_survive_bucket
+
+    # Final Risk Calculation
+    risk_raw = 1.0 - prob_pool_survives
+
+    # Handle the Dead-On-Arrival edge case (where eligibility shouldn't reduce risk)
+    prob_survive_doa = 1.0
+    for k in range(r + 1):
+        if k > H_dead: continue
+        needed = max(0, f_total_threshold - k)
+        if needed <= 0:
+            # every PG in this bucket is already lost, so the pool survives
+            # only if no PG landed in it
+            p_state = (comb(H_dead, k) * comb(H_alive, r - k)) / pg_placements
+            if p_state >= 1.0:
+                prob_survive_doa = 0.0
+            elif p_state > 0.0:
+                prob_survive_doa *= math.exp(num_pgs * math.log1p(-p_state))
+
+    risk_doa = 1.0 - prob_survive_doa
+    total_risk = max(risk_doa, eligibility * risk_raw)
+
+    return min(1.0, max(0.0, total_risk))
+
+
+# ---------------------------- Simulate Subcommand ----------------------------
+def simulate(args, domains=None):
+    # Set random seed for reproducibility
+    random.seed(args.seed)
+
+    if not 0 <= args.osd_failure_rate <= 1:
+        raise ValueError("--osd-failure-rate must be between 0 and 1, got "
+                         f"{args.osd_failure_rate}")
+
+    raw_to_stored_factor = 0
+    profile = ""
+    # Derive PG size
+    if args.k is not None and args.m is not None:
+        if args.size is not None:
+            print("    Note: ignoring --size; --k/--m select an erasure coded pool")
+            args.size = None
+        pg_size = args.k + args.m
+        raw_to_stored_factor = args.k / (args.k + args.m)
+        profile = f"{args.k}+{args.m} erasure"
+        num_failures_for_data_loss = args.m + 1
+    elif args.k is not None or args.m is not None:
+        raise ValueError("Specify both --k and --m for an erasure coded pool.")
+    else:
+        if args.size is None:
+            args.size = 3
+        pg_size = args.size
+        raw_to_stored_factor = 1 / (args.size)
+        profile = f"{args.size}x replicated"
+        num_failures_for_data_loss = args.size
+
+    num_failures_for_data_loss = max(0, num_failures_for_data_loss)
+
+    # A pool stops serving IO once any one of its PGs has fewer than min_size
+    # shards up, which happens one failure earlier than data loss for the
+    # standard min_size values: 2 failures for a 3x pool, m for a k+m pool.
+    min_size = args.min_size if getattr(args, 'min_size', None) else default_min_size(args.size, args.k)
+    min_size = max(1, min(min_size, pg_size))
+    num_failures_for_unavailable = max(1, pg_size - min_size + 1)
+    # As with data loss, a domain already down has taken a shard from every PG
+    # it held, so fewer further failures are needed to go below min_size. Once
+    # that reaches zero the pool is not one failure from unavailable, it is
+    # unavailable.
+    already_unavailable = num_failures_for_unavailable - args.domains_down <= 0
+    additional_for_unavailable = max(1, num_failures_for_unavailable - args.domains_down)
+
+    # how many (additional) OSD failures would cause data loss?
+    # adjust for pre-failed domains
+    num_osds_to_fail = max(0, num_failures_for_data_loss - args.domains_down)
+
+    num_simulations = args.simulations
+    if num_simulations < 100:
+        raise ValueError("Number of simulations must be at least 100 for meaningful results.")
+    if num_simulations % 50 != 0:
+        raise ValueError("Number of simulations must be a multiple of 50 for progress display.")
+
+    vprint(f"---------------------------")
+    print()
+
+    if not hasattr(args, 'pgs'):
+        # simulating a randomized pool
+
+        pgs_per_osd = args.pgs_per_osd
+        num_domains = args.num_domains
+        osds_per_domain = args.osds_per_domain
+        num_osds = num_domains * osds_per_domain
+
+        failure_domain = args.failure_domain
+
+        num_pgs = round_to_nearest_power_of_two((num_osds * pgs_per_osd) / pg_size)
+
+        # pg_num is a power of two, so the pool rarely lands on the requested
+        # PGs per OSD -- a --pgs-per-osd of 3000 becomes 2458. Everything
+        # downstream must use what the pool actually got, as analyze does,
+        # or the recovery model and the data per PG disagree by up to 30%.
+        pgs_per_osd = num_pgs * pg_size / num_osds
+        if abs(pgs_per_osd - args.pgs_per_osd) > 0.01 * args.pgs_per_osd:
+            vprint(f"    Note: pg_num rounded to {num_pgs} (a power of two), giving "
+                   f"{pgs_per_osd:.3g} PGs per OSD rather than the requested {args.pgs_per_osd:.3g}")
+
+        osds = list(range(1, num_osds + 1))
+        vprint(f"Generating {num_pgs} PGs using simple CRUSH-like algorithm...")
+        time_start = time.time()
+        domains, pgs = simple_crush(osds, num_domains, pg_size, num_pgs)
+        time_end = time.time()
+        dprint(f"    Generated {num_pgs} PGs in {time_end - time_start:.2f} seconds.")
+
+        # Print simulation summary
+        print(f"Simulating a {profile} pool with {num_osds} OSDs and {num_domains} {failure_domain}s ({osds_per_domain} OSDs per {failure_domain})")
+        print(f"    PGs: {num_pgs} total, averaging {num_pgs * pg_size / num_osds:.3g} per OSD")
+
+    else:
+        # analyzing simulated failures on a given pool
+        pgs = args.pgs
+        osds = args.osds
+        num_domains = args.num_domains
+        failure_domain = args.failure_domain
+        osds_per_domain = float(len(osds)) / num_domains
+        num_pgs = len(pgs)
+        num_osds = len(osds)
+        pgs_per_osd = num_pgs * pg_size / num_osds
+
+        # Print analyze summary
+        print(f"Analyzing '{args.pool_name}':")
+        print(f"    Info: {profile} pool with {num_osds} OSDs and {num_domains} {failure_domain}s")
+        print(f"    PGs: {num_pgs} total, ~{num_pgs * pg_size / num_osds:.3g} per OSD")
+
+    # --- Calculate OSD distribution stats ---
+    osd_counts = defaultdict(int)
+    for pg in pgs:
+        for osd in pg:
+            osd_counts[osd] += 1
+
+    counts = [osd_counts.get(osd, 0) for osd in osds]
+
+    min_pgs = max_pgs = mean_pgs = std_dev = None
+    if counts:
+        min_pgs = min(counts)
+        max_pgs = max(counts)
+        mean_pgs = sum(counts) / len(counts)
+        variance = sum((x - mean_pgs) ** 2 for x in counts) / len(counts)
+        std_dev = math.sqrt(variance)
+
+        vprint(f"    OSD Distribution (PGs per OSD):")
+        vprint(f"      Min:  {min_pgs}")
+        vprint(f"      Max:  {max_pgs}")
+        vprint(f"      Mean: {mean_pgs:.2f}")
+        vprint(f"      Std:  {std_dev:.2f}")
+
+    # Re-derive the stored bytes/objects per PG from tb_per_osd
+    bytes_per_osd = args.tb_per_osd * 1024**4
+    total_bytes = num_osds * bytes_per_osd
+
+    # Stored (user-visible) bytes per PG: this is what is lost when a PG is lost.
+    bytes_per_pg = total_bytes / num_pgs * raw_to_stored_factor
+    try:
+        objects_per_pg = bytes_per_pg / args.object_size
+    except ZeroDivisionError:
+        objects_per_pg = 0
+
+    # Bytes held by one shard, i.e. what a single OSD has to recover. Each
+    # replica holds the whole PG; each of an EC PG's k+m shards holds 1/k of it.
+    shard_bytes = bytes_per_pg / args.k if args.k is not None else bytes_per_pg
+
+    print(f"    Data per PG: {format_bytes(bytes_per_pg)}, {format_int(objects_per_pg)} objects")
+    if args.k is not None:
+        vprint(f"    Data per shard: {format_bytes(shard_bytes)}")
+    vprint(f"    Example PG: {pgs[0]}\n")
+
+
+    # Three independent estimates of the loss rate follow.
+    #
+    # 1. The closed form over domain counts. Fast and mapping-independent, but
+    #    it only sees the domain count and the mean OSDs per domain, so it is
+    #    blind to topology skew: four clusters with domains of [25,25,25,25],
+    #    [40,30,20,10], [70,20,5,5] and [90,5,3,2] all get the same answer,
+    #    while the true rates differ by 2x.
+    calculated_loss_rate = calculate_pg_loss_rate(
+        num_domains,
+        osds_per_domain,
+        pg_size,
+        num_pgs,
+        num_failures_for_data_loss,
+        num_osds,
+        args.domains_down
+    )
+
+    print(f"    Calculated PG Loss Rate (with {args.domains_down} pre-failed domains): {calculated_loss_rate * 100:.4g}%")
+
+    # 2. Counted over the real PG->OSD mapping. Assumption-free and therefore
+    #    correct on any CRUSH map, and deterministic, so it does not move
+    #    between runs. This is the headline estimate. Pre-failed domains change
+    #    the failure population per domain drawn, which this does not model, so
+    #    fall back to the closed form and the Monte Carlo for that case.
+    mapped_loss_rate = mapped_method = None
+    mapped_is_usable = False
+    if args.domains_down == 0:
+        map_start = time.time()
+        mapped_loss_rate, mapped_method = mapping_loss_rate(
+            pgs, num_osds, num_failures_for_data_loss)
+        dprint(f"    mapping_loss_rate took {time.time() - map_start:.2f}s")
+        label = "≤" if mapped_method == 'union bound' else ""
+        print(f"    Mapped PG Loss Rate ({mapped_method}, from the PG placement): "
+              f"{label}{mapped_loss_rate * 100:.4g}%")
+        mapped_is_usable = (mapped_method != 'union bound'
+                            or mapped_loss_rate <= UNION_BOUND_MAX_RATE)
+        if not mapped_is_usable:
+            print(f"    Note: the union bound is only tight for small rates, so "
+                  f"{mapped_loss_rate * 100:.3g}% is an upper bound rather than an estimate.")
+
+    # provisional until the Monte Carlo has run and the estimate is chosen
+    loss_rate = mapped_loss_rate if mapped_is_usable else calculated_loss_rate
+
+
+    # simulate the major incidents
+    vprint(f"Monte Carlo Sim: n={num_simulations} {num_failures_for_data_loss}x failures")
+
+    num_batches = 50
+    if args.skip_monte_carlo:
+        vprint("    Skipping Monte Carlo simulation as per user request.")
+        num_batches = 0
+    simulations_with_loss = 0
+    total_pg_losses = 0
+    vprint()
+    if not args.skip_monte_carlo:
+        vprint(f"    ╭{'─' * num_batches}╮")
+        vprint(f"    │", end="", flush=True)
+    else:
+        num_simulations = 1000000000
+    batch_size = num_simulations // num_batches if num_batches else 0
+    simulations_done = 0
+    sim_runtime = args.max_mc_runtime
+    start_time = time.time()
+    frames = ["⣾", "⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽"]
+    spinner = itertools.cycle(frames)
+    spin_time = start_time
+    animate = sys.stdout.isatty()
+    all_osds = set(osds)
+    candidates = list(all_osds)  # invariant while no domain is pre-failed
+
+    # Index PGs by OSD so a trial only has to look at the PGs touching the
+    # failed OSDs, instead of scanning every PG in the pool. Same predicate,
+    # and it is what makes enough trials affordable to be worth running: a
+    # linear scan over a real 32k-PG pool caps out at ~1k trials/s, which
+    # cannot tell a correct loss rate from one that is three times wrong.
+    pgs_by_osd = defaultdict(list)
+    for pg_idx, pg in enumerate(pgs):
+        for osd in set(pg):
+            pgs_by_osd[osd].append(pg_idx)
+
+    for batch in range(num_batches):
+        batch_good = True
+        for _ in range(batch_size):
+            if animate and spin_time + 0.1 < time.time():
+                vprint(next(spinner), end="\b", flush=True)
+                spin_time = time.time()
+            simulations_done += 1
+            failed_osds = set()
+
+            if args.domains_down > 0:
+                # pre-fail args.domains_down * osds_per_domain OSDs
+                failed_domains = random.sample(range(num_domains), args.domains_down)
+                for domain in failed_domains:
+                    failed_osds.update(domains[domain])
+                candidates = list(all_osds - failed_osds)
+
+            dprint(f"Pre-failed OSDs: {failed_osds}")
+            failed_osds.update(random.sample(candidates, num_osds_to_fail))
+            dprint(f"Failed OSDs: {failed_osds}")
+
+            # count failed shards per affected PG; a PG dies the moment it
+            # reaches the threshold
+            dead_pgs = 0
+            hits = defaultdict(int)
+            for osd in failed_osds:
+                for pg_idx in pgs_by_osd.get(osd, ()):
+                    hits[pg_idx] += 1
+                    if hits[pg_idx] == num_failures_for_data_loss:
+                        dead_pgs += 1
+                        dprint(f"PG {pgs[pg_idx]} lost due to failed OSDs {failed_osds}")
+
+            total_pg_losses += dead_pgs
+            if dead_pgs > 0:
+                simulations_with_loss += 1
+                batch_good = False
+        if batch_good:
+            vprint("⣿",end="",flush=True)
+        else:
+            vprint("⣀",end="",flush=True)
+        # Exit early if taking too long
+        elapsed = time.time() - start_time
+        if elapsed > sim_runtime:
+            vprint(" timeout, exiting early. ",end="",flush=True)
+            num_simulations = simulations_done
+            break
+
+    if not args.skip_monte_carlo:
+        vprint(f"│")
+        vprint(f"    ╰{'─' * num_batches}╯")
+        vprint()
+
+    # 3. The Monte Carlo. It samples the same failure process the other two
+    #    reason about, so it is an independent check on them rather than the
+    #    headline: it makes no assumptions, but a rare-event rate estimated
+    #    from a handful of observed losses swings by several times between
+    #    runs. Its job is to falsify the other estimates, and to supply the
+    #    blast radius, which neither of them computes.
+    mc_loss_rate = None
+    if not args.skip_monte_carlo and num_simulations > 0:
+        mc_loss_rate = simulations_with_loss / num_simulations
+        confidence = confidence_interval(simulations_with_loss, num_simulations)
+        plus_minus = max(0.0, confidence[1] - mc_loss_rate)
+        vprint(f"    Observed Incidents with ≥1 PG lost: {simulations_with_loss}/{num_simulations} ({100 * mc_loss_rate:.3f}%)")
+        print(f"    Monte Carlo Data Loss Rate: {mc_loss_rate * 100:.3g}% ± {plus_minus * 100:.3g}% "
+              f"({simulations_with_loss} losses in {num_simulations} trials)")
+
+        # Cross-check every estimate we have against the sample. A disagreement
+        # is worth seeing without --verbose: for the closed form it usually
+        # means the topology is not uniform enough for it, and for the mapped
+        # rate it means one of the two is wrong.
+        tolerance = 1e-9
+        for name, rate in (('Calculated', calculated_loss_rate), ('Mapped', mapped_loss_rate)):
+            if rate is None:
+                continue
+            if confidence[0] - tolerance <= rate <= confidence[1] + tolerance:
+                continue
+            factor = f", {rate / mc_loss_rate:.2g}x the sampled rate" if mc_loss_rate else ""
+            print(f"    Warning: {name} loss rate {rate * 100:.3g}% is outside the Monte Carlo "
+                  f"99.9% CI [{confidence[0] * 100:.3g}%, {confidence[1] * 100:.3g}%]{factor}")
+        if simulations_with_loss < MIN_LOSSES_FOR_MC:
+            vprint(f"    Note: only {simulations_with_loss} losses observed, so the sampled rate is "
+                   f"weak evidence; raise --simulations to tighten it.")
+    else:
+        confidence = (loss_rate, loss_rate)
+        plus_minus = 0.0
+        vprint("    Monte Carlo skipped; loss rate not cross-checked.")
+
+    # Pick the estimate to carry forward, preferring the ones that make the
+    # fewest assumptions and vary the least between runs.
+    if mapped_is_usable:
+        loss_rate, loss_rate_source = mapped_loss_rate, f"PG placement, {mapped_method}"
+        confidence, plus_minus = (mapped_loss_rate, mapped_loss_rate), 0.0
+    elif mc_loss_rate is not None and simulations_with_loss >= MIN_LOSSES_FOR_MC:
+        loss_rate, loss_rate_source = mc_loss_rate, "Monte Carlo"
+        # confidence and plus_minus are already the sampling interval
+    else:
+        loss_rate, loss_rate_source = calculated_loss_rate, "closed form"
+        confidence, plus_minus = (calculated_loss_rate, calculated_loss_rate), 0.0
+    vprint(f"    Using the {loss_rate_source} loss rate: {loss_rate * 100:.4g}%")
+
+    # The blast radius per data loss event only comes from the simulation.
+    # Without an observed loss, assume an event takes out a single PG.
+    if simulations_with_loss < 1:
+        total_pg_losses = simulations_with_loss = loss_rate * max(1, num_simulations)
+
+
+    # Expected PGs lost per simulated incident, i.e. averaged over all
+    # incidents including those that lose nothing.
+    pgs_lost_per_event = total_pg_losses / num_simulations
+    pct_data_loss = total_pg_losses / (num_simulations * num_pgs)
+    vprint(f"    Expected Data Loss Per Incident: {pgs_lost_per_event:.3g} PGs, {format_bytes(pgs_lost_per_event*bytes_per_pg)} ({pct_data_loss * 100:.3g}%)")
+
+    # Expected PGs lost per *data loss event*, i.e. conditional on losing at
+    # least one PG. This is the blast radius to combine with the rate of data
+    # loss events below -- using the per-incident average there would apply the
+    # loss rate twice. Falls back to one PG per event when the Monte Carlo
+    # simulation observed no losses.
+    pgs_lost_per_loss_event = total_pg_losses / simulations_with_loss if simulations_with_loss else 0.0
+    vprint(f"    Expected Data Loss Per Loss Event: {pgs_lost_per_loss_event:.3g} PGs, {format_bytes(pgs_lost_per_loss_event*bytes_per_pg)}")
+
+    # Try to compute a meaningful MTTDL and Nines Durability Number
+    vprint("")
+    vprint("---------------------------")
+    vprint("")
+
+    vprint(f"Estimating the probability of {num_osds_to_fail}x failures")
+    osd_failure_rate = args.osd_failure_rate
+    if pg_size > 1:
+        vprint(f"    OSD failure rate: {osd_failure_rate * 100:.3g}% a year")
+
+        # Per-OSD ceilings, so they already account for however many PGs the OSD
+        # is recovering in parallel.
+        read_amp = recovery_read_amplification(args.k)
+        recovery_rate = effective_recovery_rate(args.object_size, read_amp,
+                                                args.osd_read_bw*1024*1024,
+                                                args.osd_write_bw*1024*1024,
+                                                args.osd_read_iops,
+                                                args.osd_write_iops,
+                                                args.osd_recovery_sleep,
+                                                args.osd_recovery_max_active)
+        bound_by = ("bandwidth"
+                    if args.object_size / (args.osd_read_bw*1024*1024) >= 1.0 / args.osd_read_iops
+                    else "object rate")
+        vprint(f"    Device ceilings for {args.device_class}: read "
+               f"{args.osd_read_bw:.3g}MBps / {format_int(args.osd_read_iops)} ops, write "
+               f"{args.osd_write_bw:.3g}MBps / {format_int(args.osd_write_iops)} ops "
+               f"-> {bound_by} bound at {format_bytes(args.object_size)} objects")
+        vprint(f"    Recovery moves {1 + read_amp} objects of device work per object restored: "
+               f"{read_amp} read{'s' if read_amp > 1 else ''} feeding 1 write")
+
+        try:
+            vprint(f"    Estimated per-OSD recovery rate: {format_bytes(recovery_rate)}ps ({format_int(recovery_rate/args.object_size)} objects/s)")
+        except ZeroDivisionError:
+            vprint(f"    Estimated per-OSD recovery rate: {format_bytes(recovery_rate)}ps ({format_int(recovery_rate)} Bps)")
+
+        # one OSD recovers one shard, not the whole PG
+        try:
+            recovery_time_per_pg = shard_bytes / recovery_rate
+        except ZeroDivisionError:
+            recovery_time_per_pg = 0
+
+        vprint(f"    Expected PG recovery time ({format_bytes(shard_bytes)}/{format_bytes(recovery_rate)}ps): {format_time(recovery_time_per_pg)}")
+
+        # Estimate max OSD load during recovery when things are critical
+        # e.g. for 3x repl: how long to recover 2 OSDs failed.
+        # e.g. for 6+3 EC: how long to recover 3 OSDs failed.
+        # TODO: check this part
+        if args.k is not None:
+            critical_osds = args.m
+        else:
+            critical_osds = args.size - 1
+
+        # Restoring redundancy needs pg_size distinct failure domains that can
+        # still hold a shard. A pre-failed domain is gone entirely; a critical
+        # OSD failure only removes one if that domain had a single OSD. With
+        # too few left CRUSH has nowhere to put the missing shards, so the PGs
+        # stay undersized and the pool is exposed until the hardware is
+        # replaced, not merely until a backfill finishes.
+        domains_left = num_domains - args.domains_down
+        if osds_per_domain <= 1:
+            domains_left -= critical_osds
+        if domains_left < pg_size:
+            max_osd_load = None
+            recovery_time = args.replacement_time * 86400
+            vprint(f"    Only {max(0, domains_left)} of {num_domains} failure domains can still "
+                   f"hold a shard, but {pg_size} are needed to restore redundancy")
+            vprint(f"    Expected critical period (hardware replacement, --replacement-time) = {format_time(recovery_time)}")
+        else:
+            num_osds_left = max(1, num_osds - args.domains_down*osds_per_domain - num_osds_to_fail + 1)
+            # How many PGs need to be recovered, at most every PG in the pool
+            pgs_to_recover = min(critical_osds * pgs_per_osd, num_pgs)
+            max_osd_load = expected_max_osd_load(num_osds_left, pgs_to_recover)
+
+            vprint(f"    Expected most loaded OSD when recovering {format_int(pgs_to_recover)} PGs to {num_osds_left} OSDs = {max_osd_load} PGs")
+
+            backfill_time = max_osd_load * recovery_time_per_pg
+
+            # Recovery cannot start until the affected PGs have peered. Only
+            # the PGs whose up/acting set changed re-peer -- not every PG on the
+            # OSD -- so the peering load is the affected PGs a surviving OSD
+            # takes part in: the failed OSDs' PGs have pg_size-1 surviving
+            # shards each, spread over the survivors with the same
+            # balls-in-bins variance as the backfill.
+            peering_pgs = expected_max_osd_load(num_osds_left,
+                                                pgs_to_recover * max(1, pg_size - 1))
+            peering_time = args.peering_time_per_pg * peering_pgs
+
+            recovery_time = max(backfill_time + peering_time, 60) # minimum 1 minute
+            vprint(f"    Expected critical period = {format_time(recovery_time)}")
+            vprint(f"      backfill: {max_osd_load} PGs * {format_time(recovery_time_per_pg)} = {format_time(backfill_time)}")
+            vprint(f"      peering:  {peering_pgs} affected PGs * {args.peering_time_per_pg}s = {format_time(peering_time)}")
+            if peering_time > backfill_time:
+                print(f"    Note: peering dominates the critical period ({format_time(peering_time)} of "
+                      f"{format_time(recovery_time)}) with {peering_pgs} affected PGs per OSD.")
+
+        critical_windows_per_year = SECONDS_PER_YEAR / recovery_time
+        vprint(f"    Expected critical periods annually (1 yr / {format_time(recovery_time)}) = {critical_windows_per_year:.1f}")
+
+        failure_prob_per_disk = recovery_time / SECONDS_PER_YEAR * osd_failure_rate
+        vprint(f"    Expected per-OSD critical period failure rate = {failure_prob_per_disk:.2g} (1 in {format_int(inv(failure_prob_per_disk))})")
+
+        vprint(f"    Correlation factor = {args.correlation_factor}")
+
+        # The correlation factor scales a binomial probability, so it can push
+        # the result above 1. Anything beyond certainty is meaningless, and
+        # leaving it unclamped inflates the event rate below.
+        raw_failure_prob = args.correlation_factor * prob_k_or_more_failures(num_osds, failure_prob_per_disk, num_osds_to_fail)
+        failure_prob = min(1.0, raw_failure_prob)
+        if raw_failure_prob > 1.0:
+            print(f"    Warning: correlated probability of {num_osds_to_fail}+ concurrent failures "
+                  f"is {raw_failure_prob:.3g}, clamped to 1. Data loss is effectively certain in "
+                  f"every critical period, so the estimates below are a floor, not a forecast.")
+        vprint(f"    Probability of {num_osds_to_fail}+ failures in any critical period ({format_time(recovery_time)}) = 1 in {format_int(inv(failure_prob))}")
+
+        # That is the probability of being in the k-down state at any instant.
+        # Turning it into a rate needs the mean time the state lasts, which is
+        # recovery_time/k rather than recovery_time: the state ends as soon as
+        # *any one* of the k failed OSDs finishes recovering. Dividing by the
+        # full window instead treats consecutive windows as independent trials
+        # and misses every failure run that straddles a boundary, understating
+        # the rate by exactly a factor of k against the repairable-system
+        # Markov chain.
+        concurrent_failures = max(1, num_osds_to_fail)
+        expected_annual_events = critical_windows_per_year * concurrent_failures * failure_prob
+        vprint(f"    Expected annual {num_osds_to_fail}+ failure events: {expected_annual_events:.3g} "
+               f"({concurrent_failures} recovering OSDs / {format_time(recovery_time)}) "
+               f"(1 every {format_time(inv(expected_annual_events) * SECONDS_PER_YEAR)})")
+        mtt_multi_failure = mttdl(num_osds, num_failures_for_data_loss,
+                                  osd_failure_rate, args.correlation_factor,
+                                  recovery_time)
+        vprint(f"    Alternate calculation (mean time to {num_osds_to_fail}+ concurrent failures) = {format_time(mtt_multi_failure)}")
+
+        # --- availability -------------------------------------------------
+        # The same failure process, counted at the lower threshold: how often
+        # do enough OSDs fail at once to drop some PG below min_size. Each such
+        # event lasts until one shard is rebuilt, and Ceph prioritises PGs that
+        # are below min_size, so the outage is one shard's recovery rather than
+        # the whole window.
+        unavail_prob = min(1.0, args.correlation_factor * prob_k_or_more_failures(
+            num_osds, failure_prob_per_disk, additional_for_unavailable))
+        unavail_events_per_year = (critical_windows_per_year
+                                   * additional_for_unavailable * unavail_prob)
+        unavail_rate, unavail_method = mapping_loss_rate(
+            pgs, num_osds, num_failures_for_unavailable)
+        outage_events_per_year = unavail_events_per_year * unavail_rate
+        osd_downtime = outage_events_per_year * recovery_time_per_pg
+
+        # A whole failure domain going down for reasons that are not the disks -
+        # CPU, memory, a PSU, a kernel panic - takes its OSDs away without
+        # destroying anything. The data returns with the hardware, so this costs
+        # availability and no durability.
+        domain_downtime = outage_downtime_fraction(
+            num_domains - args.domains_down, 1, args.host_outage_rate, args.host_outage_hours,
+            num_domains, pg_size, additional_for_unavailable, num_pgs
+        ) * SECONDS_PER_YEAR
+
+        if already_unavailable:
+            # min_size cannot be met with this many domains down, so the pool is
+            # not serving at all.
+            osd_downtime = domain_downtime = 0.0
+            downtime_per_year = SECONDS_PER_YEAR
+            print(f"    Warning: {args.domains_down} domains down leaves fewer than min_size "
+                  f"{min_size} shards for some PGs, so the pool is already unavailable.")
+        else:
+            downtime_per_year = osd_downtime + domain_downtime
+        availability = max(0.0, 1.0 - downtime_per_year / SECONDS_PER_YEAR)
+
+        vprint(f"    Availability: min_size {min_size} of {pg_size}, so "
+               f"{num_failures_for_unavailable} concurrent failures take a PG below it"
+               + (f", {additional_for_unavailable} more given {args.domains_down} already down"
+                  if args.domains_down else ""))
+        vprint(f"      {additional_for_unavailable}+ failure events annually: {unavail_events_per_year:.3g}, "
+               f"of which {unavail_rate * 100:.3g}% hit a PG ({unavail_method})")
+        vprint(f"      From OSD failures: {outage_events_per_year:.3g}/yr x "
+               f"{format_time(recovery_time_per_pg)} = {format_time(osd_downtime)}/yr")
+        vprint(f"      From whole-{failure_domain} outages "
+               f"({args.host_outage_rate:.3g}/yr each, {args.host_outage_hours:.3g}h): "
+               f"{format_time(domain_downtime)}/yr")
+    else: # size == 1 (no redundancy)
+        vprint("    No redundancy configured, data loss is certain on any failure.")
+        expected_annual_events = num_osds * osd_failure_rate
+        mtt_multi_failure = inv(expected_annual_events) * SECONDS_PER_YEAR
+        vprint(f"    Expected annual failure events: {expected_annual_events:.3g} (1 every {format_time(mtt_multi_failure)})")
+        recovery_rate = None
+        recovery_time_per_pg = None
+        max_osd_load = None
+        recovery_time = None
+        critical_windows_per_year = None
+        failure_prob_per_disk = None
+        failure_prob = None
+        unavail_events_per_year = None
+        unavail_rate = None
+        outage_events_per_year = None
+        downtime_per_year = None
+        osd_downtime = None
+        domain_downtime = None
+        availability = None
+
+
+
+    vprint("---------------------------")
+    vprint("")
+
+    min_loss_rate = confidence[0]
+    max_loss_rate = confidence[1]
+
+    inv_loss_rate = inv(loss_rate)
+    inv_min_loss_rate = inv(min_loss_rate)
+    inv_max_loss_rate = inv(max_loss_rate)
+
+    vprint(f"MTTDL/Durability Estimates:")
+    vprint(f"    Mean time to {num_osds_to_fail}x failure: {format_time(mtt_multi_failure)}")
+    vprint(f"    Probability that {num_osds_to_fail}x failures causes data loss: {loss_rate*100:.3g}% (1 in {format_int(inv_loss_rate)})")
+    vprint(f"       99.9% CI: {min_loss_rate*100:.3g}%-{max_loss_rate*100:.3g}% (1 in {format_int(inv_max_loss_rate)} to 1 in {format_int(inv_min_loss_rate)})")
+
+    vprint("")
+    vprint(f"Combining the above to estimate annual data loss:")
+
+    # Compute MTTDL
+    expected_losses_per_year = expected_annual_events * loss_rate
+    min_expected_losses_per_year = expected_annual_events * min_loss_rate
+    max_expected_losses_per_year = expected_annual_events * max_loss_rate
+
+    mttdl_sec = inv(expected_losses_per_year) * SECONDS_PER_YEAR
+    min_mttdl_sec = inv(max_expected_losses_per_year) * SECONDS_PER_YEAR
+    max_mttdl_sec = inv(min_expected_losses_per_year) * SECONDS_PER_YEAR
+    print(f"    MTTDL: {format_time(mttdl_sec)}")
+    vprint(f"    (99.9% CI: {format_time(min_mttdl_sec)} - {format_time(max_mttdl_sec)})")
+
+    # Compute Nines Durability Number. Data loss events per year times the
+    # number of PGs each one takes out.
+    expected_pgs_lost_per_year = expected_losses_per_year * pgs_lost_per_loss_event
+    min_expected_pgs_lost_per_year = min_expected_losses_per_year * pgs_lost_per_loss_event
+    max_expected_pgs_lost_per_year = max_expected_losses_per_year * pgs_lost_per_loss_event
+    expected_durability = max(0, 1 - (expected_pgs_lost_per_year / num_pgs))
+    min_expected_durability = max(0, 1 - (max_expected_pgs_lost_per_year / num_pgs))
+    max_expected_durability = max(0, 1 - (min_expected_pgs_lost_per_year / num_pgs))
+    expected_bytes_lost_per_year = expected_pgs_lost_per_year * bytes_per_pg
+    min_expected_bytes_lost_per_year = min_expected_pgs_lost_per_year * bytes_per_pg
+    max_expected_bytes_lost_per_year = max_expected_pgs_lost_per_year * bytes_per_pg
+
+    print(f"    Durability: {count_nines(expected_durability)} "
+          f"({format_bytes(expected_bytes_lost_per_year)} of data lost per year)")
+    if availability is not None:
+        print(f"    Availability: {count_nines(availability)} "
+              f"({format_time(downtime_per_year)} of downtime per year, min_size {min_size})")
+    vprint(f"    (99.9% CI: {count_nines(min_expected_durability)} to {count_nines(max_expected_durability)})")
+
+
+    vprint(f"Expected annual data loss: {format_bytes(expected_bytes_lost_per_year)}")
+    vprint(f"    (99.9% CI: {format_bytes(min_expected_bytes_lost_per_year)} - {format_bytes(max_expected_bytes_lost_per_year)})")
+
+    # --- client performance (independent of the failure model) -----------
+    perf_args = (args.size, args.k, args.m, num_osds,
+                 args.osd_read_bw*1024*1024, args.osd_write_bw*1024*1024,
+                 args.osd_read_iops, args.osd_write_iops,
+                 args.osd_read_latency, args.osd_write_latency,
+                 args.client_io_size, args.ec_stripe_unit)
+    perf = pool_performance(*perf_args, fast_ec=False)
+    # Fast EC only differs while the IO stays inside one stripe unit; past that
+    # it reaches every data shard and there is nothing left to skip.
+    shards_touched = ec_shards_touched(args.k, args.client_io_size, args.ec_stripe_unit)
+    fast_helps = args.k is not None and shards_touched < args.k
+    perf_fast = pool_performance(*perf_args, fast_ec=True) if fast_helps else None
+    label = "classic EC" if args.k is not None else "replicated"
+    print(f"    Performance ({format_bytes(args.client_io_size)} IO, {label}): "
+          f"read {format_int(perf['read_iops'])} IOPS at {perf['read_latency']*1000:.1f}ms, "
+          f"write {format_int(perf['write_iops'])} IOPS at {perf['write_latency']*1000:.1f}ms")
+    vprint(f"      {perf['read_ops']} OSD op(s) per read, {perf['write_ops']} per write, "
+           f"out of {format_int(num_osds * args.osd_read_iops)} read / "
+           f"{format_int(num_osds * args.osd_write_iops)} write IOPS across {num_osds} OSDs")
+    if perf_fast:
+        print(f"    Performance ({format_bytes(args.client_io_size)} IO, fast EC): "
+              f"read {format_int(perf_fast['read_iops'])} IOPS at {perf_fast['read_latency']*1000:.1f}ms, "
+              f"write {format_int(perf_fast['write_iops'])} IOPS at {perf_fast['write_latency']*1000:.1f}ms")
+        vprint(f"      {perf_fast['read_ops']:.3g} OSD op(s) per read, "
+               f"{perf_fast['write_ops']:.3g} per write, reaching "
+               f"{shards_touched} of {args.k} data shards")
+    elif args.k is not None:
+        print(f"    Fast EC makes no difference at {format_bytes(args.client_io_size)}: the IO "
+              f"spans all {args.k} data shards, so there is nothing to skip")
+
+    return {
+        'mttdl': format_time(mttdl_sec),
+        # Client performance, classic EC and fast EC where they differ
+        'perf': perf,
+        'perf_fast': perf_fast,
+        'nines': count_nines(expected_durability),
+        'mttdl_sec': mttdl_sec if mttdl_sec != float('inf') else None,
+        'loss_rate': loss_rate,
+        'expected_bytes_lost_per_year': expected_bytes_lost_per_year,
+        'profile': profile,
+        'num_osds': num_osds,
+        'num_pgs': num_pgs,
+        'num_domains': num_domains,
+        # Pool layout
+        'pg_size': pg_size,
+        'k_fail': num_failures_for_data_loss,
+        'failures_needed': num_osds_to_fail,
+        'raw_to_stored': raw_to_stored_factor,
+        'bytes_per_pg': bytes_per_pg,      # stored bytes, i.e. lost with the PG
+        'shard_bytes': shard_bytes,        # bytes one OSD has to recover
+        'total_bytes': total_bytes,
+        'objects_per_pg': objects_per_pg,
+        # Recovery model (None for pg_size == 1)
+        'recovery_rate_bps': recovery_rate,
+        'recovery_time_per_pg_sec': recovery_time_per_pg,
+        'max_osd_load_pgs': max_osd_load,
+        'critical_window_sec': recovery_time,
+        'critical_windows_per_year': critical_windows_per_year,
+        'failure_prob_per_disk': failure_prob_per_disk,
+        'failure_prob': failure_prob,
+        # Annual loss
+        'expected_annual_events': expected_annual_events,
+        'expected_pgs_lost_per_year': expected_pgs_lost_per_year,
+        'durability': expected_durability,
+        # Availability: any PG below min_size takes the pool out of service
+        'min_size': min_size,
+        'failures_to_unavailable': num_failures_for_unavailable,
+        'additional_failures_to_unavailable': additional_for_unavailable,
+        'unavail_events_per_year': unavail_events_per_year,
+        'outage_events_per_year': outage_events_per_year,
+        'downtime_sec_per_year': downtime_per_year,
+        'downtime_osd_sec_per_year': osd_downtime,
+        'downtime_domain_sec_per_year': domain_downtime,
+        'availability': availability,
+        'availability_nines': count_nines(availability) if availability is not None else None,
+        # OSD distribution stats (optional, only for real pools)
+        'osd_min_pgs': min_pgs,
+        'osd_max_pgs': max_pgs,
+        'osd_mean_pgs': mean_pgs,
+        'osd_std_dev': std_dev,
+        # Blast radius, per simulated incident and per actual data loss event
+        'pgs_lost_per_event': pgs_lost_per_event,
+        'pgs_lost_per_loss_event': pgs_lost_per_loss_event,
+        'pct_data_loss': pct_data_loss,
+        # Confidence intervals (99.9% CI)
+        'monte_carlo_enabled': not args.skip_monte_carlo,
+        'min_mttdl_sec': min_mttdl_sec if min_mttdl_sec != float('inf') else None,
+        'max_mttdl_sec': max_mttdl_sec if max_mttdl_sec != float('inf') else None,
+        'min_durability': min_expected_durability,
+        'max_durability': max_expected_durability,
+        'min_expected_bytes_lost_per_year': min_expected_bytes_lost_per_year,
+        'max_expected_bytes_lost_per_year': max_expected_bytes_lost_per_year,
+    }
+
+
+# ---------------------------- Analyze Subcommand ----------------------------
+
+def valid_osds(osd_list):
+    """Drop CRUSH_ITEM_NONE placeholders left by missing shards."""
+    return [osd for osd in osd_list if 0 <= osd < CRUSH_ITEM_NONE]
+
+
+def fetch_ceph_json(args, ceph_args, local_filename):
+    """Fetch JSON from the cluster, or from --from-json DIR when given.
+
+    Returns the parsed JSON, or None after reporting why it could not be read.
+    A failure to reach the cluster is never silently substituted with a local
+    file: analyzing the wrong cluster's data should not be possible by accident.
+    """
+    if args.from_json:
+        path = os.path.join(args.from_json, local_filename)
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"Error: could not read {path}: {e}")
+            return None
+        vprint(f"Reading {path} ...")
+        return data
+
+    ceph_cmd = ['ceph', f'--cluster={args.cluster}'] + ceph_args
+    try:
+        return json.loads(subprocess.check_output(ceph_cmd))
+    except Exception as e:
+        print(f"Error: '{' '.join(ceph_cmd)}' failed: {e}")
+        print(f"       (use --from-json DIR to read a saved {local_filename} instead)")
+        return None
+
+
+def ceph_config_get(args, option, cast):
+    """Return an osd config option from the cluster, or None if unavailable."""
+    if args.from_json:
+        return None
+    ceph_cmd = ['ceph', f'--cluster={args.cluster}', 'config', 'get', 'osd', option, '--format=json']
+    try:
+        return cast(json.loads(subprocess.check_output(ceph_cmd, stderr=subprocess.DEVNULL)))
+    except Exception:
+        return None
+
+
+def fetch_ceph_config(args, option, cast, current):
+    """Return an osd config option from the cluster, or `current` as fallback.
+
+    osd_recovery_sleep and osd_recovery_max_active both default to 0, which is
+    a sentinel meaning "use the _hdd/_ssd/_hybrid variant for this device
+    class", not a literal zero. Reading the generic option alone therefore
+    reports 0 on a default cluster, and taking that at face value makes
+    recovery look instantaneous: a zero max_active gave a 0 B/s recovery rate,
+    which collapsed the critical period to its floor and reported 14 nines.
+
+    We cannot tell a pool's device class from the PG dump alone, so resolve the
+    sentinel against the variant for --device-class.
+    """
+    value = ceph_config_get(args, option, cast)
+    if value:
+        vprint(f"    Using cluster {option}: {value}")
+        return value
+
+    if value == 0:
+        variant = f"{option}_{'ssd' if getattr(args, 'device_class', 'hdd') == 'nvme' else 'hdd'}"
+        by_class = ceph_config_get(args, variant, cast)
+        if by_class:
+            vprint(f"    Cluster {option} is 0, which defers to the device class; "
+                   f"using {variant}: {by_class}")
+            return by_class
+
+    vprint(f"    Using default {option}: {current}")
+    return current
+
+
+def analyze_pool(args, pool, pg_dump):
+    vprint(f"Analyzing pool '{pool['pool_name']}' (id {pool['pool_id']}, size {pool['size']}) ")
+    if 'erasure_code_profile' in pool and pool['erasure_code_profile']:
+        vprint(f"    Type: erasure-coded ({pool['erasure_code_profile']})")
+        ec_profile_data = fetch_ceph_json(
+            args,
+            ['osd', 'erasure-code-profile', 'get', pool['erasure_code_profile'], '--format=json'],
+            'ceph-osd-erasure-code-profile-get.json')
+        try:
+            args.k = int(ec_profile_data['k'])
+            args.m = int(ec_profile_data['m'])
+            args.size = None
+        except (TypeError, KeyError, ValueError):
+            print(f"    Warning: could not read k/m from erasure code profile "
+                  f"'{pool['erasure_code_profile']}', skipping pool. "
+                  "Use the simulate subcommand with --k/--m instead.")
+            return
+    else:
+        vprint(f"    Type: replicated")
+        args.size = pool['size']
+        args.k = None
+        args.m = None
+
+    args.pg_num = pool['pg_num']
+    pg_size = args.k + args.m if args.k is not None else args.size
+    if pool.get('min_size'):
+        args.min_size = pool['min_size']
+        vprint(f"    Pool min_size: {args.min_size}")
+
+    pg_stats = pg_dump['pg_map']['pg_stats']
+    pgs = [valid_osds(pg['acting']) for pg in pg_stats
+           if pg['pgid'].startswith(f"{pool['pool_id']}.")]
+
+    if not pgs:
+        print(f"    Warning: no PGs for pool '{pool['pool_name']}' in the PG dump, skipping.")
+        return
+    if len(pgs) != args.pg_num:
+        print(f"    Warning: found {len(pgs)} PGs in the dump but pg_num is {args.pg_num} "
+              "(pg_num may have changed); continuing with the PGs from the dump.")
+        args.pg_num = len(pgs)
+
+    incomplete = sum(1 for pg in pgs if len(pg) != pg_size)
+    if incomplete:
+        print(f"    Warning: {incomplete} of {len(pgs)} PGs have fewer than {pg_size} "
+              "OSDs (degraded or incomplete); results assume the reported placement.")
+
+    args.pgs = pgs
+    args.pool_name = pool['pool_name']
+
+    # Infer failure domains from every PG in the cluster, not just this pool's:
+    # a single pool rarely covers enough OSD pairs to pin down the topology.
+    all_pgs = []
+    for pg in pg_stats:
+        all_pgs.append(valid_osds(pg['acting']))
+        if pg['up'] != pg['acting']:
+            all_pgs.append(valid_osds(pg['up']))
+
+    osds = sorted({osd for pg in all_pgs for osd in pg})
+    args.osds = osds
+    args.num_osds = len(osds)
+
+    reported_osds = pg_dump['pg_map'].get('osd_stats_sum', {}).get('num_osds')
+    if reported_osds is not None and reported_osds != len(osds):
+        vprint(f"    Note: {len(osds)} OSDs hold PGs but the cluster reports "
+               f"{reported_osds}; using {len(osds)}.")
+
+    domains = infer_failure_domains(all_pgs)
+    args.num_domains = len(domains)
+    args.failure_domain = "domain"
+
+    domain_sizes = [len(d) for d in domains]
+    pool_osds = {osd for pg in pgs for osd in pg}
+
+    vprint(f"    Number of PGs: {args.pg_num}")
+    vprint(f"    Number of OSDs: {len(osds)}")
+    vprint(f"    Number of {args.failure_domain}s: {args.num_domains} "
+           f"({min(domain_sizes)}-{max(domain_sizes)} OSDs each)")
+
+    if max(domain_sizes) > 2 * min(domain_sizes):
+        print(f"    Warning: inferred failure domains are uneven "
+              f"({min(domain_sizes)}-{max(domain_sizes)} OSDs); the risk model assumes "
+              "a uniform OSD count per domain, so treat the result as approximate.")
+    if len(pool_osds) < len(osds):
+        vprint(f"    Note: this pool's PGs only cover {len(pool_osds)} of {len(osds)} OSDs; "
+               "the failure model still uses the whole cluster.")
+
+    # Derive tb_per_osd from pool size and pg stat_sum num_bytes
+    bytes_stored = sum(pg['stat_sum']['num_bytes'] for pg in pg_stats if pg['pgid'].startswith(f"{pool['pool_id']}."))
+    objects_stored = sum(pg['stat_sum']['num_objects'] for pg in pg_stats if pg['pgid'].startswith(f"{pool['pool_id']}."))
+    raw_to_stored_factor = 0
+    if args.k is not None and args.m is not None:
+        raw_to_stored_factor = (args.k) / (args.k + args.m)
+    else:
+        raw_to_stored_factor = 1 / (args.size)
+    bytes_raw = bytes_stored / raw_to_stored_factor
+    objects_raw = objects_stored / raw_to_stored_factor
+    args.tb_per_osd = bytes_raw / len(osds) / (1024**4)
+    args.object_size = bytes_raw / objects_raw if objects_raw > 0 else 4*1024*1024  # default to 4MB
+
+    vprint(f"    Total stored data: {format_bytes(bytes_stored)} ({format_int(objects_stored)} objects)")
+    vprint(f"    Total raw data: {format_bytes(bytes_raw)} ({format_int(objects_raw)} objects)")
+    vprint(f"    Data per OSD: {format_bytes(args.tb_per_osd * 1024**4)} ({format_int(objects_raw / len(osds))} objects)")
+    vprint(f"    Average object size: {format_bytes(args.object_size)}")
+
+    # Try to fetch recovery tunables from cluster
+    args.osd_recovery_sleep = fetch_ceph_config(
+        args, 'osd_recovery_sleep', float, args.osd_recovery_sleep)
+    args.osd_recovery_max_active = fetch_ceph_config(
+        args, 'osd_recovery_max_active', int, args.osd_recovery_max_active)
+
+    vprint("")
+    simulate(args, domains=domains)
+
+
+def analyze(args):
+    # Set random seed for reproducibility
+    random.seed(args.seed)
+
+    cluster = args.cluster
+    pool_name = args.pool
+
+    pool_data = fetch_ceph_json(args, ['osd', 'pool', 'ls', 'detail', '--format=json'],
+                                'ceph-osd-pool-ls-detail.json')
+    if pool_data is None:
+        return 1
+
+    pg_dump_data = fetch_ceph_json(args, ['pg', 'dump', '--format=json'],
+                                   'ceph-pg-dump.json')
+    if pg_dump_data is None:
+        return 1
+
+    vprint("")
+    vprint("========================================")
+    vprint("")
+
+    found = False
+    for p in pool_data:
+        if p['pool_name'] == pool_name or not pool_name:
+            analyze_pool(args, p, pg_dump_data)
+            found = True
+            vprint("")
+            vprint("========================================")
+            vprint("")
+
+    if not found:
+        print(f"Pool '{pool_name}' not found in cluster '{cluster}'.")
+        return 1
+
+    return 0
+
+def test_prob_k_or_more_failures():
+    # (n, p, k, expected_P_X_ge_k)
+    test_cases = [
+        # Small n, moderate p (exact binomial)
+        (10,    0.1,     2, 0.263901),
+        (20,    0.05,    3, 0.0754837),
+        (50,    0.02,    2, 0.264229),
+
+        # Ceph-like: moderate n, very small p (exact binomial)
+        (1000,  1e-6,    2, 4.99168e-07),
+        (1000,  1e-5,    2, 4.96189e-05),
+        (5000,  2e-7,    2, 4.99567e-07),
+        (10000, 1e-8,    2, 4.99917e-09),
+        (10000, 1e-7,    3, 1.66492e-10),
+    ]
+
+    for n, p, k, expected in test_cases:
+        got = prob_k_or_more_failures(n, p, k)
+        if not math.isclose(got, expected, rel_tol=0.00001):
+            raise AssertionError(
+                f"Failed for n={n}, p={p}, k={k}: "
+                f"got {got:.18g}, expected {expected:.18g}"
+            )
+
+    print("\nAll prob_k_or_more_failures tests passed.")
+
+def test_expected_max_osd_load():
+    # A single OSD can never hold more PGs than there are to place, and the
+    # estimate must not blow up as the PG count approaches the OSD count.
+    for n_pgs in [1, 10, 100, 500, 900, 990, 999, 1000, 1001, 2000, 100000]:
+        load = expected_max_osd_load(1000, n_pgs)
+        if load > n_pgs:
+            raise AssertionError(
+                f"max load {load} exceeds {n_pgs} PGs available on 1000 OSDs")
+        if n_pgs <= 1000 and load > 10:
+            raise AssertionError(
+                f"implausible max load {load} for {n_pgs} PGs on 1000 OSDs")
+
+    # monotonic in the number of PGs
+    loads = [expected_max_osd_load(1000, m) for m in range(1, 3000, 7)]
+    if loads != sorted(loads):
+        raise AssertionError("max load is not monotonic in the PG count")
+
+    if expected_max_osd_load(0, 100) != float('inf'):
+        raise AssertionError("no OSDs left should mean unbounded recovery")
+
+    print("All expected_max_osd_load tests passed.")
+
+def test_infer_failure_domains():
+    # 3 domains of 4 OSDs, PGs of size 3 taking one OSD from three domains
+    truth = [[0, 1, 2, 3], [10, 11, 12, 13], [20, 21, 22, 23]]
+    pgs = []
+    for a in truth[0]:
+        for b in truth[1]:
+            for c in truth[2]:
+                pgs.append([a, b, c])
+
+    domains = infer_failure_domains(pgs)
+    if sorted(domains) != sorted(truth):
+        raise AssertionError(f"inferred {domains}, expected {truth}")
+
+    # whatever the input, no PG may end up with two shards in one domain
+    random.seed(7)
+    pgs = [random.sample(range(30), 4) for _ in range(200)]
+    domains = infer_failure_domains(pgs)
+    domain_of = {osd: idx for idx, domain in enumerate(domains) for osd in domain}
+    for pg in pgs:
+        if len({domain_of[osd] for osd in pg}) != len(set(pg)):
+            raise AssertionError(f"PG {pg} shares a failure domain: {domains}")
+    if sum(len(d) for d in domains) != 30:
+        raise AssertionError(f"lost OSDs while inferring domains: {domains}")
+
+    print("All infer_failure_domains tests passed.")
+
+def test_confidence_interval():
+    # the interval must stay usable at the ends, where a Wald interval collapses
+    # to zero width -- that is where rare-event Monte Carlo runs land
+    for successes in (0, 1000):
+        lo, hi = confidence_interval(successes, 1000)
+        if not 0.0 <= lo < hi <= 1.0:
+            raise AssertionError(
+                f"degenerate interval ({lo}, {hi}) for {successes}/1000")
+
+    lo, hi = confidence_interval(500, 1000)
+    if not lo < 0.5 < hi:
+        raise AssertionError(f"interval ({lo}, {hi}) excludes the observed 0.5")
+
+    if confidence_interval(0, 0) != (0, 0):
+        raise AssertionError("no trials should give an empty interval")
+
+    print("All confidence_interval tests passed.")
+
+def test_comb():
+    for n in range(8):
+        for k in range(-2, 10):
+            expected = math.comb(n, k) if 0 <= k <= n else 0
+            if comb(n, k) != expected:
+                raise AssertionError(f"comb({n}, {k}) = {comb(n, k)}, expected {expected}")
+    print("All comb tests passed.")
+
+def test_candidate_profiles():
+    # a shard needs its own failure domain, and one domain is kept spare so a
+    # lost shard has somewhere to go
+    for num_domains in range(1, 26):
+        for min_spare in (0, 1, 2):
+            for prof in candidate_profiles(num_domains, max_width=20, min_spare=min_spare):
+                if prof['width'] > num_domains - min_spare:
+                    raise AssertionError(
+                        f"{prof['label']} is width {prof['width']} on {num_domains} domains "
+                        f"keeping {min_spare} spare")
+                if prof['width'] > 20:
+                    raise AssertionError(f"{prof['label']} exceeds max_width")
+                expected = prof['k'] / prof['width'] if prof['k'] else 1.0 / prof['size']
+                if abs(prof['usable'] - expected) > 1e-12:
+                    raise AssertionError(f"{prof['label']} usable fraction {prof['usable']}")
+                tolerates = prof['m'] if prof['m'] else prof['size'] - 1
+                if prof['tolerates'] != tolerates:
+                    raise AssertionError(f"{prof['label']} tolerates {prof['tolerates']}")
+
+    # on 10 hosts the widest offered is 9, so 8+2 is out but 6+3 is in
+    labels = [p['label'] for p in candidate_profiles(10, 20)]
+    if '8+2 erasure' in labels:
+        raise AssertionError("8+2 uses all 10 domains and leaves no spare")
+    if '6+3 erasure' not in labels:
+        raise AssertionError(f"6+3 fits in 10 domains with one spare, got {labels}")
+
+    # too few domains for anything, unless the spare requirement is waived
+    if candidate_profiles(2, 20):
+        raise AssertionError("2 domains cannot host a redundant profile and keep a spare")
+    if [p['label'] for p in candidate_profiles(2, 20, min_spare=0)] != ['2x replicated']:
+        raise AssertionError("2 domains with no spare should allow 2x replication")
+    if [p['label'] for p in candidate_profiles(3, 20)] != ['2x replicated']:
+        raise AssertionError("3 domains with one spare should allow only 2x replication")
+
+    # max_width has to bite independently of the domain count
+    if any(p['width'] > 6 for p in candidate_profiles(50, max_width=6)):
+        raise AssertionError("max_width not honoured")
+
+    print("All candidate_profiles tests passed.")
+
+def test_recovery_read_amplification():
+    if recovery_read_amplification(None) != 1:
+        raise AssertionError("replication copies one replica per object written")
+    for k in (2, 4, 8, 17):
+        if recovery_read_amplification(k) != k:
+            raise AssertionError(f"a k={k} stripe must be read whole to rebuild one shard")
+
+    # more device work per object restored means a lower restoration rate, and
+    # erasure coding must lose to replication on this axis
+    rates = []
+    for amp in (1, 2, 4, 8):
+        rates.append(effective_recovery_rate(4 * 1024**2, amp, 250 * 1024**2,
+                                             250 * 1024**2, 450.0, 450.0, 0.0, 3))
+    if rates != sorted(rates, reverse=True):
+        raise AssertionError(f"restoration rate should fall as reads grow, got {rates}")
+    # with no sleep the work factor is exactly proportional
+    if abs(rates[0] / rates[1] - 3 / 2) > 1e-6:
+        raise AssertionError("1 read vs 2 reads should be a 3:2 ratio of work")
+
+    # Reads and writes are costed against their own ceilings, so where the
+    # object rate binds - small objects - slower reads slow an erasure coded
+    # pool further. At 4MB both sides are bandwidth bound and it makes no
+    # difference, which is worth pinning so the two regimes stay distinct.
+    small, large = 4096, 4 * 1024**2
+    for size, expect_slower in ((small, True), (large, False)):
+        fast_reads = effective_recovery_rate(size, 8, 250 * 1024**2,
+                                             250 * 1024**2, 450.0, 450.0, 0.0, 3)
+        slow_reads = effective_recovery_rate(size, 8, 250 * 1024**2,
+                                             250 * 1024**2, 120.0, 450.0, 0.0, 3)
+        if expect_slower and slow_reads >= fast_reads:
+            raise AssertionError(
+                f"at {size}B the object rate binds, so slower reads must cost more")
+        if not expect_slower and abs(slow_reads - fast_reads) > 1e-6:
+            raise AssertionError(
+                f"at {size}B both sides are bandwidth bound, so read IOPS is irrelevant")
+    print("All recovery_read_amplification tests passed.")
+
+def test_workload_defaults():
+    # object size and IO size are independent, and the presets say so: RBD and
+    # S3 store the same 4MB objects but read them completely differently, while
+    # CephFS is read like RBD but stores far smaller objects
+    presets = {name: apply_workload_defaults(argparse.Namespace(workload=name))
+               for name in WORKLOAD_DEFAULTS}
+    if presets['rbd'].object_size != presets['s3'].object_size:
+        raise AssertionError("rbd and s3 both store 4MB objects")
+    if presets['rbd'].client_io_size != presets['cephfs'].client_io_size:
+        raise AssertionError("cephfs is read like rbd")
+    if presets['s3'].client_io_size <= presets['rbd'].client_io_size:
+        raise AssertionError("s3 reads whole objects, rbd reads a piece")
+    if presets['cephfs'].object_size >= presets['rbd'].object_size:
+        raise AssertionError("cephfs stores smaller objects than rbd")
+
+    # anything set explicitly survives the preset
+    pinned = apply_workload_defaults(
+        argparse.Namespace(workload='s3', object_size=1234, client_io_size=None))
+    if pinned.object_size != 1234:
+        raise AssertionError("an explicit object size must not be overwritten")
+    if pinned.client_io_size != WORKLOAD_DEFAULTS['s3']['client_io_size']:
+        raise AssertionError("the unset half should still come from the preset")
+    print("All workload_defaults tests passed.")
+
+def test_ec_shards_touched():
+    # a stripe unit is one shard's worth, handed round-robin to the k data
+    # shards, so an IO reaches as many shards as it covers units, up to k
+    for k in (2, 4, 8):
+        if ec_shards_touched(k, 4096, 4096) != 1:
+            raise AssertionError(f"a single-unit IO touches one shard, k={k}")
+        if ec_shards_touched(k, 4096 * 2, 4096) != min(k, 2):
+            raise AssertionError(f"a two-unit IO touches two shards, k={k}")
+        if ec_shards_touched(k, 4096 * k, 4096) != k:
+            raise AssertionError(f"a k-unit IO reaches the whole stripe, k={k}")
+        if ec_shards_touched(k, 4096 * k * 4, 4096) != k:
+            raise AssertionError(f"nothing reaches more than k shards, k={k}")
+        # a part of a unit is still a unit
+        if ec_shards_touched(k, 512, 4096) != 1:
+            raise AssertionError(f"a sub-unit IO still touches one shard, k={k}")
+    if ec_shards_touched(None, 4096, 4096) != 0:
+        raise AssertionError("replication has no stripe")
+    print("All ec_shards_touched tests passed.")
+
+def test_pool_performance():
+    # read and write budgets are deliberately different, as they are for an HDD
+    perf = lambda size, k, m, fast=False: pool_performance(   # noqa: E731
+        size, k, m, 240, 250 * 1024**2, 250 * 1024**2, 120.0, 450.0,
+        0.008, 0.002, fast_ec=fast)
+    read_budget, write_budget = 240 * 120.0, 240 * 450.0
+
+    # replication: a read is one op, a write is one per copy
+    for size in (2, 3, 4):
+        d = perf(size, None, None)
+        if (d['read_ops'], d['write_ops']) != (1, size):
+            raise AssertionError(f"{size}x costs {d['read_ops']}/{d['write_ops']} ops")
+        if abs(d['write_iops'] - write_budget / size) > 1e-6:
+            raise AssertionError(f"{size}x write IOPS {d['write_iops']}")
+        if abs(d['read_iops'] - read_budget) > 1e-6:
+            raise AssertionError(f"{size}x read IOPS {d['read_iops']} should be the whole budget")
+
+    for k in (2, 4, 8):
+        for m in (2, 3):
+            classic = perf(None, k, m, fast=False)
+            fast = perf(None, k, m, fast=True)
+            # classic reads every data shard; a write reads them all then writes k+m
+            if (classic['read_ops'], classic['write_ops']) != (k, 2 * k + m):
+                raise AssertionError(
+                    f"{k}+{m} classic costs {classic['read_ops']}/{classic['write_ops']}")
+            # Fast EC touches one shard, but the primary holds only 1 of the k,
+            # so the rest are proxied and involve two OSDs rather than one.
+            proxied = (k - 1) / k
+            if abs(fast['read_ops'] - (1 + proxied)) > 1e-12:
+                raise AssertionError(
+                    f"{k}+{m} fast read should cost {1 + proxied} ops, got {fast['read_ops']}")
+            if abs(fast['write_ops'] - (1 + proxied + 2 * m)) > 1e-12:
+                raise AssertionError(
+                    f"{k}+{m} fast write should cost {1 + proxied + 2 * m}, "
+                    f"got {fast['write_ops']}")
+            # the data side of a write costs what a read does; each parity shard
+            # then costs two, being read before it is rewritten
+            if abs(fast['write_ops'] - fast['read_ops'] - 2 * m) > 1e-12:
+                raise AssertionError(
+                    f"{k}+{m} fast write should exceed its read by exactly 2m")
+            # so it is never as cheap as a replicated read, which is always local
+            replicated = perf(3, None, None)
+            if fast['read_ops'] <= replicated['read_ops']:
+                raise AssertionError(
+                    f"{k}+{m} fast read should cost more than a replicated read")
+            if fast['read_latency'] <= replicated['read_latency']:
+                raise AssertionError(
+                    f"{k}+{m} fast read should be slower than a replicated read")
+            # and the proxy share grows towards 1 as the stripe widens
+            if not 1.0 < fast['read_ops'] < 2.0:
+                raise AssertionError(f"{k}+{m} fast read ops out of range: {fast['read_ops']}")
+            # Fast EC always wins on reads: one shard, proxied or not, against
+            # all k.
+            if fast['read_ops'] >= classic['read_ops']:
+                raise AssertionError(f"{k}+{m} fast read should beat classic")
+
+            # Writes are not a given. Fast EC skips reading the k data shards
+            # but pays 2m for the parity read-modify-writes, so a narrow stripe
+            # carrying a lot of parity - 2+3 - is better off on the classic
+            # path. Pin the crossover in both directions.
+            cheaper = fast['write_ops'] <= classic['write_ops']
+            should_be = (1 + (k - 1) / k + 2 * m) <= (2 * k + m)
+            if cheaper != should_be:
+                raise AssertionError(
+                    f"{k}+{m}: fast write {fast['write_ops']} vs classic "
+                    f"{classic['write_ops']}, expected fast to be "
+                    f"{'cheaper' if should_be else 'dearer'}")
+            # widening the stripe makes a larger share of reads remote
+            wider = perf(None, k * 2, m, fast=True)
+            if wider['read_ops'] <= fast['read_ops']:
+                raise AssertionError("a wider stripe should proxy more of its reads")
+
+            # An IO spanning the whole stripe leaves fast EC nothing to skip, so
+            # it must fall back to the classic figures exactly.
+            spanning = pool_performance(None, k, m, 240, 250 * 1024**2, 250 * 1024**2,
+                                        120.0, 450.0, 0.008, 0.002,
+                                        io_size=4096 * k, fast_ec=True)
+            classic_same = pool_performance(None, k, m, 240, 250 * 1024**2, 250 * 1024**2,
+                                            120.0, 450.0, 0.008, 0.002,
+                                            io_size=4096 * k, fast_ec=False)
+            if spanning != classic_same:
+                raise AssertionError(
+                    f"{k}+{m} fast EC should be identical to classic once the IO "
+                    f"spans the stripe")
+
+    # a wider fan-out costs latency even though the subops are parallel
+    lat = [perf(size, None, None)['write_latency'] for size in (2, 3, 4, 6)]
+    if lat != sorted(lat):
+        raise AssertionError(f"write latency should grow with the fan-out, got {lat}")
+    if slowest_of(1) != 1.0:
+        raise AssertionError("one operation is its own slowest")
+    print("All pool_performance tests passed.")
+
+def test_outage_downtime_fraction():
+    # a whole-domain outage is downtime, so it scales with rate and duration
+    # A width-2 pool has a shard on every host it uses, so any single host
+    # outage takes it below min_size: the downtime is the time some host is
+    # down, which to first order is hosts x rate x duration. The exact figure is
+    # a shade under that, being a binomial tail rather than a sum.
+    base = outage_downtime_fraction(16, 1, 0.05, 4.0, 16, 2, 1, 4096)
+    approx = 16 * 0.05 * 4.0 / (365 * 24)
+    if not 0.99 * approx <= base <= approx:
+        raise AssertionError(
+            f"expected just under {approx:.6g} for a width-2 pool, got {base:.6g}")
+    if outage_downtime_fraction(16, 1, 0.10, 4.0, 16, 2, 1, 4096) <= base:
+        raise AssertionError("twice the outage rate must cost more downtime")
+    if outage_downtime_fraction(16, 1, 0.05, 8.0, 16, 2, 1, 4096) <= base:
+        raise AssertionError("twice the outage duration must cost more downtime")
+
+    # needing more domains down at once is exponentially safer
+    by_threshold = [outage_downtime_fraction(16, 1, 0.05, 4.0, 16, 11, t, 4096)
+                    for t in (1, 2, 3)]
+    if by_threshold != sorted(by_threshold, reverse=True):
+        raise AssertionError(f"a higher threshold must cost less, got {by_threshold}")
+
+    # a rack takes several domains at once, so it reaches the threshold alone
+    one_host = outage_downtime_fraction(16, 1, 0.02, 4.0, 16, 6, 2, 4096)
+    one_rack = outage_downtime_fraction(4, 4, 0.02, 4.0, 16, 6, 2, 4096)
+    if one_rack <= one_host:
+        raise AssertionError("a rack outage should outweigh a single host outage")
+
+    # switched off, or impossible, means no downtime
+    for kwargs in (dict(outage_rate=0.0), dict(outage_hours=0.0)):
+        args = dict(num_groups=16, group_size=1, outage_rate=0.05, outage_hours=4.0,
+                    num_hosts=16, width=3, threshold=2, num_pgs=4096)
+        args.update(kwargs)
+        if outage_downtime_fraction(**args) != 0.0:
+            raise AssertionError(f"{kwargs} should mean no downtime")
+    if outage_downtime_fraction(2, 1, 0.05, 4.0, 16, 3, 3, 4096) != 0.0:
+        raise AssertionError("3 domains cannot go down when only 2 exist")
+    print("All outage_downtime_fraction tests passed.")
+
+def test_default_min_size():
+    # 2 for replication, k+1 for erasure coding
+    for size in (2, 3, 4):
+        if default_min_size(size, None) != 2:
+            raise AssertionError(f"replicated min_size should be 2, got for size {size}")
+    for k in (2, 4, 8, 17):
+        if default_min_size(None, k) != k + 1:
+            raise AssertionError(f"erasure min_size should be k+1 for k={k}")
+
+    # a pool goes unavailable exactly one failure before it loses data, for
+    # both of those conventions
+    for size in (2, 3, 4):
+        width = size
+        to_unavailable = width - default_min_size(size, None) + 1
+        to_loss = size
+        if to_unavailable != to_loss - 1:
+            raise AssertionError(
+                f"{size}x: unavailable at {to_unavailable}, loss at {to_loss}")
+    for k in (2, 4, 8):
+        for m in (2, 3):
+            width = k + m
+            to_unavailable = width - default_min_size(None, k) + 1
+            to_loss = m + 1
+            if to_unavailable != m or to_unavailable != to_loss - 1:
+                raise AssertionError(
+                    f"{k}+{m}: unavailable at {to_unavailable}, loss at {to_loss}")
+    print("All default_min_size tests passed.")
+
+def test_rack_loss_fraction():
+    # a rack holding fewer hosts than a PG needs shards cannot take the PG out
+    if rack_loss_fraction(20, 2, 3, 3) != 0.0:
+        raise AssertionError("a 2-host rack cannot hold 3 shards of one PG")
+    # a rack holding the whole width takes everything
+    if rack_loss_fraction(6, 6, 3, 3) != 1.0:
+        raise AssertionError("one rack holding every host must lose every PG")
+    # wider stripes are more exposed, since more shards can share a rack
+    widths = [rack_loss_fraction(20, 4, w, 3) for w in (3, 4, 6, 8)]
+    if widths != sorted(widths):
+        raise AssertionError(f"exposure should grow with width, got {widths}")
+    # and a fraction is a fraction
+    for width in range(2, 20):
+        f = rack_loss_fraction(20, 4, width, 2)
+        if not 0.0 <= f <= 1.0:
+            raise AssertionError(f"width {width} gave {f}")
+    print("All rack_loss_fraction tests passed.")
+
+def run_tests(args):
+    test_comb()
+    test_candidate_profiles()
+    test_rack_loss_fraction()
+    test_default_min_size()
+    test_outage_downtime_fraction()
+    test_workload_defaults()
+    test_ec_shards_touched()
+    test_pool_performance()
+    test_recovery_read_amplification()
+    test_confidence_interval()
+    test_prob_k_or_more_failures()
+    test_expected_max_osd_load()
+    test_infer_failure_domains()
+
+    # run some known simulate commands
+    # add all args
+    test_args = [
+        [
+            argparse.Namespace(
+                verbose=False,
+                failure_domain="host",
+                num_domains=10,
+                osds_per_domain=16,
+                tb_per_osd=10.0,
+                object_size=4*1024*1024,
+                pgs_per_osd=100,
+                size=3,
+                k=None,
+                m=None,
+                simulations=1000,
+                seed=42,
+                correlation_factor=100,
+                osd_failure_rate=0.02,
+                osd_recovery_sleep=0.1,
+                osd_recovery_max_active=1,
+                domains_down=0,
+                replacement_time=7.0,
+                peering_time_per_pg=1.0,
+                device_class='hdd',
+                skip_monte_carlo=False,
+                max_mc_runtime=30
+            ),
+            ("200.1 thousand years", "8-nines")
+        ],
+        [
+            argparse.Namespace(
+                verbose=False,
+                failure_domain="host",
+                num_domains=20,
+                osds_per_domain=16,
+                tb_per_osd=10.0,
+                object_size=4*1024*1024,
+                pgs_per_osd=100,
+                k=6,
+                m=3,
+                size=None,
+                simulations=1000,
+                seed=42,
+                correlation_factor=100,
+                osd_failure_rate=0.02,
+                osd_recovery_sleep=0.1,
+                osd_recovery_max_active=1,
+                domains_down=0,
+                replacement_time=7.0,
+                peering_time_per_pg=1.0,
+                device_class='hdd',
+                skip_monte_carlo=False,
+                max_mc_runtime=30
+            ),
+            ("67.8 million years", "11-nines")
+        ],
+        [
+            argparse.Namespace(
+                verbose=False,
+                failure_domain="host",
+                num_domains=20,
+                osds_per_domain=16,
+                tb_per_osd=10.0,
+                object_size=4*1024*1024,
+                pgs_per_osd=100,
+                k=6,
+                m=3,
+                size=None,
+                simulations=1000,
+                seed=42,
+                correlation_factor=100,
+                osd_failure_rate=0.02,
+                osd_recovery_sleep=0.1,
+                osd_recovery_max_active=1,
+                domains_down=1,
+                replacement_time=7.0,
+                peering_time_per_pg=1.0,
+                device_class='hdd',
+                skip_monte_carlo=False,
+                max_mc_runtime=30
+            ),
+            ("6.0 thousand years", "7-nines")
+        ],
+        [
+            argparse.Namespace(
+                verbose=False,
+                failure_domain="host",
+                num_domains=500,
+                osds_per_domain=40,
+                tb_per_osd=0.0001,
+                object_size=4*1024*1024,
+                pgs_per_osd=0.01,
+                size=3,
+                k=None,
+                m=None,
+                simulations=1000,
+                seed=42,
+                correlation_factor=100,
+                osd_failure_rate=0.02,
+                osd_recovery_sleep=0.1,
+                osd_recovery_max_active=1,
+                domains_down=0,
+                replacement_time=7.0,
+                peering_time_per_pg=1.0,
+                device_class='hdd',
+                skip_monte_carlo=False,
+                max_mc_runtime=30
+            ),
+            ("49.7 billion years", "12-nines")
+        ],
+        [
+            argparse.Namespace(
+                verbose=False,
+                failure_domain="host",
+                num_domains=500,
+                osds_per_domain=40,
+                tb_per_osd=10,
+                object_size=4*1024,
+                pgs_per_osd=500,
+                size=None,
+                k=8,
+                m=3,
+                simulations=1000,
+                seed=42,
+                correlation_factor=100,
+                osd_failure_rate=0.02,
+                osd_recovery_sleep=0.1,
+                osd_recovery_max_active=1,
+                domains_down=0,
+                replacement_time=7.0,
+                peering_time_per_pg=1.0,
+                device_class='hdd',
+                skip_monte_carlo=True,
+                max_mc_runtime=30
+            ),
+            ("360.1 thousand years", "11-nines")
+        ]
+    ]
+    for i, test_arg in enumerate(test_args):
+        print(f"Running test case {i+1}...")
+        parser = build_parser()
+        # Start from the real simulate defaults and let the case override what
+        # it pins, so adding an option cannot leave these namespaces short of an
+        # attribute, and cannot change an expectation unless the case pins it.
+        defaults = parser.parse_args(['simulate'])
+        for key, value in vars(test_arg[0]).items():
+            setattr(defaults, key, value)
+        test_arg[0] = defaults
+        test_arg[0].command = 'simulate'
+        apply_device_class_defaults(test_arg[0])
+        apply_workload_defaults(test_arg[0])
+        cmdline = reconstruct_command_line(parser, test_arg[0])
+        print(f"Command line: {cmdline}")
+        r = simulate(test_arg[0])
+        mttdl, nines = r['mttdl'], r['nines']
+        assert test_arg[1][0] == mttdl, f"MTTDL test case {i+1} failed! {mttdl} != {test_arg[1][0]}"
+        assert test_arg[1][1] == nines, f"Durability test case {i+1} failed! {nines} != {test_arg[1][1]}"
+        print(f"\nTest case {i+1} completed.")
+        print("========================================")
+
+    print("\nAll tests passed.")
+
+
+# ---------------------------- Design Subcommand ----------------------------
+
+# The k values people actually deploy, rather than every integer.
+EC_DATA_SHARDS = (2, 3, 4, 6, 8, 10, 12, 16)
+
+
+def rack_loss_fraction(num_hosts, hosts_per_rack, width, num_failures):
+    """Fraction of PGs that lose num_failures shards when one whole rack fails.
+
+    This is the question rack-level failure domains exist to answer, and it is
+    invisible to the OSD-failure model: with the failure domain at host level a
+    PG's shards land on distinct hosts that may share a rack, so one rack
+    outage can take several shards of the same PG. With the failure domain at
+    rack level a PG has at most one shard per rack, so no rack outage can cost
+    it more than one - which is why this returns 0 for rack-level placement.
+
+    Hypergeometric: of the `width` hosts a PG occupies, how many fall in the
+    rack that failed.
+    """
+    if hosts_per_rack <= 0 or num_failures <= 0:
+        return 0.0
+    placements = comb(num_hosts, width)
+    if placements == 0:
+        return 0.0
+    fatal = 0
+    for j in range(num_failures, min(hosts_per_rack, width) + 1):
+        fatal += comb(hosts_per_rack, j) * comb(num_hosts - hosts_per_rack, width - j)
+    return fatal / placements
+
+
+def rack_groupings(num_hosts, limit=4):
+    """Plausible hosts-per-rack values for a cluster of num_hosts hosts."""
+    divisors = [d for d in range(2, num_hosts) if num_hosts % d == 0]
+    if not divisors:
+        return []
+    if len(divisors) <= limit:
+        return divisors
+    # spread the choices over the range rather than taking the smallest
+    step = (len(divisors) - 1) / (limit - 1) if limit > 1 else 0
+    return sorted({divisors[round(i * step)] for i in range(limit)})
+
+
+def candidate_profiles(num_domains, max_width, min_spare=1):
+    """Pool profiles worth comparing on a cluster with num_domains domains.
+
+    CRUSH needs a distinct domain per shard, and a profile that uses every
+    domain has nowhere to re-place a shard when one is lost, so the width is
+    capped at num_domains - min_spare: on 10 hosts the widest offered is 9.
+
+    Replication at 2x and 3x, then erasure coding at the widths people deploy
+    for m=2 and m=3.
+    """
+    usable_width = num_domains - min_spare
+    profiles = []
+    for size in (2, 3):
+        if size <= usable_width:
+            profiles.append({'label': f'{size}x replicated', 'size': size, 'k': None, 'm': None,
+                             'width': size, 'tolerates': size - 1, 'usable': 1.0 / size})
+    for m in (2, 3):
+        for k in EC_DATA_SHARDS:
+            width = k + m
+            if width > usable_width or width > max_width:
+                continue
+            profiles.append({'label': f'{k}+{m} erasure', 'size': None, 'k': k, 'm': m,
+                             'width': width, 'tolerates': m, 'usable': k / width})
+    return profiles
+
+
+def evaluate_profiles(args, profiles, num_domains, osds_per_domain, failure_domain):
+    """Run every profile through the model for one failure-domain choice."""
+    rows = []
+    for prof in profiles:
+        sub = argparse.Namespace(**vars(args))
+        sub.command = 'simulate'
+        sub.size, sub.k, sub.m = prof['size'], prof['k'], prof['m']
+        sub.num_domains, sub.osds_per_domain = num_domains, osds_per_domain
+        sub.failure_domain = failure_domain
+        sub.skip_monte_carlo = not args.monte_carlo
+        sub.min_size = None   # each profile takes the default for its type
+        sub.domains_down = 0  # design compares healthy clusters
+        sub.seed = args.seed          # same failure draws for every profile
+        captured = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(captured):
+                result = simulate(sub)
+        except Exception as e:                                    # noqa: BLE001
+            print(f"    {prof['label']}: skipped ({e})")
+            continue
+        rows.append((prof, result, captured.getvalue()))
+    return rows
+
+
+def design(args):
+    """Compare feasible pool profiles, and host- against rack-level placement."""
+    num_osds = args.num_hosts * args.osds_per_host
+    raw_bytes = num_osds * args.tb_per_osd * 1024**4
+
+    print(f"{args.num_hosts} hosts x {args.osds_per_host} OSDs = {num_osds} OSDs, "
+          f"{format_bytes(raw_bytes)} raw, {args.device_class}")
+    print(f"    {args.workload}: {format_bytes(args.object_size)} objects read "
+          f"{format_bytes(args.client_io_size)} at a time, {args.pgs_per_osd:.3g} PGs per OSD, "
+          f"OSD failure rate {args.osd_failure_rate * 100:.3g}%/yr, "
+          f"correlation factor {args.correlation_factor}")
+    spare_cap = args.num_hosts - args.min_spare_domains
+    if spare_cap < args.max_width:
+        domains = "domain" if args.min_spare_domains == 1 else "domains"
+        print(f"    k+m capped at {spare_cap}, to keep {args.min_spare_domains} spare "
+              f"{domains} for re-placing a lost shard")
+    else:
+        print(f"    k+m capped at {args.max_width}; past 8+3 performance decides, not durability")
+    print()
+
+    host_profiles = candidate_profiles(args.num_hosts, args.max_width, args.min_spare_domains)
+    if not host_profiles:
+        raise ValueError(
+            f"No pool profile fits in {args.num_hosts} hosts while keeping "
+            f"{args.min_spare_domains} spare; at least {2 + args.min_spare_domains} are needed.")
+
+    host_rows = evaluate_profiles(args, host_profiles, args.num_hosts,
+                                  args.osds_per_host, 'host')
+    if not host_rows:
+        raise ValueError("No profile could be evaluated.")
+
+    groupings = args.hosts_per_rack if args.hosts_per_rack else rack_groupings(args.num_hosts)
+    groupings = [g for g in groupings if 1 < g < args.num_hosts and args.num_hosts % g == 0]
+
+    _print_profile_table(args, host_rows, raw_bytes)
+    if groupings:
+        _print_rack_table(args, host_rows, groupings)
+    _print_advice(args, host_rows, raw_bytes, groupings)
+    if not groupings:
+        print()
+        print(f"    {args.num_hosts} hosts do not divide into racks evenly; pass "
+              "--hosts-per-rack to compare a grouping.")
+    return 0
+
+
+def _print_profile_table(args, host_rows, raw_bytes):
+    """Capacity, safety and speed for every feasible profile."""
+    # The first pair is what a replicated pool gets and what an EC pool gets
+    # without fast EC, so it must not read as "classic EC" alone.
+    print(f"{'':<62}{'repl or classic EC':^18}{'fast EC only':^18}")
+    cols = (f"{'profile':<15}{'usable':>10}{'eff':>5}{'durab':>6}{'loss/yr':>10}"
+            f"{'avail':>6}{'down/yr':>10}{'read':>9}{'write':>9}{'read':>9}{'write':>9}")
+    print(cols)
+    print('-' * len(cols))
+
+    for prof, r, _ in host_rows:
+        fast = r['perf_fast']
+        avail = r['availability_nines'].split('-')[0] if r['availability_nines'] else '-'
+        downtime = (format_time(r['downtime_sec_per_year'])
+                    if r['downtime_sec_per_year'] is not None else '-')
+        print(f"{prof['label']:<15}{format_bytes(raw_bytes * prof['usable']):>10}"
+              f"{prof['usable'] * 100:>4.0f}%"
+              f"{r['nines'].split('-')[0]:>6}"
+              f"{format_bytes(r['expected_bytes_lost_per_year']):>10}"
+              f"{avail:>6}{downtime:>10}"
+              f"{format_int(r['perf']['read_iops']):>9}"
+              f"{format_int(r['perf']['write_iops']):>9}"
+              f"{format_int(fast['read_iops']) if fast else '-':>9}"
+              f"{format_int(fast['write_iops']) if fast else '-':>9}")
+
+    print()
+    print("    durab/avail  nines of durability and availability; loss/yr and down/yr are the")
+    print("                 same two figures as bytes lost and time with a PG below min_size,")
+    print("                 counting OSD and whole-host failures. Rack outages are priced")
+    print("                 separately below, depending as they do on how the hosts are racked")
+    print(f"    read/write   cluster IOPS at {format_bytes(args.client_io_size)}, "
+          f"--client-io-size. The left pair is")
+    print("                 what a replicated pool gets, and an EC pool without fast EC: every")
+    print("                 shard read, 2k+m written. The right pair is fast EC, which touches")
+    print("                 only the shards the IO lands on, and is empty when the IO spans the")
+    print("                 whole stripe and there is nothing left for it to skip")
+
+
+def _print_rack_table(args, host_rows, groupings):
+    """What a rack outage costs, and where rack-level placement removes it."""
+    print()
+    print("Rack outages. A switch failure takes a whole rack's OSDs away without destroying")
+    print("them, so it costs availability; losing the rack for good costs data. Putting the")
+    print("failure domain at rack level gives a PG one shard per rack and neither can touch")
+    print("it, but k+m is then capped at the rack count. So a profile is either inside that")
+    print("cap - shown as safe - or it stays at host level and carries the figures instead.")
+    print()
+
+    # which profiles fit at rack level, per grouping
+    fits = {}
+    for hosts_per_rack in groupings:
+        num_racks = args.num_hosts // hosts_per_rack
+        fits[hosts_per_rack] = {
+            prof['label'] for prof in
+            candidate_profiles(num_racks, args.max_width, args.min_spare_domains)}
+
+    header = f"{'profile':<15}"
+    for hosts_per_rack in groupings:
+        header += f"{f'{hosts_per_rack}/rack, {args.num_hosts // hosts_per_rack}':>14}"
+    print(header)
+    print('-' * len(header))
+    for prof, r, _ in host_rows:
+        line = f"{prof['label']:<15}"
+        for hosts_per_rack in groupings:
+            if prof['label'] in fits[hosts_per_rack]:
+                line += f"{'safe':>14}"
+                continue
+            num_racks = args.num_hosts // hosts_per_rack
+            lost = rack_loss_fraction(args.num_hosts, hosts_per_rack,
+                                      prof['width'], prof['tolerates'] + 1)
+            down = outage_downtime_fraction(
+                num_racks, hosts_per_rack, args.rack_outage_rate, args.rack_outage_hours,
+                args.num_hosts, prof['width'],
+                prof['width'] - r['min_size'] + 1, r['num_pgs']) * SECONDS_PER_YEAR
+            line += f"{f'{lost * 100:.0f}% / {format_time(down)}':>14}"
+        print(line)
+
+    print()
+    print("    safe      k+m fits the rack count, so rack-level placement removes both risks")
+    print(f"    x% / t    otherwise: share of PGs lost for good if a rack is destroyed, and")
+    print(f"              time offline a year from switch outages at {args.rack_outage_rate:.3g} "
+          f"per rack lasting {args.rack_outage_hours:.3g}h")
+
+
+def _print_advice(args, rows, raw_bytes, groupings):
+    """Compare the best erasure profiles against 3x replication."""
+    def nines_of(row):
+        return int(row[1]['nines'].split('-')[0])
+
+    def avail_nines_of(row):
+        return int(row[1]['availability_nines'].split('-')[0]) if row[1]['availability_nines'] else 0
+
+    print()
+    print("Recommendations")
+
+    baseline = next((row for row in rows if row[0]['label'] == '3x replicated'), None)
+    if baseline is None:
+        best = max(rows, key=lambda row: row[1]['durability'])
+        print("    3x replication does not fit on this shape, so there is no usual baseline")
+        print(f"    to compare against. The most durable option is {best[0]['label']} at "
+              f"{best[1]['nines']}.")
+        return
+
+    bp, br = baseline[0], baseline[1]
+    print(f"    Baseline 3x replicated: {format_bytes(raw_bytes * bp['usable'])} usable "
+          f"({bp['usable'] * 100:.0f}% of raw), {br['nines']} durable, "
+          f"{br['availability_nines']} available,")
+    print(f"    {format_int(br['perf']['read_iops'])} read and "
+          f"{format_int(br['perf']['write_iops'])} write IOPS.")
+
+    erasure = [row for row in rows if row[0]['k'] is not None]
+    if not erasure:
+        print("    No erasure profile fits on this shape, so replication is the only option.")
+        return
+
+    # Prefer the ones that give up nothing on durability, most space first, and
+    # fall back to the most durable if none of them match.
+    target = args.target_nines if args.target_nines is not None else nines_of(baseline)
+    qualified = [row for row in erasure if nines_of(row) >= target]
+    if qualified:
+        picks = sorted(qualified, key=lambda row: -row[0]['usable'])[:3]
+        print()
+        print(f"    Erasure profiles reaching {target} nines or better, most space first:")
+    else:
+        picks = sorted(erasure, key=lambda row: -row[1]['durability'])[:3]
+        print()
+        print(f"    Nothing erasure coded reaches {target} nines here; the most durable are:")
+
+    print()
+    print(f"    {'':<37}{'classic EC':^18}{'fast EC':^18}")
+    print(f"    {'profile':<15}{'usable':>8}{'durab':>7}{'avail':>7}"
+          f"{'read':>9}{'write':>9}{'read':>9}{'write':>9}")
+    for prof, r, _ in picks:
+        fast = r['perf_fast']
+        d_diff = int(r['nines'].split('-')[0]) - nines_of(baseline)
+        a_diff = (int(r['availability_nines'].split('-')[0]) if r['availability_nines'] else 0)
+        a_diff -= avail_nines_of(baseline)
+        print(f"    {prof['label']:<15}"
+              f"{prof['usable'] / bp['usable']:>7.2f}x"
+              f"{d_diff:>+7d}{a_diff:>+7d}"
+              f"{r['perf']['read_iops'] / br['perf']['read_iops']:>8.2f}x"
+              f"{r['perf']['write_iops'] / br['perf']['write_iops']:>8.2f}x"
+              f"{fast['read_iops'] / br['perf']['read_iops'] if fast else 0:>8.2f}x"
+              f"{fast['write_iops'] / br['perf']['write_iops'] if fast else 0:>8.2f}x")
+    print()
+    print("    Read +1 as one nine better than the baseline, 0.20x as a fifth of its")
+    print("    throughput. The two pairs are the same profile on the classic and the fast")
+    print("    EC paths: classic reads every shard, fast reads only the one holding the")
+    print("    data, so the read column is where the two differ most.")
+
+    # anything else on the capacity/durability frontier, named but not detailed
+    def dominated(row):
+        for other in rows:
+            if other is row:
+                continue
+            if (other[1]['durability'] >= row[1]['durability']
+                    and other[0]['usable'] >= row[0]['usable']
+                    and (other[1]['durability'] > row[1]['durability']
+                         or other[0]['usable'] > row[0]['usable'])):
+                return True
+        return False
+
+    shown = {row[0]['label'] for row in picks} | {'3x replicated'}
+    others = [row for row in rows if not dominated(row) and row[0]['label'] not in shown
+              and row[0]['size'] != 2]
+
+    def listing(subset):
+        return ", ".join(f"{row[0]['label'].split()[0]} ({row[0]['usable'] * 100:.0f}%, "
+                         f"{nines_of(row)}n)" for row in sorted(subset,
+                                                                key=lambda r: r[0]['usable']))
+
+    safer = [row for row in others if nines_of(row) > nines_of(baseline)]
+    roomier = [row for row in others if nines_of(row) <= nines_of(baseline)]
+    if safer or roomier:
+        print()
+        print("    Also on the capacity/durability frontier:")
+        if safer:
+            print(f"      more durable than the baseline, less space: {listing(safer)}")
+        if roomier:
+            print(f"      more space, less durable: {listing(roomier)}")
+
+    print()
+    bounded = [row[0]['label'] for row in rows if 'union bound' in row[2]]
+    if bounded:
+        print(f"    Loss rate for {', '.join(bounded)} is an upper bound, not exact.")
+
+    if groupings:
+        print("    Racking changes none of the durability above: the loss rate follows the PG")
+        print("    and OSD counts, not how the OSDs are grouped. What it buys is surviving a")
+        print("    rack outage, which the table above prices.")
+
+
+# ---------------------------- Main CLI ----------------------------
+def apply_workload_defaults(args):
+    """Fill in the object and IO sizes the workload implies, if unset."""
+    for option, value in WORKLOAD_DEFAULTS[getattr(args, 'workload', 'rbd')].items():
+        if getattr(args, option, None) is None:
+            setattr(args, option, value)
+    return args
+
+
+def apply_device_class_defaults(args):
+    """Fill in whichever device-class options were left unset."""
+    defaults = DEVICE_CLASS_DEFAULTS[getattr(args, 'device_class', 'hdd')]
+    for option, value in defaults.items():
+        if getattr(args, option, None) is None:
+            setattr(args, option, value)
+    return args
+
+
+def add_shared_options(p, monte_carlo=True, single_pool=True):
+    """Options every subcommand needs, grouped so --help stays readable.
+
+    single_pool covers the options that only mean something for one specific
+    pool in a specific state, which design has no use for: it is choosing what
+    to build, not describing a pool that already exists and may be degraded.
+    """
+    p.add_argument('--verbose', action='store_true', help='enable verbose output')
+    p.add_argument('--debug', action='store_true', help='enable debug output')
+
+    preset = p.add_argument_group(
+        'hardware and workload',
+        'Two presets that set most of the detail below. Override individually if needed.')
+    preset.add_argument('--device-class', choices=sorted(DEVICE_CLASS_DEFAULTS), default='hdd',
+                        help='device class the pool lives on, setting its bandwidth,\n'
+                             'object rate, latency and recovery tunables (default: hdd)')
+    preset.add_argument('--workload', choices=sorted(WORKLOAD_DEFAULTS), default='rbd',
+                        help='workload preset, setting the object and client IO sizes:\n'
+                             'rbd 4MB objects read 4kB at a time, cephfs 64kB objects\n'
+                             'read the same way, s3 4MB both (default: rbd)')
+
+    model = p.add_argument_group('failure model')
+    model.add_argument('--osd-failure-rate', '--afr', type=float, default=0.02,
+                       help='annualised failure rate of one OSD, the fraction expected to\n'
+                            'fail outright in a year. Unlike the outage rates below, these\n'
+                            'destroy their data (default: 0.02)')
+    model.add_argument('--correlation-factor', '--fudge', type=int, default=100,
+                       help='how much more likely concurrent failures are than an\n'
+                            'independent model says: real ones share firmware, batches,\n'
+                            'power and cooling. The independent estimate is multiplied by\n'
+                            'this (default: 100)')
+    model.add_argument('--host-outage-rate', type=float, default=0.05,
+                       help='whole-host outages per host per year from causes other than\n'
+                            'the disks - CPU, memory, PSU, panics. These cost availability\n'
+                            'and not durability (default: 0.05)')
+    model.add_argument('--host-outage-hours', type=float, default=4.0,
+                       help='hours a host outage lasts (default: 4.0)')
+    model.add_argument('--rack-outage-rate', type=float, default=0.02,
+                       help='whole-rack outages per rack per year, e.g. a switch failure\n'
+                            '(default: 0.02)')
+    model.add_argument('--rack-outage-hours', type=float, default=4.0,
+                       help='hours a rack outage lasts (default: 4.0)')
+    model.add_argument('--replacement-time', type=float, default=7.0,
+                       help='days to physically replace failed hardware, used as the\n'
+                            'exposure window when too few failure domains survive for\n'
+                            'recovery to run (default: 7.0)')
+    model.add_argument('--peering-time-per-pg', type=float, default=1.0,
+                       help='seconds to re-peer one affected PG before recovery can start\n'
+                            '(default: 1.0s)')
+    if single_pool:
+        model.add_argument('--domains-down', type=int, default=0,
+                           help='failure domains already down, to model a degraded pool\n'
+                                '(default: 0)')
+        model.add_argument('--min-size', type=int, default=None,
+                           help='shards that must be up for a PG to serve IO\n'
+                                '(default: 2 replicated, k+1 erasure coded)')
+
+    detail = p.add_argument_group('device and workload detail',
+                                  'Defaults come from the two presets above.')
+    detail.add_argument('--osd-read-bw', type=float, default=None,
+                        help='per-OSD read bandwidth in MBps')
+    detail.add_argument('--osd-write-bw', type=float, default=None,
+                        help='per-OSD write bandwidth in MBps')
+    detail.add_argument('--osd-read-iops', type=float, default=None,
+                        help='per-OSD client read IOPS for small IO')
+    detail.add_argument('--osd-write-iops', type=float, default=None,
+                        help='per-OSD client write IOPS for small IO; an HDD in\n'
+                             'write-through mode serves these from its media cache')
+    detail.add_argument('--osd-read-latency', type=float, default=None,
+                        help='per-OSD read latency in seconds')
+    detail.add_argument('--osd-write-latency', type=float, default=None,
+                        help='per-OSD write latency in seconds')
+    detail.add_argument('--osd-recovery-sleep', type=float, default=None,
+                        help='OSD Recovery Sleep in seconds')
+    detail.add_argument('--osd-recovery-max-active', type=int, default=None,
+                        help='OSD Recovery Max Active')
+    detail.add_argument('--client-io-size', type=int, default=None,
+                        help='client IO size the performance figures are for. Separate\n'
+                             'from --object-size, which is how the data is stored')
+    detail.add_argument('--ec-stripe-unit', type=int, default=EC_STRIPE_UNIT,
+                        help='EC stripe unit, as osd_pool_erasure_code_stripe_unit. Fast\n'
+                             'EC only helps while an IO fits inside one (default: 4kB)')
+
+    mc = p.add_argument_group('monte carlo cross-check',
+                              'An independent check on the calculated loss rate.')
+    mc.add_argument('--simulations', type=int, default=10000,
+                    help="number of incidents to simulate (default: 10000)")
+    mc.add_argument('--seed', type=int, default=int(time.time()),
+                    help='random seed (default: current time)')
+    mc.add_argument('--max-mc-runtime', type=int, default=30,
+                    help='Maximum simulation runtime in seconds (default: 30s)')
+    if monte_carlo:
+        mc.add_argument('--skip-monte-carlo', action='store_true',
+                        help='Skip the Monte Carlo sims and use theoretical estimates instead')
+
+
+def add_cluster_shape_options(p):
+    """Options describing a hypothetical cluster, for simulate."""
+    p.add_argument('--failure-domain', type=str, default="host",
+                   help="Type of failure domain (host/rack/...) (default: host)")
+    p.add_argument('--num-domains', type=int, default=10,
+                   help="number of failure domains (default: 10)")
+    p.add_argument('--osds-per-domain', type=int, default=16,
+                   help="number of OSDs per failure domain (default: 16)")
+    p.add_argument('--tb-per-osd', type=float, default=10.0,
+                   help="raw data per OSD in TB (default: 10.0)")
+    p.add_argument('--object-size', type=int, default=None,
+                   help="average stored object size in bytes; recovery moves whole\n"
+                        "objects, so this drives recovery (default: by --workload)")
+    p.add_argument('--pgs-per-osd', type=float, default=100,
+                   help="target PGs per OSD (default: 100)")
+
+
+def build_parser():
+    """Build the CLI. Separate from main so run_tests can read real defaults."""
+    parser = argparse.ArgumentParser(
+            prog='clyso-nines',
+            description='Clyso Nines - Data Loss Risk Estimator for Ceph Clusters'
+    )
+    parser.add_argument('--version', action='version', version='clyso-nines 0.1')
+
+    subparsers = parser.add_subparsers(dest='command')
+
+    sim = subparsers.add_parser('simulate', help='Calculate durability of a randomized pool')
+    add_shared_options(sim)
+    add_cluster_shape_options(sim)
+    sim.add_argument('--size', type=int, default=None,
+                     help="simulate a replicated pool with SIZE replicas (default: 3)")
+    sim.add_argument('--k', type=int, help="simulate an erasure coded pool with K data shards")
+    sim.add_argument('--m', type=int, help="simulate an erasure coded pool with M parity shards")
+    sim.set_defaults(func=simulate)
+
+    an = subparsers.add_parser('analyze', help='Calculate durability of the local pools')
+    add_shared_options(an)
+    an.add_argument('--cluster', type=str, default='ceph', help='Ceph cluster name (default: ceph)')
+    an.add_argument('--pool', type=str, help='analyze only the given pool (default: all pools)')
+    an.add_argument('--from-json', type=str, metavar='DIR',
+                    help='read saved ceph-pg-dump.json / ceph-osd-pool-ls-detail.json '
+                         'from DIR instead of querying a cluster')
+    an.set_defaults(func=analyze)
+
+    des = subparsers.add_parser('design',
+                                help='Compare feasible pool profiles for a given cluster shape')
+    shape = des.add_argument_group('cluster shape')
+    shape.add_argument('--num-hosts', type=int, default=10, help='number of hosts (default: 10)')
+    shape.add_argument('--osds-per-host', type=int, default=16,
+                       help='number of OSDs per host (default: 16)')
+    shape.add_argument('--tb-per-osd', type=float, default=10.0,
+                       help="raw data per OSD in TB (default: 10.0)")
+    shape.add_argument('--hosts-per-rack', type=int, nargs='+', default=None,
+                       help='rack groupings to compare against host-level placement\n'
+                            '(default: divisors of --num-hosts)')
+    shape.add_argument('--pgs-per-osd', type=float, default=100,
+                       help="target PGs per OSD (default: 100)")
+    shape.add_argument('--object-size', type=int, default=None,
+                       help="average stored object size in bytes; recovery moves whole\n"
+                            "objects, so this drives recovery (default: by --workload)")
+
+    choose = des.add_argument_group('profiles to compare')
+    choose.add_argument('--max-width', type=int, default=11,
+                        help='largest k+m to consider. Past 8+3 the stripe is wide\n'
+                             'enough that performance, not durability, decides\n'
+                             '(default: 11)')
+    choose.add_argument('--min-spare-domains', type=int, default=1,
+                        help='failure domains to keep beyond the shard width, so a lost\n'
+                             'shard has somewhere to go (default: 1)')
+    choose.add_argument('--target-nines', type=int, default=None,
+                        help='durability to aim for; the advice names the most space\n'
+                             'efficient profile that reaches it')
+    choose.add_argument('--monte-carlo', action='store_true',
+                        help='also run the Monte Carlo cross-check for each profile (slower)')
+
+    add_shared_options(des, monte_carlo=False, single_pool=False)
+    des.set_defaults(func=design)
+
+    test = subparsers.add_parser('test', help='run internal tests')
+    test.add_argument('--verbose', action='store_true', help='enable verbose output')
+    test.add_argument('--debug', action='store_true', help='enable debug output')
+    test.set_defaults(func=run_tests)
+    return parser
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+    if not args.command:
+        parser.print_help()
+    else:
+        global VERBOSE
+        global DEBUG
+        VERBOSE = args.verbose
+        DEBUG = args.debug
+
+        # Fill in whichever device-class options were left unset, so the echoed
+        # command line shows what was actually used.
+        apply_device_class_defaults(args)
+        apply_workload_defaults(args)
+
+        # Reconstruct command
+        cmdline = reconstruct_command_line(parser, args)
+        # Print header
+        print(f"Clyso Nines - Data Loss Risk Estimator for Ceph Clusters")
+        print("---------------------------------------------------------")
+        print(f"Command line: {cmdline}")
+        print("---------------------------------------------------------")
+        vprint()
+        result = args.func(args)
+        vprint()
+        vprint("---------------------------------------------------------")
+        vprint(f"Command line: {cmdline}")
+        vprint("---------------------------------------------------------")
+        vprint()
+        # subcommands return an exit status, or their results
+        if isinstance(result, int):
+            return result
+
+    return 0
+
+if __name__ == "__main__":
+    # Hide cursor, but leave escape codes out of redirected output
+    interactive = sys.stdout.isatty()
+    if interactive:
+        print('\033[?25l', end='', flush=True)
+
+    exit_code = 0
+    try:
+        exit_code = main()
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        exit_code = 130
+    except ValueError as e:
+        # invalid input: report it without a traceback
+        print(f"Error: {e}", file=sys.stderr)
+        exit_code = 2
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        exit_code = 1
+    finally:
+        # Restore cursor
+        if interactive:
+            print('\033[?25h', end='', flush=True)
+
+    sys.exit(exit_code)
