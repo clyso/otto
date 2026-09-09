@@ -43,13 +43,17 @@ releases:
     recommended: true
   v19:
     name: squid
-    version: 19.2.4
+    version: 19.2.6
     recommended: true
     caveats:
         - See https://docs.clyso.com/docs/kb/known-bugs/squid/#squid-deployed-osds-are-crashing
+        - See https://ceph.io/en/news/blog/2026/v20-2-4-v19-2-6-combo-released/
   v20:
     name: tentacle
-    version: 20.2.1
+    version: 20.2.4
+    recommended: true
+    caveats:
+        - See https://ceph.io/en/news/blog/2026/v20-2-4-v19-2-6-combo-released/
   v21:
     name: umbrella
   v22:
