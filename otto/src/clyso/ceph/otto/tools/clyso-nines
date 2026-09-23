@@ -25,9 +25,11 @@ import json
 import math
 import os
 import random
+import re
 import shlex
 import subprocess
 import sys
+import tarfile
 import time
 from collections import defaultdict
 
@@ -860,7 +862,8 @@ def simulate(args, domains=None):
         pgs_per_osd = num_pgs * pg_size / num_osds
 
         # Print analyze summary
-        print(f"Analyzing '{args.pool_name}':")
+        scenario = getattr(args, 'scenario', None)
+        print(f"Analyzing '{args.pool_name}'" + (f" {scenario}:" if scenario else ":"))
         print(f"    Info: {profile} pool with {num_osds} OSDs and {num_domains} {failure_domain}s")
         print(f"    PGs: {num_pgs} total, ~{num_pgs * pg_size / num_osds:.3g} per OSD")
 
@@ -1461,13 +1464,110 @@ def valid_osds(osd_list):
     return [osd for osd in osd_list if 0 <= osd < CRUSH_ITEM_NONE]
 
 
+# The ceph-collect outputs analyze needs, by the name the collector stores
+# them under. It saves `ceph osd dump` rather than `ceph osd pool ls detail`,
+# but the osd dump carries the same pool entries plus the EC profiles.
+CEPH_COLLECT_FILES = {
+    'osd_dump': 'osd_info-dump.json',
+    'pg_dump': 'pg_info-dump.json',
+    'osd_tree': 'osd_info-tree.json',
+}
+CEPH_COLLECT_OSD_CONFIG = re.compile(r'osd_info-osd\.(\d+)-config_show\.json$')
+
+
+def read_ceph_collect(path):
+    """Load what analyze needs from a ceph-collect tarball or its extracted directory.
+
+    Returns a dict keyed like CEPH_COLLECT_FILES, plus 'osd_config' holding one
+    OSD's `config show` (the running values, with the _hdd/_ssd variants
+    already resolved to what that daemon reads), or None when none was
+    collected. Raises ValueError if a required file is missing.
+    """
+    wanted = {name: key for key, name in CEPH_COLLECT_FILES.items()}
+    raw = {}
+    config_osd = None
+
+    def key_for(basename):
+        """Which collected output this file is, or None to skip it."""
+        nonlocal config_osd
+        if basename in wanted:
+            return wanted[basename]
+        # any one OSD's config will do; take the lowest id so the choice
+        # does not depend on the archive order
+        match = CEPH_COLLECT_OSD_CONFIG.match(basename)
+        if match and (config_osd is None or int(match.group(1)) < config_osd):
+            config_osd = int(match.group(1))
+            return 'osd_config'
+        return None
+
+    if os.path.isdir(path):
+        for root, _, files in os.walk(path):
+            for basename in files:
+                key = key_for(basename)
+                if key:
+                    with open(os.path.join(root, basename), 'rb') as f:
+                        raw[key] = f.read()
+    else:
+        try:
+            tar = tarfile.open(path, 'r:*')
+        except (tarfile.TarError, OSError) as e:
+            raise ValueError(f"could not open ceph-collect archive {path}: {e}")
+        with tar:
+            for member in tar:
+                if not (member.isfile() or member.issym()):
+                    continue
+                key = key_for(os.path.basename(member.name))
+                if key:
+                    # the collector stores most .json outputs as symlinks,
+                    # which extractfile resolves inside the archive
+                    raw[key] = tar.extractfile(member).read()
+
+    missing = [CEPH_COLLECT_FILES[key] for key in ('osd_dump', 'pg_dump') if key not in raw]
+    if missing:
+        raise ValueError(f"{path} is missing {', '.join(missing)}; "
+                         "is it a ceph-collect archive?")
+
+    collected = {}
+    for key, data in raw.items():
+        try:
+            collected[key] = json.loads(data)
+        except ValueError as e:
+            if key in ('osd_dump', 'pg_dump'):
+                raise ValueError(f"could not parse {CEPH_COLLECT_FILES[key]} in {path}: {e}")
+            vprint(f"Ignoring unparseable {key} in {path}: {e}")
+    collected.setdefault('osd_config', None)
+    if collected['osd_config'] is not None:
+        vprint(f"Reading recovery tunables from osd.{config_osd}'s config show")
+    return collected
+
+
+def collected_json(args, ceph_args):
+    """Answer a ceph command from the loaded ceph-collect data, or None."""
+    osd_dump = args.collected['osd_dump']
+    if ceph_args[:4] == ['osd', 'pool', 'ls', 'detail']:
+        # osd dump names the pool id 'pool'; pool ls detail calls it 'pool_id'
+        return [dict(pool, pool_id=pool.get('pool_id', pool.get('pool')))
+                for pool in osd_dump['pools']]
+    if ceph_args[:2] == ['pg', 'dump']:
+        return args.collected['pg_dump']
+    if ceph_args[:3] == ['osd', 'erasure-code-profile', 'get']:
+        profile = osd_dump.get('erasure_code_profiles', {}).get(ceph_args[3])
+        if profile is None:
+            print(f"Error: erasure code profile '{ceph_args[3]}' is not in the osd dump")
+        return profile
+    raise ValueError(f"'ceph {' '.join(ceph_args)}' is not available from a ceph-collect archive")
+
+
 def fetch_ceph_json(args, ceph_args, local_filename):
-    """Fetch JSON from the cluster, or from --from-json DIR when given.
+    """Fetch JSON from the cluster, or from --from-json DIR / --ceph-collect when given.
 
     Returns the parsed JSON, or None after reporting why it could not be read.
     A failure to reach the cluster is never silently substituted with a local
     file: analyzing the wrong cluster's data should not be possible by accident.
     """
+    if getattr(args, 'collected', None) is not None:
+        return collected_json(args, ceph_args)
+
     if args.from_json:
         path = os.path.join(args.from_json, local_filename)
         try:
@@ -1490,6 +1590,12 @@ def fetch_ceph_json(args, ceph_args, local_filename):
 
 def ceph_config_get(args, option, cast):
     """Return an osd config option from the cluster, or None if unavailable."""
+    if getattr(args, 'collected', None) is not None:
+        config = args.collected['osd_config'] or {}
+        try:
+            return cast(config[option]) if option in config else None
+        except ValueError:
+            return None
     if args.from_json:
         return None
     ceph_cmd = ['ceph', f'--cluster={args.cluster}', 'config', 'get', 'osd', option, '--format=json']
@@ -1527,6 +1633,24 @@ def fetch_ceph_config(args, option, cast, current):
 
     vprint(f"    Using default {option}: {current}")
     return current
+
+
+def osd_capacity_and_usage(pg_dump, osds):
+    """Total raw capacity and allocated bytes of the given OSDs, from osd_stats.
+
+    Returns (capacity, used), or None when the dump reports no capacity for any
+    of them.
+    """
+    wanted = set(osds)
+    capacity = used = 0
+    for stat in pg_dump['pg_map'].get('osd_stats', []):
+        if stat.get('osd') not in wanted:
+            continue
+        statfs = stat.get('statfs', {})
+        # older dumps report kb/kb_used only
+        capacity += statfs.get('total') or stat.get('kb', 0) * 1024
+        used += statfs.get('allocated') or stat.get('kb_used', 0) * 1024
+    return (capacity, used) if capacity else None
 
 
 def analyze_pool(args, pool, pg_dump):
@@ -1625,13 +1749,41 @@ def analyze_pool(args, pool, pg_dump):
         raw_to_stored_factor = 1 / (args.size)
     bytes_raw = bytes_stored / raw_to_stored_factor
     objects_raw = objects_stored / raw_to_stored_factor
-    args.tb_per_osd = bytes_raw / len(osds) / (1024**4)
     args.object_size = bytes_raw / objects_raw if objects_raw > 0 else 4*1024*1024  # default to 4MB
 
     vprint(f"    Total stored data: {format_bytes(bytes_stored)} ({format_int(objects_stored)} objects)")
     vprint(f"    Total raw data: {format_bytes(bytes_raw)} ({format_int(objects_raw)} objects)")
-    vprint(f"    Data per OSD: {format_bytes(args.tb_per_osd * 1024**4)} ({format_int(objects_raw / len(osds))} objects)")
     vprint(f"    Average object size: {format_bytes(args.object_size)}")
+
+    # Report the pool as it is today and as it will be once the cluster is
+    # --fill-ratio full: a pool that is mostly empty now recovers in seconds,
+    # and the nines it earns for that overstate what it will have once it
+    # fills up, which is what an operator has to plan for. The OSDs are
+    # shared, so each pool grows into its current share of the used space;
+    # were one tiny pool handed the whole cluster, its few PGs would be
+    # absurdly large.
+    today_tb = bytes_raw / len(osds) / (1024**4)
+    scenarios = [('as used today', today_tb)]
+    usage = osd_capacity_and_usage(pg_dump, osds)
+    if usage:
+        capacity, used = usage
+        if used > 0:
+            share = min(1.0, bytes_raw / used)
+            basis = f"{share:.1%} of the space used today"
+        else:
+            # nothing written yet: go by the PG shards each pool was given
+            pool_shards = sum(len(pg) for pg in pgs)
+            all_shards = sum(len(valid_osds(pg['acting'])) for pg in pg_stats)
+            share = pool_shards / all_shards if all_shards else 1.0
+            basis = f"{share:.1%} of the PG shards, as the cluster holds no data yet"
+        full_tb = args.fill_ratio * capacity * share / len(osds) / (1024**4)
+        scenarios.append((f"when the cluster is {args.fill_ratio:.0%} full", full_tb))
+        vprint(f"    Cluster: {format_bytes(capacity)} raw, {used / capacity:.1%} used")
+        vprint(f"    Projecting the cluster {args.fill_ratio:.0%} full, this pool at {basis}: "
+               f"{format_bytes(full_tb * 1024**4)} per OSD (today {format_bytes(today_tb * 1024**4)})")
+    else:
+        print("    Warning: the PG dump has no OSD capacities, so only today's usage is "
+              "reported; that overstates durability for a pool that is not yet full.")
 
     # Try to fetch recovery tunables from cluster
     args.osd_recovery_sleep = fetch_ceph_config(
@@ -1639,8 +1791,26 @@ def analyze_pool(args, pool, pg_dump):
     args.osd_recovery_max_active = fetch_ceph_config(
         args, 'osd_recovery_max_active', int, args.osd_recovery_max_active)
 
-    vprint("")
-    simulate(args, domains=domains)
+    for label, tb_per_osd in scenarios:
+        args.tb_per_osd = tb_per_osd
+        args.scenario = f"{label}, {format_bytes(tb_per_osd * 1024**4)} per OSD"
+        vprint("")
+        simulate(args, domains=domains)
+
+
+def warn_device_class_mismatch(args, osd_tree):
+    """Point out when --device-class does not describe the collected OSDs."""
+    if not osd_tree:
+        return
+    classes = {node.get('device_class') for node in osd_tree.get('nodes', [])
+               if node.get('type') == 'osd' and node.get('device_class')}
+    if not classes:
+        return
+    flash = classes <= {'ssd', 'nvme'}
+    if (args.device_class == 'hdd') == flash:
+        print(f"Warning: the collected OSDs are device class {', '.join(sorted(classes))} "
+              f"but --device-class is {args.device_class}; the device figures and "
+              "recovery tunables follow --device-class.")
 
 
 def analyze(args):
@@ -1649,6 +1819,11 @@ def analyze(args):
 
     cluster = args.cluster
     pool_name = args.pool
+
+    if args.ceph_collect:
+        vprint(f"Reading ceph-collect data from {args.ceph_collect} ...")
+        args.collected = read_ceph_collect(args.ceph_collect)
+        warn_device_class_mismatch(args, args.collected.get('osd_tree'))
 
     pool_data = fetch_ceph_json(args, ['osd', 'pool', 'ls', 'detail', '--format=json'],
                                 'ceph-osd-pool-ls-detail.json')
@@ -2077,7 +2252,74 @@ def test_rack_loss_fraction():
             raise AssertionError(f"width {width} gave {f}")
     print("All rack_loss_fraction tests passed.")
 
+def test_read_ceph_collect():
+    import tempfile
+    osd_dump = {'pools': [{'pool': 5, 'pool_name': 'ec', 'size': 6,
+                           'erasure_code_profile': 'p42'}],
+                'erasure_code_profiles': {'p42': {'k': '4', 'm': '2'}}}
+    pg_dump = {'pg_map': {'pg_stats': []}}
+    with tempfile.TemporaryDirectory() as tmp:
+        top = os.path.join(tmp, 'ceph-collect_20260101_000000')
+        os.mkdir(top)
+        files = {'osd_info-dump.json': osd_dump, 'pg_info-dump.json': pg_dump,
+                 'osd_info-osd.7-config_show': {'osd_recovery_sleep': '0.100000'},
+                 'osd_info-osd.3-config_show': {'osd_recovery_sleep': '0.200000'}}
+        for name, data in files.items():
+            with open(os.path.join(top, name), 'w') as f:
+                json.dump(data, f)
+        # the collector stores most .json outputs as symlinks to the bare name
+        for osd in (3, 7):
+            os.symlink(f'osd_info-osd.{osd}-config_show',
+                       os.path.join(top, f'osd_info-osd.{osd}-config_show.json'))
+        tarball = os.path.join(tmp, 'collect.tar.gz')
+        with tarfile.open(tarball, 'w:gz') as tar:
+            tar.add(top, arcname=os.path.basename(top))
+
+        for path in (tarball, top):
+            args = argparse.Namespace(from_json=None, collected=read_ceph_collect(path))
+            pools = fetch_ceph_json(args, ['osd', 'pool', 'ls', 'detail'], None)
+            if pools[0]['pool_id'] != 5:
+                raise AssertionError("osd dump 'pool' should be exposed as 'pool_id'")
+            profile = fetch_ceph_json(args, ['osd', 'erasure-code-profile', 'get', 'p42'], None)
+            if profile['k'] != '4':
+                raise AssertionError("EC profiles come from the osd dump")
+            if fetch_ceph_json(args, ['pg', 'dump'], None) != pg_dump:
+                raise AssertionError("pg dump should be returned as collected")
+            # the lowest-numbered OSD's config wins, whatever the archive order
+            if ceph_config_get(args, 'osd_recovery_sleep', float) != 0.2:
+                raise AssertionError("recovery tunables come from an OSD's config show")
+            if ceph_config_get(args, 'osd_recovery_max_active', int) is not None:
+                raise AssertionError("an option the OSD did not report is unavailable")
+
+        os.remove(os.path.join(top, 'pg_info-dump.json'))
+        try:
+            read_ceph_collect(top)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a collect without the pg dump should be rejected")
+    print("All read_ceph_collect tests passed.")
+
+
+def test_osd_capacity_and_usage():
+    pg_dump = {'pg_map': {'osd_stats': [
+        {'osd': 0, 'kb': 1, 'kb_used': 1,
+         'statfs': {'total': 4 * 1024**4, 'allocated': 1024**4}},
+        {'osd': 1, 'kb': 2 * 1024**3, 'kb_used': 1024**3},   # older dumps have no statfs
+        {'osd': 2, 'statfs': {'total': 100 * 1024**4, 'allocated': 0}},
+    ]}}
+    if osd_capacity_and_usage(pg_dump, [0, 1]) != (6 * 1024**4, 2 * 1024**4):
+        raise AssertionError("capacity should prefer statfs, falling back to kb")
+    if osd_capacity_and_usage(pg_dump, [7]) is not None:
+        raise AssertionError("OSDs the dump does not report have no capacity")
+    if osd_capacity_and_usage({'pg_map': {}}, [0]) is not None:
+        raise AssertionError("a dump without osd_stats has no capacity")
+    print("All osd_capacity_and_usage tests passed.")
+
+
 def run_tests(args):
+    test_osd_capacity_and_usage()
+    test_read_ceph_collect()
     test_comb()
     test_candidate_profiles()
     test_rack_loss_fraction()
@@ -2739,9 +2981,17 @@ def build_parser():
     add_shared_options(an)
     an.add_argument('--cluster', type=str, default='ceph', help='Ceph cluster name (default: ceph)')
     an.add_argument('--pool', type=str, help='analyze only the given pool (default: all pools)')
-    an.add_argument('--from-json', type=str, metavar='DIR',
-                    help='read saved ceph-pg-dump.json / ceph-osd-pool-ls-detail.json '
-                         'from DIR instead of querying a cluster')
+    an.add_argument('--fill-ratio', type=float, default=0.8,
+                    help='size each pool as if the cluster were this full, each pool keeping '
+                         'its share of the used space, rather than by the data stored today '
+                         '(default: 0.8)')
+    source = an.add_mutually_exclusive_group()
+    source.add_argument('--from-json', type=str, metavar='DIR',
+                        help='read saved ceph-pg-dump.json / ceph-osd-pool-ls-detail.json '
+                             'from DIR instead of querying a cluster')
+    source.add_argument('--ceph-collect', type=str, metavar='PATH',
+                        help='read a ceph-collect tarball (or its extracted directory) '
+                             'instead of querying a cluster')
     an.set_defaults(func=analyze)
 
     des = subparsers.add_parser('design',
