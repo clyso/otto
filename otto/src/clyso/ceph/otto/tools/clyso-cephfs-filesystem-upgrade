@@ -16,6 +16,7 @@ set -euo pipefail
 CEPH="${CEPH:-ceph}"
 REDEPLOY_TIMEOUT="${REDEPLOY_TIMEOUT:-600}"   # seconds to wait for an MDS to come back
 POLL_INTERVAL="${POLL_INTERVAL:-5}"           # seconds between status polls
+MON_POLL_INTERVAL="${MON_POLL_INTERVAL:-2}"   # seconds between fsmap polls inside an outage window
 
 PROG="$(basename "$0")"
 
@@ -471,6 +472,92 @@ redeploy_and_wait() {
     done
 }
 
+# ---------------------------------------------------------------------------
+# Monitor-based state (no dependence on the cephadm daemon cache, which lags
+# ~20 s behind a redeploy - that lag is inside the outage window otherwise)
+# ---------------------------------------------------------------------------
+# gid of an MDS (by daemon name without the "mds." prefix) from a cached fs dump,
+# whether it holds a rank or is a standby; empty if unknown to the monitors.
+mds_gid_cached() {
+    jq -r --arg n "$1" '
+        ([.standbys[]? | select(.name==$n) | .gid]
+         + [.filesystems[]?.mdsmap.info[]? | select(.name==$n) | .gid])
+        | .[0] // ""' <<<"$FS_DUMP_JSON"
+}
+
+# "standby" if the MDS is a plain standby in the cached fs dump, else its state
+# in the mdsmap, else "".
+mds_state_cached() {
+    jq -r --arg n "$1" '
+        if ([.standbys[]? | select(.name==$n)] | length) > 0 then "standby"
+        else ([.filesystems[]?.mdsmap.info[]? | select(.name==$n) | .state] | .[0] // "") end' \
+        <<<"$FS_DUMP_JSON"
+}
+
+# X.Y.Z version of an MDS as reported to the monitors (mds metadata); empty if
+# the daemon has not registered yet.
+MDS_METADATA_JSON=""
+refresh_mds_metadata() { MDS_METADATA_JSON="$($CEPH mds metadata --format json 2>/dev/null)"; }
+mds_version_mon() {
+    jq -r --arg n "$1" '
+        [.[] | select(.name==$n)
+         | (.ceph_version_short // (.ceph_version | capture("ceph version (?<v>[0-9]+\\.[0-9]+\\.[0-9]+)").v) // "")]
+        | .[0] // ""' <<<"$MDS_METADATA_JSON"
+}
+
+# names (without "mds.") of the standbys pinned to FS (join_fscid == fscid of FS)
+fs_pinned_standbys() {
+    jq -r --arg f "$1" '
+        (.filesystems[] | select(.mdsmap.fs_name==$f) | .id) as $id
+        | .standbys[]? | select(.join_fscid==$id) | .name' <<<"$FS_DUMP_JSON"
+}
+
+# wait until every given MDS (names with "mds.") is a plain standby known to
+# the monitors, has a gid different from the one recorded in PRE_GIDS (i.e. it
+# restarted), and reports TARGET_VERSION. $1 = timeout, rest = daemons.
+declare -A PRE_GIDS=()
+wait_standby_on_target() {
+    local timeout="$1"; shift
+    local -a batch=("$@") d n
+    local deadline=$(( $(date +%s) + timeout ))
+    while :; do
+        refresh_fs_dump; refresh_mds_metadata
+        local ok=true why=""
+        for d in "${batch[@]}"; do
+            n="${d#mds.}"
+            if [[ "$(mds_state_cached "$n")" != "standby" ]]; then ok=false; why="$d is not a standby yet"; break; fi
+            if [[ -n "${PRE_GIDS[$d]:-}" && "$(mds_gid_cached "$n")" == "${PRE_GIDS[$d]}" ]]; then ok=false; why="$d has not restarted yet"; break; fi
+            if [[ "$(mds_version_mon "$n")" != "$TARGET_VERSION" ]]; then ok=false; why="$d reports $(mds_version_mon "$n") (want $TARGET_VERSION)"; break; fi
+        done
+        $ok && return 0
+        if (( $(date +%s) >= deadline )); then
+            warn "Timed out: $why"
+            return 1
+        fi
+        sleep "$MON_POLL_INTERVAL"
+    done
+}
+
+# record the current gids of the given daemons, so a restart can be detected
+record_gids() {
+    local d
+    refresh_fs_dump
+    for d in "$@"; do PRE_GIDS["$d"]="$(mds_gid_cached "${d#mds.}")"; done
+}
+
+# wait for every rank of FS to be up:active (monitor-based). $1 = timeout.
+wait_ranks_active() {
+    local deadline=$(( $(date +%s) + $1 ))
+    while :; do
+        local want have
+        want="$(fs_get "$FS" | jq -r '.mdsmap.max_mds')"
+        have="$(fs_get "$FS" | jq -r '[.mdsmap.info[] | select(.state=="up:active")] | length')"
+        [[ "$have" -ge "$want" ]] && return 0
+        (( $(date +%s) >= deadline )) && return 1
+        sleep "$MON_POLL_INTERVAL"
+    done
+}
+
 do_upgrade() {
     # uses globals: FS, METHOD, TARGET_VERSION, IMAGE
     [[ -n "$FS" ]] || die "no filesystem specified"
@@ -596,7 +683,16 @@ do_upgrade() {
             info "Active MDS already on target; no failover needed"
         fi
     else
-        redeploy_and_wait "${STALE[@]}" || die "redeploy failed; '$FS' left FAILED. Restore with: $CEPH fs set $FS joinable true"
+        # the filesystem is failed: every MDS comes back as a standby, so wait
+        # on the monitors (immediate) rather than on 'orch ps' (~20 s cache lag)
+        record_gids "${STALE[@]}"
+        for d in "${STALE[@]}"; do
+            info "Redeploying $d -> $IMAGE"
+            $CEPH orch daemon redeploy "$d" --image "$IMAGE"
+        done
+        info "Waiting for ${#STALE[@]} MDS daemon(s) to re-register as standbys on $TARGET_VERSION (timeout ${REDEPLOY_TIMEOUT}s)"
+        wait_standby_on_target "$REDEPLOY_TIMEOUT" "${STALE[@]}" \
+            || die "redeploy failed; '$FS' left FAILED. Restore with: $CEPH fs set $FS joinable true"
     fi
 
     # Restore
