@@ -10,14 +10,28 @@ the `orch ps` cache lag, and says so before failing anything;
 `--add-standbys` avoids the fallback.
 
 
-> **`--add-standbys` needs an explicit `count` placement.** With a
-> `count_per_host` (or bare label/host) placement, the temporary daemons double
-> up on hosts; restoring the original placement makes cephadm reconcile back to
-> one-per-host and it may remove or relocate a daemon - including a rank holder -
-> while the filesystem is joinable. The script detects this, declines to add
-> standbys, and falls back to redeploying the ranks inside the outage window
-> (safe, slightly longer). For the zero-redeploy switch on such a service, add a
-> permanent standby (raise `count`/`count_per_host`) and re-run.
+> **`--add-standbys` needs an explicit `count` placement with free slots.**
+> cephadm places at most `per_host = 1 + (count - 1) // N` daemons of an MDS
+> service on each of its N candidate hosts. The temporary daemons must fit in
+> the free slots of the *original* count (`count + extras <= N * per_host`):
+> otherwise they double up on a host that already runs one, and when the
+> original placement is restored cephadm reconciles that host and removes a
+> daemon - possibly a rank holder, i.e. an unplanned failover while the
+> filesystem serves. The same goes for a `count_per_host` or bare label/host
+> placement. The script checks this before adding anything, declines if there
+> is no room, and falls back to redeploying the ranks inside the outage window
+> (safe, slightly longer). To get the zero-redeploy switch, make room: add the
+> placement label to another host, or add a permanent standby.
+>
+> While adding, the set of new daemons is accepted only once the service holds
+> exactly the raised count and that set is stable over two polls (a failed
+> deploy makes cephadm place a replacement and remove the surplus later), and
+> the script checks that no host went above the original per-host limit. When
+> bringing the service back to its original count after the switch, the idle
+> standbys it removes are chosen host by host, over-limit hosts first; if a
+> host is still above the limit with only rank holders left, the service is
+> left **unmanaged** rather than letting cephadm fail a rank over, and the
+> command to restore it is printed.
 
 ## How it works
 

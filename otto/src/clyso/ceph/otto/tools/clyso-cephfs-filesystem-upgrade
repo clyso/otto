@@ -793,16 +793,46 @@ fs_service_spec() {
         | jq -c 'if type=="array" then .[0] else . end'
 }
 
+# hosts cephadm may place the daemons of a spec on (its label or its explicit
+# host list), without the offline / maintenance / _no_schedule ones. One per
+# line; empty when the placement cannot be resolved (e.g. host_pattern).
+spec_candidate_hosts() {
+    local spec="$1" label hosts_json
+    hosts_json="$($CEPH orch host ls --format json 2>/dev/null)" || return 0
+    label="$(jq -r '.placement.label // empty' <<<"$spec")"
+    if [[ -n "$label" ]]; then
+        jq -r --arg l "$label" '.[]
+            | select(((.labels // []) | index($l)) and (((.labels // []) | index("_no_schedule")) | not) and ((.status // "") == ""))
+            | .hostname' <<<"$hosts_json" | sort -u
+    elif jq -e '(.placement.hosts // []) | length > 0' <<<"$spec" >/dev/null; then
+        jq -r --argjson s "$spec" '
+            ([$s.placement.hosts[] | if type=="object" then .hostname else (split(":")[0] | split("=")[0]) end]) as $want
+            | .[] | select(.hostname as $h | $want | index($h))
+            | select((((.labels // []) | index("_no_schedule")) | not) and ((.status // "") == ""))
+            | .hostname' <<<"$hosts_json" | sort -u
+    fi
+}
+
+# cephadm's per-host limit for a service with an explicit 'count' spread over
+# N candidate hosts (mgr/cephadm/schedule.py, colocation allowed for mds):
+#   per_host = 1 + (count - 1) // N
+# $1 = count, $2 = number of candidate hosts
+placement_per_host() { echo $(( 1 + ($1 - 1) / $2 )); }
+
 # add_temp_standbys N: deploy N more daemons in service mds.$FS, wait until the
 # monitors see them as standbys pinned to FS on TARGET_VERSION. Sets
 # ORIG_SPEC_JSON and EXTRA_DAEMONS.
 # --add-standbys is only safe when the service placement is bound by an explicit
-# 'count'. With count_per_host (or a bare label/host placement), the extra
-# daemons double up on hosts and, when the original placement is restored,
-# cephadm reconciles back to one-per-host and may remove or relocate a daemon -
-# including a rank holder - while the filesystem is joinable. Prints "" if
-# supported, else a reason string.
+# 'count' AND the extra daemons fit in free placement slots. cephadm allows
+# per_host = 1 + (count-1)//N daemons per host: raising the count beyond
+# N * per_host(original count) raises that limit, the extras double up on hosts
+# that already run one, and when the original placement is restored cephadm
+# reconciles back to the original limit and removes a daemon from the doubled
+# host - possibly a rank holder, i.e. an unplanned failover while the fs serves.
+# Same with count_per_host or a bare label/host placement. $1 = number of
+# standbys to add. Prints "" if supported, else a reason string.
 add_standbys_unsupported_reason() {
+    local need="${1:-1}"
     local spec; spec="$(fs_service_spec "$FS")"
     [[ -n "$spec" && "$spec" != "null" ]] || { echo "cannot read the spec of service mds.$FS"; return; }
     local cnt cph
@@ -810,9 +840,51 @@ add_standbys_unsupported_reason() {
     cph="$(jq -r '.placement.count_per_host // empty' <<<"$spec")"
     if [[ -n "$cph" ]]; then
         echo "service mds.$FS uses a count_per_host placement"
+        return
     elif [[ -z "$cnt" ]]; then
         echo "service mds.$FS has no explicit placement count (label/host placement)"
+        return
     fi
+    local -a hosts=()
+    mapfile -t hosts < <(spec_candidate_hosts "$spec")
+    [[ ${#hosts[@]} -gt 0 ]] || { echo "cannot resolve the candidate hosts of service mds.$FS (label/hosts placement expected)"; return; }
+    local per_host cap
+    per_host="$(placement_per_host "$cnt" "${#hosts[@]}")"
+    cap=$(( ${#hosts[@]} * per_host ))
+    if (( cnt + need > cap )); then
+        echo "no free placement slot for $need more daemon(s): count $cnt on ${#hosts[@]} host(s) (${hosts[*]}) allows $per_host per host ($cap slots), so the temporary daemons would share a host with an existing one and cephadm would remove one of them - possibly a rank holder - when the placement is restored. Add the placement label to another host (or add hosts to the placement) to make room"
+    fi
+}
+
+# hostname of an MDS (name with "mds.") from the cached orch ps
+daemon_host() {
+    jq -r --arg n "$1" '.[] | select(.daemon_name==$n) | .hostname // ""' <<<"$MDS_PS_JSON"
+}
+
+# hosts where mds.$FS runs more daemons than the ORIGINAL placement allows per
+# host, not counting the daemons given as arguments (planned removals). Prints
+# "host=n/limit ..." or "". Uses ORIG_SPEC_JSON and the cached MDS_PS_JSON.
+ORIG_CAND_HOSTS=()
+hosts_over_placement_limit() {
+    local cnt per_host d x h skip out=""
+    cnt="$(jq -r '.placement.count // empty' <<<"$ORIG_SPEC_JSON")"
+    [[ -n "$cnt" ]] || return 0
+    [[ ${#ORIG_CAND_HOSTS[@]} -gt 0 ]] || mapfile -t ORIG_CAND_HOSTS < <(spec_candidate_hosts "$ORIG_SPEC_JSON")
+    [[ ${#ORIG_CAND_HOSTS[@]} -gt 0 ]] || return 0
+    per_host="$(placement_per_host "$cnt" "${#ORIG_CAND_HOSTS[@]}")"
+    local -A per=()
+    while IFS= read -r d; do
+        [[ -n "$d" ]] || continue
+        skip=false
+        for x in "$@"; do [[ "$x" == "$d" ]] && skip=true; done
+        $skip && continue
+        h="$(daemon_host "$d")"
+        [[ -n "$h" ]] && per[$h]=$(( ${per[$h]:-0} + 1 ))
+    done < <(fs_daemons "$FS")
+    for h in "${!per[@]}"; do
+        (( per[$h] > per_host )) && out="$out $h=${per[$h]}/$per_host"
+    done
+    echo "${out# }"
 }
 
 add_temp_standbys() {
@@ -847,27 +919,44 @@ add_temp_standbys() {
         | $CEPH orch apply -i - >/dev/null
 
     info "Waiting for the $need new MDS to be created and registered with $FS"
+    # The set of extras is accepted only once the service holds exactly
+    # new_count daemons and that set is the same on two consecutive polls: a
+    # failed deploy makes cephadm place a replacement and then remove the
+    # surplus once the failed one recovers - an extra picked up in between
+    # would be removed by cephadm later, possibly while holding a rank.
     local deadline=$(( $(date +%s) + REDEPLOY_TIMEOUT ))
+    local prev_extras="" cur_extras total
     while :; do
         refresh_mds_ps; refresh_fs_dump
         EXTRA_DAEMONS=()
+        total=0
         while IFS= read -r d; do
             [[ -n "$d" ]] || continue
+            total=$((total + 1))
             local seen=false b
             for b in "${before[@]}"; do [[ "$b" == "$d" ]] && seen=true; done
             $seen || EXTRA_DAEMONS+=("$d")
         done < <(fs_daemons "$FS")
-        if [[ ${#EXTRA_DAEMONS[@]} -ge "$need" ]]; then
+        cur_extras="${EXTRA_DAEMONS[*]:-}"
+        if [[ ${#EXTRA_DAEMONS[@]} -eq "$need" && "$total" -eq "$new_count" ]]; then
             # all new daemons known to the monitors (as standbys)?
             local ready=true
             for d in "${EXTRA_DAEMONS[@]}"; do
                 [[ "$(mds_state_cached "${d#mds.}")" == "standby" ]] || { ready=false; break; }
             done
-            $ready && break
+            $ready && [[ "$cur_extras" == "$prev_extras" ]] && break
         fi
+        prev_extras="$cur_extras"
         (( $(date +%s) >= deadline )) && die "timed out waiting for the temporary standbys of $FS (created so far: ${EXTRA_DAEMONS[*]:-none}). Nothing has been failed; restore the placement with: $CEPH orch apply -i <original spec>"
         sleep "$POLL_INTERVAL"
     done
+
+    # the extras must sit in free placement slots: a host above the original
+    # per-host limit would be reconciled by cephadm (one daemon removed) when
+    # the placement is restored. Checked before anything is failed; the exit
+    # trap removes the extras and restores the spec.
+    local over; over="$(hosts_over_placement_limit)"
+    [[ -z "$over" ]] || die "cephadm placed the temporary standbys on hosts that already run a daemon of mds.$FS ($over): restoring the placement later would remove one of them, possibly a rank holder. Nothing has been failed."
 
     # they should already run the target; redeploy only a daemon that does not
     # (e.g. an image pin resolved differently on its host) - normally none
@@ -953,50 +1042,80 @@ remove_temp_standbys() {
 #      no point upgrading a daemon that is about to be removed;
 #   2. idle temporary standbys;
 #   3. idle upgraded permanent standbys.
-# Only plain standbys are removed - never a rank holder, so no failover. Sets
+# Only plain standbys are removed - never a rank holder, so no failover. The
+# choice is also host-aware: a standby on a host above the original per-host
+# limit is removed first, whatever its class, because cephadm would otherwise
+# reconcile that host itself once the placement is restored and could remove
+# a rank holder there. If a host is still above the limit after the removals
+# (only rank holders left on it), the service is left UNMANAGED rather than
+# letting cephadm fail a rank over; the command to restore it is printed. Sets
 # STALE_KEEP to the previous actives that stay and still need the upgrade.
 declare -a STALE_KEEP=()
 shrink_after_switch() {
-    local need=${#EXTRA_DAEMONS[@]} d n
+    local need=${#EXTRA_DAEMONS[@]} d n x
     STALE_KEEP=("${STALE_RANK[@]}")
     [[ $need -gt 0 ]] || return 0
     info "Bringing mds.$FS back to its original placement: $need daemon(s) to remove, previous actives first (no point upgrading them)"
     jq -c '.unmanaged = true' <<<"$ORIG_SPEC_JSON" | $CEPH orch apply -i - >/dev/null
-    refresh_fs_dump
-    local -a victims=() keep=()
+    refresh_fs_dump; refresh_mds_ps
+
+    # removable daemons (plain standbys), in order of preference
+    local -a cands=()
+    for d in "${STALE_RANK[@]}" "${EXTRA_DAEMONS[@]}"; do
+        [[ "$(mds_state_cached "${d#mds.}")" == "standby" ]] && cands+=("$d")
+    done
+    while IFS= read -r d; do
+        [[ -n "$d" ]] || continue
+        local skip=false
+        for x in "${EXTRA_DAEMONS[@]}" "${STALE_RANK[@]}"; do [[ "$x" == "$d" ]] && skip=true; done
+        $skip && continue
+        [[ "$(mds_state_cached "${d#mds.}")" == "standby" ]] && cands+=("$d")
+    done < <(fs_daemons "$FS")
+
+    # pick victims one at a time: the first candidate on an over-limit host,
+    # else the first candidate
+    local -a victims=()
+    local over pick c h taken
+    while [[ ${#victims[@]} -lt $need ]]; do
+        over=" $(hosts_over_placement_limit "${victims[@]}") "
+        pick=""
+        for c in "${cands[@]}"; do
+            taken=false
+            for x in "${victims[@]}"; do [[ "$x" == "$c" ]] && taken=true; done
+            $taken && continue
+            h="$(daemon_host "$c")"
+            if [[ -n "$h" && "$over" == *" $h="* ]]; then pick="$c"; break; fi
+            [[ -n "$pick" ]] || pick="$c"
+        done
+        [[ -n "$pick" ]] || break
+        victims+=("$pick")
+    done
+
+    local -a keep=()
     for d in "${STALE_RANK[@]}"; do
-        if [[ ${#victims[@]} -lt $need && "$(mds_state_cached "${d#mds.}")" == "standby" ]]; then
-            victims+=("$d")
-        else
-            keep+=("$d")
-        fi
+        taken=false
+        for x in "${victims[@]}"; do [[ "$x" == "$d" ]] && taken=true; done
+        $taken || keep+=("$d")
     done
     STALE_KEEP=("${keep[@]}")
-    if [[ ${#victims[@]} -lt $need ]]; then
-        refresh_mds_ps
-        local -a pool=("${EXTRA_DAEMONS[@]}")
-        while IFS= read -r d; do
-            [[ -n "$d" ]] || continue
-            local skip=false x
-            for x in "${EXTRA_DAEMONS[@]}" "${STALE_RANK[@]}"; do [[ "$x" == "$d" ]] && skip=true; done
-            $skip || pool+=("$d")
-        done < <(fs_daemons "$FS")
-        for d in "${pool[@]}"; do
-            [[ ${#victims[@]} -lt $need ]] || break
-            [[ "$(mds_state_cached "${d#mds.}")" == "standby" ]] && victims+=("$d")
-        done
-    fi
+    over="$(hosts_over_placement_limit "${victims[@]}")"
+
     for d in "${victims[@]}"; do
         local why=""
         for x in "${STALE_RANK[@]}"; do [[ "$x" == "$d" ]] && why=" (previous active, still old: removed instead of upgraded)"; done
-        info "Removing idle standby $d$why"
+        info "Removing idle standby $d on $(daemon_host "$d")$why"
         $CEPH orch daemon rm "$d" --force >/dev/null
         $CEPH config rm "mds.${d#mds.}" container_image >/dev/null 2>&1 || true
     done
     [[ ${#victims[@]} -ge $need ]] \
         || warn "only ${#victims[@]} of $need idle daemon(s) could be removed (the others hold ranks); mds.$FS keeps $(( need - ${#victims[@]} )) daemon(s) more than its placement asks for"
-    info "Restoring the original placement of service mds.$FS"
-    jq -c '.unmanaged = false' <<<"$ORIG_SPEC_JSON" | $CEPH orch apply -i - >/dev/null
+    if [[ -n "$over" ]]; then
+        warn "host(s) above the per-host limit of mds.$FS's placement with only rank holders left: $over. Restoring the managed placement now would make cephadm remove one of them (a failover). Leaving service mds.$FS UNMANAGED; once a planned failover is acceptable, restore it with:"
+        warn "    $CEPH orch apply -i - <<<'$(jq -c '.unmanaged = false' <<<"$ORIG_SPEC_JSON")'"
+    else
+        info "Restoring the original placement of service mds.$FS"
+        jq -c '.unmanaged = false' <<<"$ORIG_SPEC_JSON" | $CEPH orch apply -i - >/dev/null
+    fi
     EXTRA_DAEMONS=()
 }
 
@@ -1127,9 +1246,9 @@ do_upgrade_fail_fs() {
         on_target "$(mds_version_mon "$n")" && READY+=("mds.$n")
     done < <(fs_pinned_standbys "$FS")
     if [[ ${#READY[@]} -lt "$ranks" ]] && $ADD_STANDBYS; then
-        local addreason; addreason="$(add_standbys_unsupported_reason)"
+        local addreason; addreason="$(add_standbys_unsupported_reason $(( ranks - ${#READY[@]} )))"
         if [[ -n "$addreason" ]]; then
-            warn "--add-standbys is not supported here: $addreason. The temporary daemons would double up on hosts and cephadm would reshuffle them (possibly a rank) when the placement is restored. Proceeding WITHOUT adding standbys (the ranks will be redeployed inside the outage window instead). To get the zero-redeploy switch, add a permanent standby to mds.$FS (e.g. raise count/count_per_host) and re-run."
+            warn "--add-standbys is not supported here: $addreason. Proceeding WITHOUT adding standbys (the ranks will be redeployed inside the outage window instead). To get the zero-redeploy switch, add a permanent standby to mds.$FS (e.g. raise count/count_per_host) and re-run."
         else
             add_temp_standbys $(( ranks - ${#READY[@]} ))
             refresh_fs_dump; refresh_mds_metadata
