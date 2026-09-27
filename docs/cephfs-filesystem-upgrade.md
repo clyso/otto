@@ -32,6 +32,18 @@ the `orch ps` cache lag, and says so before failing anything;
 > host is still above the limit with only rank holders left, the service is
 > left **unmanaged** rather than letting cephadm fail a rank over, and the
 > command to restore it is printed.
+>
+> The candidate hosts are resolved as cephadm does: the explicit host list,
+> else the label, else every host, then `host_pattern` if any; draining hosts
+> (`_no_schedule`) are left out, but offline and maintenance hosts are kept -
+> cephadm does not move MDS daemons away from unreachable hosts, so they count
+> in the per-host limit. Since cephadm cannot deploy on an unreachable host,
+> the free slots must also be on reachable ones.
+
+An MDS the monitors do not know (down, e.g. on an offline host) holds no rank
+and cannot take one while down: it is fenced like the other previous actives,
+never waited for inside the outage window, and its redeploy is only scheduled
+after the switch.
 
 ## How it works
 

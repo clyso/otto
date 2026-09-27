@@ -869,24 +869,45 @@ fs_service_spec() {
         | jq -c 'if type=="array" then .[0] else . end'
 }
 
-# hosts cephadm may place the daemons of a spec on (its label or its explicit
-# host list), without the offline / maintenance / _no_schedule ones. One per
-# line; empty when the placement cannot be resolved (e.g. host_pattern).
+# hosts cephadm may place the daemons of a spec on, as HostAssignment.get_candidates
+# (mgr/cephadm/schedule.py) computes them: the explicit host list, else the
+# label, else every host; then host_pattern if any. Draining hosts (label
+# _no_schedule) are left out. Offline and maintenance hosts are KEPT: cephadm
+# only reschedules haproxy and nfs away from unreachable hosts, so they still
+# count in the per-host limit of an MDS service. One per line; empty when the
+# placement cannot be resolved (unknown host_pattern type).
 spec_candidate_hosts() {
-    local spec="$1" label hosts_json
+    local spec="$1" hosts_json label pat ptype h
     hosts_json="$($CEPH orch host ls --format json 2>/dev/null)" || return 0
-    label="$(jq -r '.placement.label // empty' <<<"$spec")"
-    if [[ -n "$label" ]]; then
-        jq -r --arg l "$label" '.[]
-            | select(((.labels // []) | index($l)) and (((.labels // []) | index("_no_schedule")) | not) and ((.status // "") == ""))
-            | .hostname' <<<"$hosts_json" | sort -u
-    elif jq -e '(.placement.hosts // []) | length > 0' <<<"$spec" >/dev/null; then
-        jq -r --argjson s "$spec" '
+    local -a base=()
+    if jq -e '(.placement.hosts // []) | length > 0' <<<"$spec" >/dev/null; then
+        mapfile -t base < <(jq -r --argjson s "$spec" '
             ([$s.placement.hosts[] | if type=="object" then .hostname else (split(":")[0] | split("=")[0]) end]) as $want
             | .[] | select(.hostname as $h | $want | index($h))
-            | select((((.labels // []) | index("_no_schedule")) | not) and ((.status // "") == ""))
-            | .hostname' <<<"$hosts_json" | sort -u
+            | select(((.labels // []) | index("_no_schedule")) | not)
+            | .hostname' <<<"$hosts_json")
+    else
+        label="$(jq -r '.placement.label // empty' <<<"$spec")"
+        mapfile -t base < <(jq -r --arg l "$label" '.[]
+            | select(($l == "") or ((.labels // []) | index($l)))
+            | select(((.labels // []) | index("_no_schedule")) | not)
+            | .hostname' <<<"$hosts_json")
     fi
+    # host_pattern: a string (fnmatch) up to reef, an object {pattern, pattern_type} later
+    pat="$(jq -r '.placement.host_pattern | if type=="object" then .pattern else . end // empty' <<<"$spec")"
+    ptype="$(jq -r '.placement.host_pattern | if type=="object" then (.pattern_type // "fnmatch") else "fnmatch" end' <<<"$spec" 2>/dev/null)"
+    for h in "${base[@]}"; do
+        [[ -n "$h" ]] || continue
+        if [[ -n "$pat" ]]; then
+            case "${ptype,,}" in
+                fnmatch) # shellcheck disable=SC2053
+                         [[ "$h" == $pat ]] || continue ;;
+                regex)   [[ "$h" =~ ^($pat) ]] || continue ;;
+                *)       return 0 ;;
+            esac
+        fi
+        echo "$h"
+    done | sort -u
 }
 
 # cephadm's per-host limit for a service with an explicit 'count' spread over
@@ -929,6 +950,21 @@ add_standbys_unsupported_reason() {
     cap=$(( ${#hosts[@]} * per_host ))
     if (( cnt + need > cap )); then
         echo "no free placement slot for $need more daemon(s): count $cnt on ${#hosts[@]} host(s) (${hosts[*]}) allows $per_host per host ($cap slots), so the temporary daemons would share a host with an existing one and cephadm would remove one of them - possibly a rank holder - when the placement is restored. Add the placement label to another host (or add hosts to the placement) to make room"
+        return
+    fi
+    # cephadm never deploys on an unreachable (offline / maintenance) host, so
+    # the free slots must be on reachable ones, or the extras never show up
+    local hosts_json free=0 h n st
+    hosts_json="$($CEPH orch host ls --format json 2>/dev/null)"
+    refresh_mds_ps
+    for h in "${hosts[@]}"; do
+        st="$(jq -r --arg h "$h" '.[] | select(.hostname==$h) | .status // ""' <<<"$hosts_json")"
+        [[ -z "$st" ]] || continue
+        n="$(jq -r --arg s "mds.$FS" --arg h "$h" '[.[] | select(.service_name==$s and .hostname==$h)] | length' <<<"$MDS_PS_JSON")"
+        (( per_host > n )) && free=$(( free + per_host - n ))
+    done
+    if (( free < need )); then
+        echo "only $free free placement slot(s) on reachable hosts for $need more daemon(s) (limit $per_host per host on ${hosts[*]}; cephadm does not deploy on offline or maintenance hosts)"
     fi
 }
 
@@ -1127,6 +1163,7 @@ remove_temp_standbys() {
 # letting cephadm fail a rank over; the command to restore it is printed. Sets
 # STALE_KEEP to the previous actives that stay and still need the upgrade.
 declare -a STALE_KEEP=()
+declare -a STALE_DOWN=()
 shrink_after_switch() {
     local need=${#EXTRA_DAEMONS[@]} d n x
     STALE_KEEP=("${STALE_RANK[@]}")
@@ -1280,7 +1317,11 @@ do_upgrade_fail_fs() {
     # -- split: standbys (upgrade now, fs serving) / ranks (upgrade after the switch).
     # A daemon momentarily unknown to the monitors is retried briefly before it is
     # classified as a rank, to ride out any re-registration gap.
+    # STALE_DOWN: daemons the monitors do not know (down, e.g. on an offline
+    # host). They hold no rank and cannot take one while down; they are
+    # redeployed after the switch and never waited for inside the outage window.
     local -a STALE_STANDBY=() STALE_RANK=()
+    STALE_DOWN=()
     for d in "${STALE[@]}"; do
         n="${d#mds.}"
         local st; st="$(mds_state_cached "$n")"
@@ -1293,7 +1334,7 @@ do_upgrade_fail_fs() {
         case "$st" in
             standby)   STALE_STANDBY+=("$d") ;;
             up:active) STALE_RANK+=("$d") ;;
-            "")        warn "$d is not known to the monitors (down?); it will be redeployed after the switch"; STALE_RANK+=("$d") ;;
+            "")        warn "$d is not known to the monitors (down, host offline?); it will be redeployed after the switch, without holding it up"; STALE_DOWN+=("$d") ;;
             *)         warn "$d is in a transitional state ($st); it will be redeployed after the switch"; STALE_RANK+=("$d") ;;
         esac
     done
@@ -1363,8 +1404,15 @@ do_upgrade_fail_fs() {
         FS_FROZEN=true
         info "Ranks of $FS frozen (joinable=false): the actives keep serving, no promotion or rank re-balancing until the switch"
         # 2. fence the old actives, and wait until the monitors see it
-        fence_old_actives "${STALE_RANK[@]}" || die "could not fence the old actives; '$FS' is still serving, nothing was changed"
-        wait_join_fscid -1 60 "${FENCED_DAEMONS[@]}" \
+        fence_old_actives "${STALE_RANK[@]}" "${STALE_DOWN[@]}" || die "could not fence the old actives; '$FS' is still serving, nothing was changed"
+        # wait only for the daemons the monitors know: one that is down (e.g. on
+        # an offline host) cannot take a rank now, and re-registers unpinned
+        refresh_fs_dump
+        local -a fence_wait=()
+        for d in "${FENCED_DAEMONS[@]}"; do
+            [[ -n "$(mds_state_cached "${d#mds.}")" ]] && fence_wait+=("$d")
+        done
+        [[ ${#fence_wait[@]} -eq 0 ]] || wait_join_fscid -1 60 "${fence_wait[@]}" \
             || die "the monitors do not show the old actives unpinned after 60s; '$FS' is still serving, nothing was changed"
         info "Old actives fenced: only the upgraded standbys can take a rank at the switch"
     fi
@@ -1408,6 +1456,12 @@ do_upgrade_fail_fs() {
     # old daemons are pinned to $FS again and no other filesystem can borrow
     # them as unpinned standbys
     unfence_old_actives
+    if [[ ${#STALE_DOWN[@]} -gt 0 ]]; then
+        warn "redeploying ${#STALE_DOWN[@]} MDS the monitors do not know (${STALE_DOWN[*]}) on $IMAGE; not waiting for them - cephadm deploys them when their host is back"
+        for d in "${STALE_DOWN[@]}"; do
+            $CEPH orch daemon redeploy "$d" --image "$IMAGE" >/dev/null 2>&1 || warn "could not schedule the redeploy of $d"
+        done
+    fi
 
     # -- phase 3: the previous actives, now standbys, filesystem serving. The
     # fence kept them out of the ranks at the switch; redeploy the ones that
