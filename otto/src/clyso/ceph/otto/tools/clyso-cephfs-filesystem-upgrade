@@ -24,6 +24,7 @@ REDEPLOY_TIMEOUT="${REDEPLOY_TIMEOUT:-600}"   # seconds to wait for an MDS to co
 POLL_INTERVAL="${POLL_INTERVAL:-5}"           # seconds between status polls
 MON_POLL_INTERVAL="${MON_POLL_INTERVAL:-2}"   # seconds between fsmap polls inside an outage window
 CHURN_CHECK_SECS="${CHURN_CHECK_SECS:-4}"      # window used to detect background MDS restarts before a switch
+FLUSH_TIMEOUT="${FLUSH_TIMEOUT:-60}"          # seconds allowed per 'flush journal' (--flush-journal)
 
 PROG="$(basename "$0")"
 
@@ -737,8 +738,15 @@ flush_active_journals() {
     local n
     while IFS= read -r n; do
         [[ -n "$n" ]] || continue
-        info "Flushing journal of mds.$n (rank of $FS)"
-        $CEPH tell "mds.$n" flush journal >/dev/null 2>&1 || warn "flush journal on mds.$n failed; replay may take longer"
+        info "Flushing journal of mds.$n (rank of $FS, max ${FLUSH_TIMEOUT}s)"
+        # bounded: 'ceph tell' waits forever for an MDS that has left the map
+        local rc=0
+        timeout "$FLUSH_TIMEOUT" $CEPH tell "mds.$n" flush journal >/dev/null 2>&1 || rc=$?
+        if [[ $rc -eq 124 ]]; then
+            warn "flush journal on mds.$n timed out after ${FLUSH_TIMEOUT}s; replay may take longer"
+        elif [[ $rc -ne 0 ]]; then
+            warn "flush journal on mds.$n failed; replay may take longer"
+        fi
     done < <(fs_get "$FS" | jq -r '.mdsmap.info[] | select(.state=="up:active") | .name')
 }
 
@@ -784,6 +792,74 @@ restore_service_image_pin() {
     else
         $CEPH config rm "mds.$FS" container_image >/dev/null 2>&1 || true
     fi
+    SVC_PIN_CHANGED=false
+}
+
+# Once EVERY daemon of mds.$FS runs the target, move the image from the
+# per-daemon sections to the service: set mds.<fs> container_image and drop the
+# mds.<fs>.<host>.<id> overrides that 'orch daemon redeploy --image' leaves
+# behind. Otherwise those overrides outlive the upgrade, shadow any later
+# service-level change and a new daemon of the service would be born on the
+# old service image. Changing container_image redeploys nothing (see above).
+# The service is pinned to the repo digest the daemons actually run when they
+# all share a single one, else to IMAGE, so cephadm has no tag -> digest
+# difference to reconcile later. When that image is the global container_image
+# the mds.<fs> setting is removed instead: it would only duplicate global, and
+# would keep the service on this image once global moves on.
+# Left untouched, with a warning, while any daemon is not running the target:
+# there the overrides are what keeps the upgraded daemons on it.
+consolidate_image_pins() {
+    local deadline=$(( $(date +%s) + 120 )) d ok pin cur glob sec
+    local -a daemons=() lagging=() overrides=()
+    while :; do
+        refresh_mds_ps
+        mapfile -t daemons < <(fs_daemons "$FS")
+        lagging=()
+        for d in "${daemons[@]}"; do
+            [[ "$(daemon_status "$d")" == "running" ]] && on_target "$(daemon_version "$d")" || lagging+=("$d")
+        done
+        [[ ${#lagging[@]} -eq 0 ]] && break
+        if (( $(date +%s) >= deadline )); then
+            warn "not every MDS of $FS runs $TARGET_VERSION (${lagging[*]}): container_image left per daemon; once they do, run:"
+            warn "    $CEPH config set mds.$FS container_image $IMAGE"
+            warn "    for s in \$($CEPH config dump --format json | jq -r '.[] | select(.name==\"container_image\" and (.section|startswith(\"mds.$FS.\"))) | .section'); do $CEPH config rm \$s container_image; done"
+            return 0
+        fi
+        sleep "$POLL_INTERVAL"
+    done
+
+    # container_image_name may be the tag for some daemons and the digest for
+    # others (same image); the repo digests are what they have in common
+    pin="$(jq -r --arg s "mds.$FS" '[.[] | select(.service_name==$s) | (.container_image_digests // [""])[]] | unique | if length==1 and .[0]!="" then .[0] else "" end' <<<"$MDS_PS_JSON")"
+    [[ -n "$pin" ]] || pin="$IMAGE"
+
+    refresh_config_dump
+    cur="$(jq -r --arg s "mds.$FS" '[.[] | select(.section==$s and .name=="container_image") | .value] | .[0] // ""' <<<"$CONFIG_DUMP_JSON")"
+    mapfile -t overrides < <(jq -r --arg p "mds.$FS." '.[] | select(.name=="container_image" and (.section|startswith($p))) | .section' <<<"$CONFIG_DUMP_JSON")
+
+    glob="$(jq -r '[.[] | select(.section=="global" and .name=="container_image") | .value] | .[0] // ""' <<<"$CONFIG_DUMP_JSON")"
+
+    if [[ -n "$glob" && "$pin" == "$glob" ]]; then
+        if [[ -n "$cur" ]]; then
+            info "Every MDS of $FS runs $TARGET_VERSION on the global container_image: removing mds.$FS container_image ($cur)"
+            $CEPH config rm "mds.$FS" container_image >/dev/null \
+                || { warn "could not remove mds.$FS container_image; per-daemon overrides kept"; return 0; }
+        else
+            info "mds.$FS inherits the global container_image ($glob)"
+        fi
+    elif [[ "$cur" == "$pin" ]]; then
+        info "mds.$FS container_image already on $pin"
+    else
+        info "Every MDS of $FS runs $TARGET_VERSION: setting mds.$FS container_image $pin"
+        $CEPH config set "mds.$FS" container_image "$pin" >/dev/null \
+            || { warn "could not set mds.$FS container_image; per-daemon overrides kept"; return 0; }
+    fi
+    for sec in "${overrides[@]}"; do
+        [[ -n "$sec" ]] || continue
+        info "Removing per-daemon override: $CEPH config rm $sec container_image"
+        $CEPH config rm "$sec" container_image >/dev/null 2>&1 \
+            || warn "could not remove container_image from $sec; do it by hand: $CEPH config rm $sec container_image"
+    done
     SVC_PIN_CHANGED=false
 }
 
@@ -1279,9 +1355,13 @@ do_upgrade_fail_fs() {
         verify_switch_ready "$ranks"
         # 1. not joinable: the actives keep serving, but the monitors no longer
         #    promote a standby nor re-balance ranks by affinity
-        info "Setting $FS not joinable (the actives keep serving; no promotion or rank re-balancing until the switch)"
-        $CEPH fs set "$FS" joinable false >/dev/null
+        # ceph's own reply ("marked not joinable; MDS cannot join as newly
+        # active") reads too much like the 'fs fail' one: shown only on error
+        local out
+        out="$($CEPH fs set "$FS" joinable false 2>&1)" \
+            || die "could not set $FS not joinable: $out; '$FS' is still serving, nothing was changed"
         FS_FROZEN=true
+        info "Ranks of $FS frozen (joinable=false): the actives keep serving, no promotion or rank re-balancing until the switch"
         # 2. fence the old actives, and wait until the monitors see it
         fence_old_actives "${STALE_RANK[@]}" || die "could not fence the old actives; '$FS' is still serving, nothing was changed"
         wait_join_fscid -1 60 "${FENCED_DAEMONS[@]}" \
@@ -1295,11 +1375,13 @@ do_upgrade_fail_fs() {
     # old ones so their restart can be detected
     record_gids "${STALE_RANK[@]}"
     info "Failing filesystem $FS (outage starts)"
-    local t0; t0=$(date +%s)
-    if ! $CEPH fs fail "$FS"; then
+    local t0 fout; t0=$(date +%s)
+    if ! fout="$($CEPH fs fail "$FS" 2>&1)"; then
+        echo "$fout" >&2
         die "fs fail refused for '$FS'; nothing was changed. Check 'ceph health detail' (MDS_TRIM / MDS_CACHE_OVERSIZED refuse 'fs fail' on recent releases; --flush-journal can help with MDS_TRIM)"
     fi
     PRE_SWITCH=false
+    info "$FS failed: all ranks down"
 
     if ! $full_switch; then
         # like fail_fs, but the wait is monitor-based instead of orch ps
@@ -1312,8 +1394,10 @@ do_upgrade_fail_fs() {
             || die "redeploy failed; '$FS' left FAILED. Restore with: $CEPH fs set $FS joinable true"
     fi
 
-    info "Setting $FS joinable"
-    $CEPH fs set "$FS" joinable true
+    info "Setting $FS joinable (the ranks are handed to the standbys)"
+    local jout
+    jout="$($CEPH fs set "$FS" joinable true 2>&1)" \
+        || die "could not set $FS joinable: $jout; '$FS' is left FAILED. Restore with: $CEPH fs set $FS joinable true"
     if wait_ranks_active "$REDEPLOY_TIMEOUT"; then
         info "All $ranks rank(s) of $FS active again (outage: $(( $(date +%s) - t0 ))s)"
     else
@@ -1345,10 +1429,9 @@ do_upgrade_fail_fs() {
     else
         info "Phase 3/3: nothing left to upgrade"
     fi
-    if $SVC_PIN_CHANGED; then
-        info "mds.$FS container_image left on the target image (every daemon of $FS runs it now)"
-        SVC_PIN_CHANGED=false
-    fi
+    # mds.$FS container_image (set by --add-standbys) is left on the target
+    # image; consolidate_image_pins (called by do_upgrade) settles it
+    SVC_PIN_CHANGED=false
     trap - EXIT INT TERM
 
     # final convergence check: after phase 3 every rank should be on target. If
@@ -1458,6 +1541,7 @@ do_upgrade() {
 
     if [[ "$METHOD" == "fail_fs" ]]; then
         do_upgrade_fail_fs
+        consolidate_image_pins
         echo
         info "Done. Final state of $FS:"
         sleep 3
@@ -1526,6 +1610,8 @@ do_upgrade() {
         [[ "$active" -ge 1 ]] && break
         sleep "$POLL_INTERVAL"
     done
+
+    consolidate_image_pins
 
     echo
     info "Done. Final state of $FS:"

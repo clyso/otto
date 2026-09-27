@@ -212,6 +212,24 @@ joinable again, on any early exit.
 After the switch the script also re-checks every rank and, if one is still on the
 old version, redeploys the offending rank holders once more to converge.
 
+## Container image settings after the run
+
+`orch daemon redeploy --image` leaves a per-daemon `container_image` override
+(`mds.<fs>.<host>.<id>`) on every daemon it touches. Once every MDS of the
+service runs the target, the script moves that setting to the service: it sets
+`mds.<fs> container_image` to the repo digest the daemons actually run (or to
+the image given with `-i` if they do not share one) and removes the per-daemon
+overrides - otherwise they would outlive the upgrade and shadow any later
+service-level change, and a new daemon of the service would be born on the old
+service image. When that image already is the global `container_image`, the
+`mds.<fs>` setting is removed instead. Changing these settings redeploys
+nothing. A later `ceph orch upgrade` clears every `mds.*` section anyway. If a
+daemon of the service does not run the target within 120 s, the overrides are
+left in place and the commands to consolidate them are printed.
+
+`--flush-journal` bounds each `flush journal` with `FLUSH_TIMEOUT` (default
+60 s): `ceph tell` would otherwise wait forever for an MDS that left the map.
+
 ## Dry run
 
 The method was exercised with a small simulator of the monitors' standby
