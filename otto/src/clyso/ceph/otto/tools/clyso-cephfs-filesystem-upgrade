@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ceph-filesystem-upgrade.sh
+# clyso-cephfs-filesystem-upgrade
 #
 # Upgrade the MDS daemons of a single CephFS filesystem without disturbing the
 # others, working around the cephadm limitation where
@@ -9,11 +9,39 @@
 #
 # Argument-driven by default; pass -I/--interactive for a guided prompt flow.
 #
-# The 'fail_fs' method mimics, on a stock cephadm, the staged switch proposed
-# for mgr/cephadm (upgrade_staged_switch): every standby is upgraded while the
-# filesystem serves, then the filesystem is failed and re-joined immediately so
-# the monitors hand the ranks to the upgraded standbys - no redeploy inside the
-# outage window - and the previous actives are upgraded afterwards.
+# The 'fail_fs' method (default) mimics, on a stock cephadm, the staged switch
+# proposed for mgr/cephadm (upgrade_staged_switch, ceph/ceph#72111): everything
+# that does not need the filesystem down is done while it serves, so the
+# outage is only 'fs fail' -> 'fs set joinable true' -> journal replay, with NO
+# daemon redeployed inside it:
+#
+#   1. allow_standby_replay is turned off, and every standby MDS is redeployed
+#      on the target image while the filesystem keeps serving.
+#   2. The filesystem is set not joinable (the actives keep serving; the
+#      monitors stop promoting standbys and re-balancing ranks), and the
+#      previous actives are FENCED: each one gets a per-daemon mds_join_fs
+#      naming a filesystem that does not exist ("__upgrading__"), so the
+#      monitors see it as unpinned. On re-join they always prefer a standby
+#      pinned to the filesystem, so the old daemons cannot take a rank back
+#      next to the upgraded ones - no mixed-version active ranks, whatever
+#      the gids.
+#   3. 'fs fail', then 'fs set joinable true' right away: every rank goes to
+#      an upgraded standby. The fence is lifted, the previous actives - now
+#      standbys - are upgraded with the filesystem serving, and
+#      allow_standby_replay is restored.
+#
+# The switch needs at least max_mds upgraded standbys pinned to the filesystem
+# (mds_join_fs). With fewer, --add-standbys temporarily raises the placement
+# count of mds.<fs> so the missing standbys are deployed - born on the target
+# image - before the switch, and the service is brought back to its original
+# size afterwards without any failover; this needs an explicit 'count'
+# placement with free host slots, otherwise the script redeploys the ranks
+# inside the outage window instead (safe, slightly longer).
+#
+# --flush-journal flushes the journal of each active rank, one at a time, just
+# before 'fs fail', so the new MDS have little to replay and the ranks come
+# back faster. The extra metadata-pool I/O happens before the outage, never
+# during it.
 #
 # Requires: ceph, jq. Run from a host with an admin keyring.
 
@@ -179,17 +207,20 @@ METHODS:
             The outage is kept as short as possible: every standby MDS is
             upgraded first, while the filesystem keeps serving (nothing changes
             for clients). Then, if at least max_mds upgraded standbys are pinned to
-            the filesystem (mds_join_fs), the filesystem is failed and set
-            joinable again straight away: the monitors hand every rank to the
-            upgraded standbys (lowest gids) and NO daemon is redeployed inside
-            the outage window - the filesystem is down for the fail/rejoin and
-            the journal replay only. The previous active MDS, now standbys, are
-            upgraded afterwards, again with the filesystem serving.
+            the filesystem (mds_join_fs), the filesystem is set not joinable,
+            the previous actives are fenced (per-daemon mds_join_fs set to a
+            filesystem that does not exist, so they cannot take a rank back),
+            and the filesystem is failed and set joinable again straight away:
+            every rank goes to an upgraded standby and NO daemon is redeployed
+            inside the outage window - the filesystem is down for the
+            fail/rejoin and the journal replay only. The previous active MDS,
+            now standbys, are upgraded afterwards, with the filesystem serving.
             With fewer upgraded standbys than ranks (or without mds_join_fs),
             the remaining daemons are redeployed inside the window instead; the
             script says so before failing anything, and --add-standbys avoids
-            it. Every wait inside the window uses the monitors ('fs dump' /
-            'mds metadata'), not 'orch ps', whose cache lags by ~20 s.
+            it. --flush-journal shortens the replay. Every wait inside the
+            window uses the monitors ('fs dump' / 'mds metadata'), not
+            'orch ps', whose cache lags by ~20 s.
             refuse_standby_for_another_fs is recommended with several
             filesystems (-R). Standby-replay is turned off for the duration.
   max_mds   Scale the filesystem to a single rank, upgrade standbys first then
@@ -202,6 +233,7 @@ EXAMPLES:
   $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs cephfs2
   $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs,cephfs2 -m fail_fs
   $PROG -i quay.io/ceph/ceph:v18.2.8 -f cephfs2 -m fail_fs
+  $PROG -i quay.io/ceph/ceph:v18.2.8 -f cephfs --add-standbys --flush-journal
   $PROG -i my.registry.local/ceph/ceph:v18.2.8 -f cephfs,cephfs2 -m max_mds
   $PROG -i my.registry.local/ceph/ceph:custom -t 18.2.8 cephfs2 -m fail_fs
   $PROG -R
