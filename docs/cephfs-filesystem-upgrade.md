@@ -48,17 +48,33 @@ after the switch.
 ## How it works
 
 1. `allow_standby_replay` is turned off (so upgraded standbys stay plain
-   standbys and keep their gids).
+   standbys and keep their gids), and the filesystem is set **not joinable**:
+   the actives keep serving, but the monitors no longer promote a standby
+   (nor re-balance ranks by affinity).
 2. Every **standby** MDS of the filesystem is redeployed on the target image
    while the filesystem keeps serving; nothing changes for clients.
 3. If at least `max_mds` upgraded standbys are pinned to the filesystem
-   (`mds_join_fs`): the filesystem is set not joinable (the actives keep
-   serving), the previous actives are fenced (see *Robustness*), then the
-   filesystem is failed and set joinable again immediately. The monitors
+   (`mds_join_fs`): the previous actives are fenced (see *Robustness*), then
+   the filesystem is failed and set joinable again immediately. The monitors
    hand every rank to the upgraded pinned standbys. The outage is the
    fail/rejoin and the replay.
-4. The previous actives, now standbys, are redeployed with the filesystem
-   serving. `allow_standby_replay` is restored.
+4. The filesystem is set not joinable again, the fence is lifted, and the
+   previous actives, now standbys, are redeployed with the filesystem
+   serving. The filesystem is then set joinable and `allow_standby_replay` is
+   restored.
+
+Why not joinable in steps 1–2 and 4: that is when MDS of two releases sit
+side by side (upgraded standbys next to old actives, then old standbys next
+to upgraded actives). An active that crashed then would be replaced by
+whichever standby the monitors pick — possibly one of the other release, and
+the filesystem would run mixed-version active ranks, which CephFS does not
+support. Not joinable, a crashed active is simply not replaced until the
+phase ends: in steps 1–2 its rank is recovered by the switch that follows,
+in step 4 by the upgraded standbys once the filesystem is joinable again. The
+old `fail_fs` never had this exposure (it failed the filesystem before
+redeploying anything). `--keep-failover` keeps the filesystem joinable during
+those phases instead, if an immediate replacement matters more than a
+single-version filesystem; the script then warns about it.
 
 With fewer upgraded standbys than ranks, the remaining daemons are redeployed
 inside the window (as with `fail_fs`) — the script says so before failing
@@ -150,27 +166,41 @@ rank when one is really missing.
     clyso-cephfs-filesystem-upgrade -i quay.io/ceph/ceph:v18.2.8 --all
     clyso-cephfs-filesystem-upgrade -i ... cephfs2 --add-standbys       # fewer standbys than ranks
     clyso-cephfs-filesystem-upgrade -i ... cephfs --flush-journal       # opt-in
+    clyso-cephfs-filesystem-upgrade -i ... cephfs --keep-failover       # see "How it works"
 
 Prerequisites for the full switch: `mds_join_fs` set for the service (`-J`;
 without it the script warns and falls back to redeploying inside the window,
 and `--add-standbys` is refused), `refuse_standby_for_another_fs`
 recommended with several filesystems (`-R`, the script warns otherwise), no
-damaged rank.
+damaged rank. bash 4.4 or later.
 
 `--flush-journal` (off by default) flushes the journal of each active rank,
-one at a time, right before `fs fail`, for a shorter replay; it adds
-metadata-pool I/O *before* the outage window, never inside it.
+one at a time, right before the fence and `fs fail`, for a shorter replay; it
+adds metadata-pool I/O *before* the outage window, never inside it. It does
+lengthen the time the filesystem is not joinable (a crashed active is not
+replaced during the flush either), by up to `FLUSH_TIMEOUT` (60 s) per rank;
+with `--keep-failover` it runs before the filesystem is set not joinable.
 
 ## Caveats
 
-* While the filesystem serves with standbys of the other version (after step
-  2, and during step 4), an active MDS that crashes is replaced by the
-  monitors with the first pinned standby, whatever its version: the
-  filesystem then runs mixed-version ranks until the script's final check
-  redeploys the odd one. The mgr/cephadm staged switch does not have this
-  exposure, since it switches every daemon inside the outage window.
-* During the few seconds the filesystem is not joinable before the switch
-  (fence), a crashed active is not replaced until the switch.
+* While the standbys are upgraded (steps 1–2), and while the previous actives
+  are (step 4), the filesystem is not joinable: an active MDS that crashes is
+  not replaced until the phase ends — at most `REDEPLOY_TIMEOUT` per phase,
+  typically tens of seconds. The ranks that are still up keep serving.
+* With `--keep-failover`, an active that crashes during those phases is
+  replaced at once, by the first pinned standby whatever its release: the
+  filesystem then runs mixed-version ranks until the switch (step 3) or the
+  script's final check. The mgr/cephadm staged switch has neither trade-off:
+  it switches every daemon inside the outage window.
+* While fenced (from just before `fs fail` until every rank is back, a few
+  seconds), the previous actives are unpinned for **every** filesystem: one
+  that needs a standby in that window and has no pinned standby available
+  can take one of them as a rank (a pinned standby always wins over them).
+  Harmless while every filesystem is on the old release; in a cluster
+  upgraded one filesystem at a time, an already-upgraded filesystem could
+  pick up an old MDS. Keeping a spare standby pinned to each filesystem
+  avoids it.
+* The fence relies on the monitors filling *empty* ranks — see *Robustness*.
 * On Tentacle and later, `fs fail` refuses a filesystem with `MDS_TRIM` or
   `MDS_CACHE_OVERSIZED`; `--flush-journal` clears the trim backlog.
 
@@ -185,7 +215,10 @@ will really hand every rank to an upgraded standby:
   a daemon and changes its gid, which would scramble which standby wins a rank.
   This check is monitor-based on purpose: `orch ps` lags ~20 s behind a redeploy
   and would wrongly flag the standbys just upgraded in phase 1 as not running.
-* the `max_mds` lowest-gid pinned standbys are all on the target version.
+* the `max_mds` lowest-gid pinned standbys are all on the target version,
+  leaving out the daemons about to be fenced (e.g. an active that crashed
+  while the filesystem was not joinable and came back as a pinned standby on
+  the old release: it is fenced with the others).
 
 If either check fails the script stops **before** `fs fail`, changing nothing,
 and says what to fix (typically: let `orch ps` settle, and make the
@@ -204,13 +237,26 @@ at the end.
 **The switch does not rely on gid ordering.** Right before `fs fail`, the script
 *fences* the current rank holders: it sets a per-daemon `mds_join_fs` naming a
 filesystem that does not exist. The monitors then record them with
-`join_fscid` NONE (unpinned), and when a rank is reassigned
-(`FSMap::get_available_standby`) a standby pinned to the filesystem always wins
-over an unpinned one, whatever the gids. With at least `max_mds` upgraded pinned
+`join_fscid` NONE (unpinned), and when a rank is filled
+(`FSMap::get_available_standby`) a standby pinned to the filesystem wins over
+an unpinned one, whatever the gids. With at least `max_mds` upgraded pinned
 standbys (the full-switch condition) the old daemons are therefore never picked:
 no old-version MDS takes a rank next to the upgraded ones (CephFS does not
 support mixed-version active ranks). `refuse_standby_for_another_fs` plays no
 part in this: it only keeps out standbys pinned to *another* filesystem.
+
+"Pinned wins over unpinned" holds unconditionally on reef, squid and tentacle.
+On main (after tentacle), standby selection is scored with host
+anti-affinity (`standby_enable_host_anti_affinity`, on by default): an
+unpinned standby on another host (`SCORE_PREF_VANILLA`, 5) outranks a pinned
+one on the host of the addresses to avoid (`SCORE_FALLBACK_MATCH`, 3).
+`find_replacement_for()` only passes addresses to avoid for a rank that is
+still in `up` (a laggy active being replaced, affinity re-balancing). `fs fail`
+purges every rank from `up`, so when the ranks are filled at the switch no
+address is avoided and a pinned standby (`SCORE_PREF_MATCH`, 6) still beats an
+unpinned one (5). **This is the one assumption the fenced switch rests on**:
+the ranks must be empty when the monitors fill them, which is why the fence is
+only relied on across `fs fail`.
 
 The fence is applied with the filesystem **not joinable** (`fs set <fs> joinable
 false`: the actives keep serving), and the script waits until the monitors show
@@ -218,8 +264,20 @@ every fenced daemon unpinned before failing the filesystem. On a joinable
 filesystem the monitors' affinity check (`MDSMonitor::check_health`, every tick)
 would drop each unpinned active in favour of a pinned standby — one unplanned
 failover per tick, to the new version, while the filesystem serves. The fence is
-lifted as soon as the ranks are back; a trap lifts it, and makes the filesystem
-joinable again, on any early exit.
+lifted as soon as every rank is back. On an early exit *before* `fs fail`, a
+trap lifts it and makes the filesystem joinable again (and removes the
+`--add-standbys` extras). On an exit *after* `fs fail` and before every rank is
+back, the fence is **kept** — lifting it would let the old daemons compete for
+the empty ranks again — and the recovery steps are printed:
+
+    ceph fs set <fs> joinable true         # if not done yet
+    # once every rank is active, on the target version:
+    for d in <fenced daemons>; do ceph config rm $d mds_join_fs; done
+
+`ceph mds freeze <gid> true` (which makes the monitors skip a daemon) was not
+used for the fence: it applies to a gid, which changes on every restart, and
+has to be undone per daemon, where a config key survives restarts and is
+removed with one command.
 
 After the switch the script also re-checks every rank and, if one is still on the
 old version, redeploys the offending rank holders once more to converge.

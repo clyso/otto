@@ -15,20 +15,25 @@
 # outage is only 'fs fail' -> 'fs set joinable true' -> journal replay, with NO
 # daemon redeployed inside it:
 #
-#   1. allow_standby_replay is turned off, and every standby MDS is redeployed
-#      on the target image while the filesystem keeps serving.
-#   2. The filesystem is set not joinable (the actives keep serving; the
-#      monitors stop promoting standbys and re-balancing ranks), and the
-#      previous actives are FENCED: each one gets a per-daemon mds_join_fs
+#   1. allow_standby_replay is turned off and the filesystem is set not
+#      joinable: the actives keep serving, but the monitors no longer promote
+#      a standby nor re-balance ranks. Every standby MDS is then redeployed on
+#      the target image. While standbys of the new release sit next to the old
+#      actives, a crashed active is therefore NOT replaced until the switch
+#      (step 3) - rather than replaced by an upgraded standby, which would run
+#      mixed-version active ranks. --keep-failover keeps the filesystem
+#      joinable instead (and accepts that exposure).
+#   2. The previous actives are FENCED: each one gets a per-daemon mds_join_fs
 #      naming a filesystem that does not exist ("__upgrading__"), so the
-#      monitors see it as unpinned. On re-join they always prefer a standby
-#      pinned to the filesystem, so the old daemons cannot take a rank back
-#      next to the upgraded ones - no mixed-version active ranks, whatever
-#      the gids.
+#      monitors see it as unpinned. When they fill a rank that is not up (all
+#      of them, after 'fs fail') they always prefer a standby pinned to the
+#      filesystem, so the old daemons cannot take a rank back next to the
+#      upgraded ones - no mixed-version active ranks, whatever the gids.
 #   3. 'fs fail', then 'fs set joinable true' right away: every rank goes to
 #      an upgraded standby. The fence is lifted, the previous actives - now
-#      standbys - are upgraded with the filesystem serving, and
-#      allow_standby_replay is restored.
+#      standbys - are upgraded with the filesystem serving (and, as in step 1,
+#      not joinable unless --keep-failover), then the filesystem is set
+#      joinable and allow_standby_replay is restored.
 #
 # The switch needs at least max_mds upgraded standbys pinned to the filesystem
 # (mds_join_fs). With fewer, --add-standbys temporarily raises the placement
@@ -39,13 +44,19 @@
 # inside the outage window instead (safe, slightly longer).
 #
 # --flush-journal flushes the journal of each active rank, one at a time, just
-# before 'fs fail', so the new MDS have little to replay and the ranks come
-# back faster. The extra metadata-pool I/O happens before the outage, never
-# during it.
+# before the fence and 'fs fail', so the new MDS have little to replay and the
+# ranks come back faster. The extra metadata-pool I/O happens before the
+# outage, never during it, but while the filesystem is not joinable (with
+# --keep-failover: before it is set not joinable).
 #
 # Requires: ceph, jq. Run from a host with an admin keyring.
 
 set -euo pipefail
+
+# empty-array expansions ("${a[@]}") under 'set -u' need bash >= 4.4
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
+    echo "ERROR: bash >= 4.4 is required (this is $BASH_VERSION)" >&2; exit 1
+fi
 
 CEPH="${CEPH:-ceph}"
 REDEPLOY_TIMEOUT="${REDEPLOY_TIMEOUT:-600}"   # seconds to wait for an MDS to come back
@@ -159,7 +170,19 @@ OPTIONS:
                             active rank, one rank at a time, right before
                             'fs fail', so the replay after the switch is shorter.
                             Adds metadata-pool I/O BEFORE the outage window, never
-                            inside it. Off by default.
+                            inside it - but it lengthens the time the filesystem
+                            is not joinable (up to FLUSH_TIMEOUT, 60 s, per rank;
+                            with --keep-failover it runs before that). Off by
+                            default.
+  --keep-failover           With 'fail_fs': keep the filesystem joinable while
+                            its standbys are upgraded (and while the previous
+                            actives are, after the switch). A crashed active is
+                            then replaced at once - but possibly by an MDS of the
+                            other release: mixed-version active ranks, which
+                            CephFS does not support, until the switch or the
+                            final check. Without it (default) the filesystem is
+                            not joinable during those phases and a crashed active
+                            is not replaced until they end.
   -I, --interactive         Guided interactive mode (lists, prompts for the
                             filesystem and method, then upgrades).
   --force-downgrade         Allow moving MDS to an OLDER version than they
@@ -205,22 +228,27 @@ BEHAVIOR:
 METHODS:
   fail_fs   Fail the filesystem (offline) for the switch to the new version.
             The outage is kept as short as possible: every standby MDS is
-            upgraded first, while the filesystem keeps serving (nothing changes
-            for clients). Then, if at least max_mds upgraded standbys are pinned to
-            the filesystem (mds_join_fs), the filesystem is set not joinable,
-            the previous actives are fenced (per-daemon mds_join_fs set to a
-            filesystem that does not exist, so they cannot take a rank back),
-            and the filesystem is failed and set joinable again straight away:
-            every rank goes to an upgraded standby and NO daemon is redeployed
-            inside the outage window - the filesystem is down for the
-            fail/rejoin and the journal replay only. The previous active MDS,
-            now standbys, are upgraded afterwards, with the filesystem serving.
-            With fewer upgraded standbys than ranks (or without mds_join_fs),
-            the remaining daemons are redeployed inside the window instead; the
-            script says so before failing anything, and --add-standbys avoids
-            it. --flush-journal shortens the replay. Every wait inside the
-            window uses the monitors ('fs dump' / 'mds metadata'), not
-            'orch ps', whose cache lags by ~20 s.
+            upgraded first, while the actives keep serving clients. During
+            that phase the filesystem is set NOT JOINABLE: if an active MDS
+            crashes, its rank is not replaced until the switch (the monitors
+            would otherwise hand it to an upgraded standby, and the filesystem
+            would run mixed-version active ranks, which CephFS does not
+            support). --keep-failover keeps it joinable and accepts that risk.
+            Then, if at least max_mds upgraded standbys are pinned to the
+            filesystem (mds_join_fs), the previous actives are fenced
+            (per-daemon mds_join_fs set to a filesystem that does not exist, so
+            they cannot take a rank back), and the filesystem is failed and
+            set joinable again straight away: every rank goes to an upgraded
+            standby and NO daemon is redeployed inside the outage window - the
+            filesystem is down for the fail/rejoin and the journal replay only.
+            The previous active MDS, now standbys, are upgraded afterwards,
+            with the filesystem serving (and, again, not joinable unless
+            --keep-failover). With fewer upgraded standbys than ranks (or
+            without mds_join_fs), the remaining daemons are redeployed inside
+            the window instead; the script says so before failing anything,
+            and --add-standbys avoids it. --flush-journal shortens the replay.
+            Every wait inside the window uses the monitors ('fs dump' /
+            'mds metadata'), not 'orch ps', whose cache lags by ~20 s.
             refuse_standby_for_another_fs is recommended with several
             filesystems (-R). Standby-replay is turned off for the duration.
   max_mds   Scale the filesystem to a single rank, upgrade standbys first then
@@ -256,6 +284,7 @@ ALL=false
 FORCE_DOWNGRADE=false
 FLUSH_JOURNAL=false
 ADD_STANDBYS=false
+KEEP_FAILOVER=false
 
 # append comma-separated and/or repeated -f values
 add_filesystems() {
@@ -289,6 +318,7 @@ while [[ $# -gt 0 ]]; do
         --force-downgrade) FORCE_DOWNGRADE=true; shift ;;
         --flush-journal) FLUSH_JOURNAL=true; shift ;;
         --add-standbys) ADD_STANDBYS=true; shift ;;
+        --keep-failover) KEEP_FAILOVER=true; shift ;;
         --) shift; while [[ $# -gt 0 ]]; do POSITIONAL+=("$1"); shift; done; break ;;
         -*) die "unknown option: $1 (see --help)" ;;
         *) POSITIONAL+=("$1"); shift ;;
@@ -632,7 +662,11 @@ fs_all_gids() {
 # makes cephadm reconcile in a loop) can bump an upgraded standby's gid above
 # an old one and mix versions after the switch. Refuse to fail the fs then.
 verify_switch_ready() {
-    local ranks="$1" n snap1 snap2 off=""
+    local ranks="$1" n snap1 snap2 off=""; shift
+    # the remaining arguments are the daemons about to be fenced: they will be
+    # unpinned at the switch, so they do not compete with the pinned standbys
+    local -A fenced=()
+    for n in "$@"; do fenced["${n#mds.}"]=1; done
 
     # a) no MDS of the fs is still restarting: snapshot every gid (rank holders
     #    and pinned standbys) from the MONITORS, CHURN_CHECK_SECS apart, and wait
@@ -655,10 +689,16 @@ verify_switch_ready() {
     $stable || die "the MDS of '$FS' keep restarting (gids still changing after ${REDEPLOY_TIMEOUT}s): a redeploy or a cephadm reconciliation is in flight. Let 'ceph orch ps --daemon-type mds' settle (and make the 'mds.$FS container_image' pin, if any, match the target so cephadm stops reconciling), then re-run. Nothing was changed."
 
     # b) the 'ranks' lowest-gid pinned standbys must all be on target: those are
-    #    the ones the monitors pick, since the current actives respawn higher
+    #    the ones the monitors pick, since the current actives respawn higher.
+    #    Daemons about to be fenced are left out (e.g. an active that crashed
+    #    and came back as a pinned standby on the old release: it is fenced
+    #    with the others and cannot take a rank).
     refresh_mds_metadata
     local -a low=()
-    while IFS= read -r n; do [[ -n "$n" ]] && low+=("${n%%:*}"); done < <(pinned_standby_gids "$FS" | sort -t: -k2 -n | head -n "$ranks")
+    while IFS= read -r n; do
+        [[ -n "$n" && -z "${fenced[${n%%:*}]:-}" ]] && low+=("${n%%:*}")
+    done < <(pinned_standby_gids "$FS" | sort -t: -k2 -n)
+    low=("${low[@]:0:$ranks}")
     for n in "${low[@]}"; do on_target "$(mds_version_mon "$n")" || off="$off mds.$n"; done
     [[ -z "$off" ]] || die "the lowest-gid pinned standbys of '$FS' are not all on $TARGET_VERSION:$off - they would take a rank before the upgraded ones and '$FS' would come back with mixed versions. Re-run from a clean state (no in-flight redeploys, 'mds.$FS container_image' pin matching the target). Nothing was changed."
 }
@@ -666,14 +706,29 @@ verify_switch_ready() {
 # Fence the current rank holders (old version) so that, at the switch, the
 # monitors hand every rank to an upgraded standby - no reliance on gid ordering.
 # Each old daemon gets a per-daemon mds_join_fs naming a filesystem that does
-# not exist: the monitors then record it with join_fscid NONE (unpinned), and
-# FSMap::get_available_standby always prefers a standby pinned to the fs over
-# an unpinned one. That holds as long as there are at least max_mds upgraded
-# standbys pinned to $FS (the full-switch condition); refuse_standby_for_another_fs
-# does not matter here (it only concerns standbys pinned to another fs).
+# not exist: the monitors then record it with join_fscid NONE (unpinned).
+# That holds as long as there are at least max_mds upgraded standbys pinned to
+# $FS (the full-switch condition); refuse_standby_for_another_fs does not
+# matter here (it only concerns standbys pinned to another fs).
+#
+# Why a pinned standby wins (FSMap::get_available_standby):
+#  - reef, squid, tentacle: a standby pinned to the fs is always preferred over
+#    an unpinned one, whatever the gids.
+#  - main (after tentacle), with host anti-affinity: the standbys are scored,
+#    and an unpinned standby on another host (SCORE_PREF_VANILLA, 5) outranks
+#    a pinned one on the host of the addresses to avoid (SCORE_FALLBACK_MATCH,
+#    3). find_replacement_for() only passes addresses to avoid for a rank that
+#    is still in 'up' (a laggy active being replaced, affinity re-balancing).
+#    'fs fail' purges every rank from 'up', so at the switch no address is
+#    avoided and pinned (6) still beats unpinned (5). The fence relies on that:
+#    the ranks must be empty when the monitors fill them, i.e. after 'fs fail'.
+#
 # MUST be done with $FS not joinable: an active whose join_fscid is not its fs
 # is dropped by MDSMonitor::check_health, one per tick, in favour of a pinned
 # standby - an unplanned failover to the new version while the fs serves.
+# While fenced, the old daemons are unpinned for EVERY filesystem: another
+# filesystem that needs a standby then and has no pinned one available could
+# take one of them (the fence is lifted as soon as the ranks are back).
 # Records the fenced daemons in FENCED_DAEMONS.
 FENCED_DAEMONS=()
 FENCE_SENTINEL="__upgrading__"
@@ -727,8 +782,8 @@ wait_join_fscid() {
     done
 }
 
-# wait until every given MDS (names with "mds.") is a plain standby known to
-# the monitors, has a gid different from the one recorded in PRE_GIDS (i.e. it
+# wait until every given MDS (names with "mds.") is known to the monitors (a
+# standby, or a rank holder), has a gid different from the one recorded in PRE_GIDS (i.e. it
 # restarted), and reports TARGET_VERSION. $1 = timeout, rest = daemons.
 declare -A PRE_GIDS=()
 wait_standby_on_target() {
@@ -741,7 +796,10 @@ wait_standby_on_target() {
         local ok=true why=""
         for d in "${batch[@]}"; do
             n="${d#mds.}"
-            if [[ "$(mds_state_cached "$n")" != "standby" ]]; then ok=false; why="$d is not a standby yet"; break; fi
+            # up:* too: with --keep-failover an upgraded daemon may have taken
+            # over the rank of an active that crashed meanwhile
+            local st; st="$(mds_state_cached "$n")"
+            if [[ "$st" != "standby" && "$st" != up:* ]]; then ok=false; why="$d is not a standby yet"; break; fi
             if [[ -n "${PRE_GIDS[$d]:-}" && "$(mds_gid_cached "$n")" == "${PRE_GIDS[$d]}" ]]; then ok=false; why="$d has not restarted yet"; break; fi
             if ! on_target "$(mds_version_mon "$n")"; then ok=false; why="$d reports $(mds_version_mon "$n") (want $TARGET_VERSION)"; break; fi
         done
@@ -785,10 +843,12 @@ flush_active_journals() {
 # wait for every rank of FS to be up:active (monitor-based). $1 = timeout.
 wait_ranks_active() {
     local deadline=$(( $(date +%s) + $1 ))
+    local fsj want have
     while :; do
-        local want have
-        want="$(fs_get "$FS" | jq -r '.mdsmap.max_mds')"
-        have="$(fs_get "$FS" | jq -r '[.mdsmap.info[] | select(.state=="up:active")] | length')"
+        # one mon round-trip per poll: this loop runs inside the outage window
+        fsj="$(fs_get "$FS")"
+        want="$(jq -r '.mdsmap.max_mds' <<<"$fsj")"
+        have="$(jq -r '[.mdsmap.info[] | select(.state=="up:active")] | length' <<<"$fsj")"
         [[ "$have" -ge "$want" ]] && return 0
         (( $(date +%s) >= deadline )) && return 1
         sleep "$MON_POLL_INTERVAL"
@@ -1264,37 +1324,92 @@ shrink_after_switch() {
     EXTRA_DAEMONS=()
 }
 
-# exit trap for do_upgrade_fail_fs: always lift the fence; before the switch,
-# also undo --add-standbys (idle temporaries, placement, service image pin)
-PRE_SWITCH=true
-FS_FROZEN=false      # we set $FS not joinable before the switch
+# State of do_upgrade_fail_fs, for its exit trap:
+#   SWITCH_STAGE  pre     - before 'fs fail': an abort undoes everything
+#                 failed  - 'fs fail' done, not every rank back yet: an abort
+#                           leaves the filesystem and the fence as they are
+#                           (lifting the fence now would let the old daemons
+#                           compete for the ranks again) and prints the steps
+#                 serving - every rank back, on upgraded daemons
+#   FS_FROZEN     $FS is not joinable because of us (joinable false or fs fail)
+#   ASR_OFF       we turned allow_standby_replay off and have not restored it
+SWITCH_STAGE=pre
+FS_FROZEN=false
+FROZEN_SINCE=0
+ASR_OFF=false
+
+# freeze_fs CONTEXT: set $FS not joinable (no-op if it already is because of
+# us). The actives keep serving; the monitors neither promote a standby nor
+# re-balance ranks by affinity. CONTEXT is appended to the error message.
+freeze_fs() {
+    $FS_FROZEN && return 0
+    local out
+    # ceph's own reply ("marked not joinable; MDS cannot join as newly
+    # active") reads too much like the 'fs fail' one: shown only on error
+    out="$($CEPH fs set "$FS" joinable false 2>&1)" \
+        || die "could not set $FS not joinable: $out; $1"
+    FS_FROZEN=true
+    FROZEN_SINCE=$(date +%s)
+}
+thaw_fs() {
+    local out
+    out="$($CEPH fs set "$FS" joinable true 2>&1)" || return 1
+    FS_FROZEN=false
+}
+
 on_exit_cleanup() {
-    local -a was_fenced=("${FENCED_DAEMONS[@]}")
-    unfence_old_actives
-    if $PRE_SWITCH && $FS_FROZEN; then
-        # the actives must be pinned again before $FS is joinable, or the
-        # monitors would drop them in favour of an upgraded standby
-        if [[ ${#was_fenced[@]} -gt 0 ]]; then
-            refresh_fs_dump
-            wait_join_fscid "$(fs_id_cached "$FS")" 60 "${was_fenced[@]}" \
-                || warn "the monitors do not show the fence lifted yet on ${was_fenced[*]}"
+    case "$SWITCH_STAGE" in
+    pre)
+        local -a was_fenced=("${FENCED_DAEMONS[@]}")
+        unfence_old_actives
+        if $FS_FROZEN; then
+            # the actives must be pinned again before $FS is joinable, or the
+            # monitors would drop them in favour of an upgraded standby
+            if [[ ${#was_fenced[@]} -gt 0 ]]; then
+                refresh_fs_dump
+                wait_join_fscid "$(fs_id_cached "$FS")" 60 "${was_fenced[@]}" \
+                    || warn "the monitors do not show the fence lifted yet on ${was_fenced[*]}"
+            fi
+            warn "aborting before the switch: setting $FS joinable again"
+            thaw_fs || warn "could not set $FS joinable; do it by hand: $CEPH fs set $FS joinable true"
         fi
-        warn "aborting before the switch: setting $FS joinable again"
-        $CEPH fs set "$FS" joinable true >/dev/null 2>&1 || warn "could not set $FS joinable; do it by hand: $CEPH fs set $FS joinable true"
-        FS_FROZEN=false
-    fi
-    if $PRE_SWITCH && [[ ${#EXTRA_DAEMONS[@]} -gt 0 ]]; then
-        warn "aborting before the switch: removing the temporary standbys and restoring mds.$FS"
-        remove_temp_standbys
-        restore_service_image_pin
+        if [[ ${#EXTRA_DAEMONS[@]} -gt 0 ]]; then
+            warn "aborting before the switch: removing the temporary standbys and restoring mds.$FS"
+            remove_temp_standbys
+            restore_service_image_pin
+        fi
+        ;;
+    failed)
+        warn "aborted during the switch: '$FS' is left as it is. To recover:"
+        if $FS_FROZEN; then
+            warn "    $CEPH fs set $FS joinable true"
+        fi
+        if [[ ${#FENCED_DAEMONS[@]} -gt 0 ]]; then
+            warn "  once '$CEPH fs status $FS' shows every rank active (on $TARGET_VERSION), lift the fence on the previous actives:"
+            warn "    for d in ${FENCED_DAEMONS[*]}; do $CEPH config rm \$d mds_join_fs; done"
+        fi
+        warn "  then redeploy the MDS of $FS not yet on $TARGET_VERSION: $CEPH orch daemon redeploy <daemon> --image $IMAGE"
+        ;;
+    serving)
+        # every rank is held by an upgraded daemon: the fence can go
+        unfence_old_actives
+        if $FS_FROZEN; then
+            warn "aborting: setting $FS joinable again (its ranks are on $TARGET_VERSION)"
+            thaw_fs || warn "could not set $FS joinable; do it by hand: $CEPH fs set $FS joinable true"
+        fi
+        ;;
+    esac
+    if $ASR_OFF; then
+        warn "allow_standby_replay is left off on $FS; once every MDS of $FS runs the same version: $CEPH fs set $FS allow_standby_replay true"
     fi
 }
 
 do_upgrade_fail_fs() {
     # uses globals: FS, TARGET_VERSION, IMAGE, STALE, ASR, ORIG_MAX_MDS
     local d n
-    PRE_SWITCH=true
+    SWITCH_STAGE=pre
     FS_FROZEN=false
+    ASR_OFF=false
     trap 'on_exit_cleanup' EXIT
     trap 'exit 130' INT TERM
 
@@ -1329,6 +1444,7 @@ do_upgrade_fail_fs() {
         mapfile -t was_replay < <(fs_get "$FS" | jq -r '.mdsmap.info[] | select(.state=="up:standby-replay") | .name')
         info "Disabling allow_standby_replay on $FS"
         $CEPH fs set "$FS" allow_standby_replay false
+        ASR_OFF=true
         if [[ ${#was_replay[@]} -gt 0 ]]; then
             info "Waiting for ${#was_replay[@]} standby-replay daemon(s) of $FS to become plain standbys"
             local sd=$(( $(date +%s) + REDEPLOY_TIMEOUT ))
@@ -1370,6 +1486,20 @@ do_upgrade_fail_fs() {
             *)         warn "$d is in a transitional state ($st); it will be redeployed after the switch"; STALE_RANK+=("$d") ;;
         esac
     done
+
+    # -- freeze. From now until the switch, standbys of the target release
+    # sit next to the old actives (and, after it, the previous actives next to
+    # the upgraded ranks). An active that crashed meanwhile would be replaced by
+    # whichever standby the monitors pick: mixed-version active ranks, which
+    # CephFS does not support. Unless --keep-failover, $FS is not joinable
+    # during those phases instead: the actives keep serving, a crashed one is
+    # not replaced, and its rank is recovered by the switch that follows.
+    if $KEEP_FAILOVER; then
+        warn "--keep-failover: $FS stays joinable while its standbys are upgraded; an active that crashes meanwhile may be replaced by an MDS of another release (mixed-version ranks until the switch)"
+    else
+        freeze_fs "'$FS' is still serving, nothing was changed"
+        info "$FS set not joinable: the actives keep serving, but until the switch a crashed active is NOT replaced (no mixed-version ranks; see --keep-failover)"
+    fi
 
     # -- phase 1: upgrade the standbys, filesystem serving
     if [[ ${#STALE_STANDBY[@]} -gt 0 ]]; then
@@ -1422,19 +1552,27 @@ do_upgrade_fail_fs() {
         info "Phase 2/3: ${#STALE_RANK[@]} MDS will be redeployed inside the outage window (no mds_join_fs)"
     fi
     if $INTERACTIVE; then
+        if $FS_FROZEN; then
+            warn "$FS has not been joinable for $(( $(date +%s) - FROZEN_SINCE ))s: an active that crashes is not replaced until the switch (answering no makes it joinable again)"
+        else
+            warn "$FS is joinable (--keep-failover) and has upgraded standbys: an active that crashes now may be replaced by an MDS of another release"
+        fi
         confirm "Fail '$FS' now (outage starts)?" || die "aborted by user; '$FS' is still serving"
     fi
+
+    # --flush-journal: before the fence and 'fs fail' (with --keep-failover,
+    # also before the freeze, so it does not lengthen the not-joinable window)
+    $FLUSH_JOURNAL && flush_active_journals
+
     if $full_switch; then
-        verify_switch_ready "$ranks"
-        # 1. not joinable: the actives keep serving, but the monitors no longer
-        #    promote a standby nor re-balance ranks by affinity
-        # ceph's own reply ("marked not joinable; MDS cannot join as newly
-        # active") reads too much like the 'fs fail' one: shown only on error
-        local out
-        out="$($CEPH fs set "$FS" joinable false 2>&1)" \
-            || die "could not set $FS not joinable: $out; '$FS' is still serving, nothing was changed"
-        FS_FROZEN=true
-        info "Ranks of $FS frozen (joinable=false): the actives keep serving, no promotion or rank re-balancing until the switch"
+        verify_switch_ready "$ranks" "${STALE_RANK[@]}" "${STALE_DOWN[@]}"
+        # 1. not joinable (already, unless --keep-failover): the actives keep
+        #    serving, but the monitors no longer promote a standby nor
+        #    re-balance ranks by affinity - required before fencing
+        if ! $FS_FROZEN; then
+            freeze_fs "'$FS' is still serving, nothing was changed"
+            info "Ranks of $FS frozen (joinable=false): the actives keep serving, no promotion or rank re-balancing until the switch"
+        fi
         # 2. fence the old actives, and wait until the monitors see it
         fence_old_actives "${STALE_RANK[@]}" "${STALE_DOWN[@]}" || die "could not fence the old actives; '$FS' is still serving, nothing was changed"
         # wait only for the daemons the monitors know: one that is down (e.g. on
@@ -1450,7 +1588,6 @@ do_upgrade_fail_fs() {
     fi
 
     # -- phase 2: the switch
-    $FLUSH_JOURNAL && flush_active_journals
     # the previous actives will respawn as standbys with new gids; record the
     # old ones so their restart can be detected
     record_gids "${STALE_RANK[@]}"
@@ -1460,7 +1597,9 @@ do_upgrade_fail_fs() {
         echo "$fout" >&2
         die "fs fail refused for '$FS'; nothing was changed. Check 'ceph health detail' (MDS_TRIM / MDS_CACHE_OVERSIZED refuse 'fs fail' on recent releases; --flush-journal can help with MDS_TRIM)"
     fi
-    PRE_SWITCH=false
+    # from here on an abort leaves $FS and the fence as they are (see the trap)
+    SWITCH_STAGE=failed
+    FS_FROZEN=true
     info "$FS failed: all ranks down"
 
     if ! $full_switch; then
@@ -1471,19 +1610,29 @@ do_upgrade_fail_fs() {
             $CEPH orch daemon redeploy "$d" --image "$IMAGE"
         done
         wait_standby_on_target "$REDEPLOY_TIMEOUT" "${STALE_RANK[@]}" \
-            || die "redeploy failed; '$FS' left FAILED. Restore with: $CEPH fs set $FS joinable true"
+            || die "redeploy failed; '$FS' left FAILED"
     fi
 
     info "Setting $FS joinable (the ranks are handed to the standbys)"
     local jout
     jout="$($CEPH fs set "$FS" joinable true 2>&1)" \
-        || die "could not set $FS joinable: $jout; '$FS' is left FAILED. Restore with: $CEPH fs set $FS joinable true"
-    if wait_ranks_active "$REDEPLOY_TIMEOUT"; then
-        info "All $ranks rank(s) of $FS active again (outage: $(( $(date +%s) - t0 ))s)"
-    else
-        warn "not every rank of $FS is active after ${REDEPLOY_TIMEOUT}s; check 'ceph fs status $FS'"
-    fi
+        || die "could not set $FS joinable: $jout; '$FS' is left FAILED"
     FS_FROZEN=false
+    # keep the fence until every rank is held: lifting it earlier would let an
+    # old daemon take a rank that is still empty
+    wait_ranks_active "$REDEPLOY_TIMEOUT" \
+        || die "not every rank of $FS is active after ${REDEPLOY_TIMEOUT}s; check '$CEPH fs status $FS'"
+    info "All $ranks rank(s) of $FS active again (outage: $(( $(date +%s) - t0 ))s)"
+    SWITCH_STAGE=serving
+
+    # -- phase 3 freeze: the previous actives, still on the old release, are
+    # about to be pinned to $FS again as standbys; unless --keep-failover, keep
+    # $FS not joinable until they are upgraded (a crashed active then waits for
+    # the end of phase 3 rather than being taken over by an old daemon)
+    if $full_switch && [[ ${#STALE_RANK[@]} -gt 0 ]] && ! $KEEP_FAILOVER; then
+        freeze_fs "'$FS' is serving on $TARGET_VERSION"
+        info "$FS set not joinable again while the previous actives are upgraded: a crashed active is not replaced until phase 3 ends"
+    fi
     # the ranks are held by pinned upgraded daemons: lift the fence now, so the
     # old daemons are pinned to $FS again and no other filesystem can borrow
     # them as unpinned standbys
@@ -1515,6 +1664,10 @@ do_upgrade_fail_fs() {
     else
         info "Phase 3/3: nothing left to upgrade"
     fi
+    if $FS_FROZEN; then
+        info "Setting $FS joinable again"
+        thaw_fs || die "could not set $FS joinable; do it by hand: $CEPH fs set $FS joinable true"
+    fi
     # mds.$FS container_image (set by --add-standbys) is left on the target
     # image; consolidate_image_pins (called by do_upgrade) settles it
     SVC_PIN_CHANGED=false
@@ -1537,13 +1690,14 @@ do_upgrade_fail_fs() {
         wait_ranks_active "$REDEPLOY_TIMEOUT" || true
         refresh_fs_dump; refresh_mds_metadata
         local bad2=""
-        while IFS= read -r n; do [[ -n "$n" ]] && { on_target "$(mds_version_mon "$n")" || bad2="$bad2 mds.$n"; }; done             < <(fs_get "$FS" | jq -r '.mdsmap.info[] | select(.state|startswith("up:")) | .name')
+        while IFS= read -r n; do [[ -n "$n" ]] && { on_target "$(mds_version_mon "$n")" || bad2="$bad2 mds.$n"; }; done < <(fs_get "$FS" | jq -r '.mdsmap.info[] | select(.state|startswith("up:")) | .name')
         [[ -z "$bad2" ]] || warn "still not converged:$bad2 - redeploy these by hand: for d in$bad2; do $CEPH orch daemon redeploy \"$d\" --image \"$IMAGE\"; done"
     fi
 
     if [[ "$ASR" == "true" ]]; then
         info "Restoring allow_standby_replay on $FS"
         $CEPH fs set "$FS" allow_standby_replay true
+        ASR_OFF=false
     fi
 }
 
@@ -1599,7 +1753,14 @@ do_upgrade() {
     echo "max_mds (orig)  : $ORIG_MAX_MDS"
     echo "standby_replay  : $ASR"
     echo "flush journal   : $FLUSH_JOURNAL"
-    [[ "$METHOD" == "fail_fs" ]] && echo "add standbys    : $ADD_STANDBYS"
+    if [[ "$METHOD" == "fail_fs" ]]; then
+        echo "add standbys    : $ADD_STANDBYS"
+        if $KEEP_FAILOVER; then
+            echo "crashed active  : replaced at once while standbys are upgraded, possibly by an MDS of another release (--keep-failover)"
+        else
+            echo "crashed active  : NOT replaced while its standbys (then the previous actives) are upgraded: $FS is not joinable then"
+        fi
+    fi
     echo "Will redeploy (${#STALE[@]}):"
     for d in "${STALE[@]}"; do echo "    + $d ($(daemon_version "$d") -> $TARGET_VERSION)"; done
     if [[ ${#SKIP[@]} -gt 0 ]]; then
