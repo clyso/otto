@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ceph-filesystem-upgrade.sh
+# clyso-cephfs-filesystem-upgrade
 #
 # Upgrade the MDS daemons of a single CephFS filesystem without disturbing the
 # others, working around the cephadm limitation where
@@ -9,22 +9,100 @@
 #
 # Argument-driven by default; pass -I/--interactive for a guided prompt flow.
 #
+# The 'fail_fs' method (default) mimics, on a stock cephadm, the staged switch
+# proposed for mgr/cephadm (upgrade_staged_switch, ceph/ceph#72111): everything
+# that does not need the filesystem down is done while it serves, so the
+# outage is only 'fs fail' -> 'fs set joinable true' -> journal replay, with NO
+# daemon redeployed inside it:
+#
+#   1. allow_standby_replay is turned off and the filesystem is set not
+#      joinable: the actives keep serving, but the monitors no longer promote
+#      a standby nor re-balance ranks. Every standby MDS is then redeployed on
+#      the target image. While standbys of the new release sit next to the old
+#      actives, a crashed active is therefore NOT replaced until the switch
+#      (step 3) - rather than replaced by an upgraded standby, which would run
+#      mixed-version active ranks. --keep-failover keeps the filesystem
+#      joinable instead (and accepts that exposure).
+#   2. The previous actives are FENCED: each one gets a per-daemon mds_join_fs
+#      naming a filesystem that does not exist ("__upgrading__"), so the
+#      monitors see it as unpinned. When they fill a rank that is not up (all
+#      of them, after 'fs fail') they always prefer a standby pinned to the
+#      filesystem, so the old daemons cannot take a rank back next to the
+#      upgraded ones - no mixed-version active ranks, whatever the gids.
+#   3. 'fs fail', then 'fs set joinable true' right away: every rank goes to
+#      an upgraded standby. The fence is lifted, the previous actives - now
+#      standbys - are upgraded with the filesystem serving (and, as in step 1,
+#      not joinable unless --keep-failover), then the filesystem is set
+#      joinable and allow_standby_replay is restored.
+#
+# The switch needs at least max_mds upgraded standbys pinned to the filesystem
+# (mds_join_fs). With fewer, --add-standbys temporarily raises the placement
+# count of mds.<fs> so the missing standbys are deployed - born on the target
+# image - before the switch, and the service is brought back to its original
+# size afterwards without any failover; this needs an explicit 'count'
+# placement with free host slots, otherwise the script redeploys the ranks
+# inside the outage window instead (safe, slightly longer).
+#
+# --flush-journal flushes the journal of each active rank, one at a time, just
+# before the fence and 'fs fail', so the new MDS have little to replay and the
+# ranks come back faster. The extra metadata-pool I/O happens before the
+# outage, never during it, but while the filesystem is not joinable (with
+# --keep-failover: before it is set not joinable).
+#
 # Requires: ceph, jq. Run from a host with an admin keyring.
 
 set -euo pipefail
 
+# empty-array expansions ("${a[@]}") under 'set -u' need bash >= 4.4
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
+    echo "ERROR: bash >= 4.4 is required (this is $BASH_VERSION)" >&2; exit 1
+fi
+
 CEPH="${CEPH:-ceph}"
 REDEPLOY_TIMEOUT="${REDEPLOY_TIMEOUT:-600}"   # seconds to wait for an MDS to come back
 POLL_INTERVAL="${POLL_INTERVAL:-5}"           # seconds between status polls
+MON_POLL_INTERVAL="${MON_POLL_INTERVAL:-2}"   # seconds between fsmap polls inside an outage window
+CHURN_CHECK_SECS="${CHURN_CHECK_SECS:-4}"      # window used to detect background MDS restarts before a switch
+FLUSH_TIMEOUT="${FLUSH_TIMEOUT:-60}"          # seconds allowed per 'flush journal' (--flush-journal)
 
 PROG="$(basename "$0")"
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-die()  { echo "ERROR: $*" >&2; exit 1; }
-info() { echo ">>> $*"; }
-warn() { echo "WARNING: $*" >&2; }
+# Colors: COLOR=auto (default: only when stdout and stderr are terminals and
+# NO_COLOR is unset) | always | never.
+C_RST='' C_RED='' C_GRN='' C_YEL='' C_BLU='' C_MAG='' C_CYN='' C_ALERT='' C_OKBG=''
+case "${COLOR:-auto}" in
+    always) _color=true ;;
+    never)  _color=false ;;
+    *)      if [[ -t 1 && -t 2 && -z "${NO_COLOR:-}" ]]; then _color=true; else _color=false; fi ;;
+esac
+if $_color; then
+    C_RST=$'\e[0m' C_RED=$'\e[1;31m' C_GRN=$'\e[1;32m' C_YEL=$'\e[1;33m'
+    C_BLU=$'\e[1;34m' C_MAG=$'\e[1;35m' C_CYN=$'\e[36m' C_ALERT=$'\e[1;37;41m' C_OKBG=$'\e[1;37;42m'
+fi
+unset _color
+
+die()     { echo "${C_ALERT} ERROR ${C_RST} ${C_RED}$*${C_RST}" >&2; exit 1; }
+info()    { echo "${C_CYN}>>>${C_RST} $*"; }
+success() { echo "${C_GRN}>>> OK:${C_RST} ${C_GRN}$*${C_RST}"; }
+fail()    { echo "${C_RED}>>> FAILED:${C_RST} ${C_RED}$*${C_RST}" >&2; }   # a step failed, not fatal by itself
+warn()    { echo "${C_YEL}WARNING:${C_RST} ${C_YEL}$*${C_RST}" >&2; }
+phase()   { echo; echo "${C_MAG}>>> $*${C_RST}"; }
+banner()  { echo "${C_BLU}$*${C_RST}"; }
+outage()  { echo "${C_ALERT} OUTAGE ${C_RST} ${C_RED}$*${C_RST}"; }
+serving() { echo "${C_OKBG} SERVING ${C_RST} ${C_GRN}$*${C_RST}"; }
+
+# final verdict of an upgrade run (EXIT trap, armed once an upgrade starts)
+exit_verdict() {
+    local rc=$1
+    case $rc in
+        0)   echo; echo "${C_OKBG} SUCCESS ${C_RST} ${C_GRN}$PROG completed${C_RST}" ;;
+        130) echo; echo "${C_ALERT} INTERRUPTED ${C_RST} ${C_RED}$PROG was interrupted${C_RST}" >&2 ;;
+        *)   echo; echo "${C_ALERT} FAILED ${C_RST} ${C_RED}$PROG exited with status $rc${C_RST}" >&2 ;;
+    esac
+}
 
 require() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not found in PATH"; }
 
@@ -33,6 +111,10 @@ ver_lt() {
     [[ "$1" != "$2" ]] && \
     [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" == "$1" ]]
 }
+
+# true when a reported version is the target: exact, or a development build
+# of it (18.2.8-97-g4c7647d for a target of 18.2.8)
+on_target() { [[ "$1" == "$TARGET_VERSION" || "$1" == "$TARGET_VERSION-"* ]]; }
 
 # cached `orch ps` snapshot of all MDS daemons
 MDS_PS_JSON=""
@@ -104,6 +186,33 @@ OPTIONS:
                             selection. Uses --method (default 'fail_fs').
   -m, --method METHOD       Upgrade method: 'fail_fs' or 'max_mds'.
                             Defaults to 'fail_fs' when not given.
+  --add-standbys            With 'fail_fs': when the filesystem has fewer standbys
+                            than ranks, temporarily raise the placement count of
+                            its mds.<fs> service so that enough upgraded standbys
+                            exist for the switch to redeploy nothing inside the
+                            outage window. Afterwards the daemon count is brought
+                            back to the original placement without any failover:
+                            idle extras are removed, and for an extra that ended
+                            up holding a rank, an idle upgraded standby is
+                            removed instead (the extra stays; only daemon ids
+                            differ from before).
+  --flush-journal           With 'fail_fs': flush the journal of each
+                            active rank, one rank at a time, right before
+                            'fs fail', so the replay after the switch is shorter.
+                            Adds metadata-pool I/O BEFORE the outage window, never
+                            inside it - but it lengthens the time the filesystem
+                            is not joinable (up to FLUSH_TIMEOUT, 60 s, per rank;
+                            with --keep-failover it runs before that). Off by
+                            default.
+  --keep-failover           With 'fail_fs': keep the filesystem joinable while
+                            its standbys are upgraded (and while the previous
+                            actives are, after the switch). A crashed active is
+                            then replaced at once - but possibly by an MDS of the
+                            other release: mixed-version active ranks, which
+                            CephFS does not support, until the switch or the
+                            final check. Without it (default) the filesystem is
+                            not joinable during those phases and a crashed active
+                            is not replaced until they end.
   -I, --interactive         Guided interactive mode (lists, prompts for the
                             filesystem and method, then upgrades).
   --force-downgrade         Allow moving MDS to an OLDER version than they
@@ -140,12 +249,38 @@ BEHAVIOR:
         Upgrade cephfs2's MDS to 18.2.8 by scaling to max_mds 1.
   $PROG -i quay.io/ceph/ceph:v18.2.8 --all -m fail_fs
         Upgrade every filesystem that needs it, one after the other.
+  $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs2 --add-standbys
+        Upgrade cephfs2 with fail_fs, adding temporary standbys first if it has
+        fewer than max_mds so that nothing is redeployed inside the outage.
   $PROG -I
         Guided mode.
 
 METHODS:
-  fail_fs   Fail the filesystem (offline) for the duration of the upgrade.
-            Fastest and simplest; the fs is briefly unavailable.
+  fail_fs   Fail the filesystem (offline) for the switch to the new version.
+            The outage is kept as short as possible: every standby MDS is
+            upgraded first, while the actives keep serving clients. During
+            that phase the filesystem is set NOT JOINABLE: if an active MDS
+            crashes, its rank is not replaced until the switch (the monitors
+            would otherwise hand it to an upgraded standby, and the filesystem
+            would run mixed-version active ranks, which CephFS does not
+            support). --keep-failover keeps it joinable and accepts that risk.
+            Then, if at least max_mds upgraded standbys are pinned to the
+            filesystem (mds_join_fs), the previous actives are fenced
+            (per-daemon mds_join_fs set to a filesystem that does not exist, so
+            they cannot take a rank back), and the filesystem is failed and
+            set joinable again straight away: every rank goes to an upgraded
+            standby and NO daemon is redeployed inside the outage window - the
+            filesystem is down for the fail/rejoin and the journal replay only.
+            The previous active MDS, now standbys, are upgraded afterwards,
+            with the filesystem serving (and, again, not joinable unless
+            --keep-failover). With fewer upgraded standbys than ranks (or
+            without mds_join_fs), the remaining daemons are redeployed inside
+            the window instead; the script says so before failing anything,
+            and --add-standbys avoids it. --flush-journal shortens the replay.
+            Every wait inside the window uses the monitors ('fs dump' /
+            'mds metadata'), not 'orch ps', whose cache lags by ~20 s.
+            refuse_standby_for_another_fs is recommended with several
+            filesystems (-R). Standby-replay is turned off for the duration.
   max_mds   Scale the filesystem to a single rank, upgrade standbys first then
             the active MDS last (single failover), then restore max_mds. The fs
             stays online but degraded; slower.
@@ -156,6 +291,7 @@ EXAMPLES:
   $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs cephfs2
   $PROG -i quay.io/ceph/ceph:v18.2.8 cephfs,cephfs2 -m fail_fs
   $PROG -i quay.io/ceph/ceph:v18.2.8 -f cephfs2 -m fail_fs
+  $PROG -i quay.io/ceph/ceph:v18.2.8 -f cephfs --add-standbys --flush-journal
   $PROG -i my.registry.local/ceph/ceph:v18.2.8 -f cephfs,cephfs2 -m max_mds
   $PROG -i my.registry.local/ceph/ceph:custom -t 18.2.8 cephfs2 -m fail_fs
   $PROG -R
@@ -176,6 +312,9 @@ ACTION_SET_JOIN_FS=false
 ACTION_SET_REFUSE=false
 ALL=false
 FORCE_DOWNGRADE=false
+FLUSH_JOURNAL=false
+ADD_STANDBYS=false
+KEEP_FAILOVER=false
 
 # append comma-separated and/or repeated -f values
 add_filesystems() {
@@ -207,6 +346,9 @@ while [[ $# -gt 0 ]]; do
         -J|--set-mds-join-fs) ACTION_SET_JOIN_FS=true; shift ;;
         -R|--set-refuse-standby-for-another-fs) ACTION_SET_REFUSE=true; shift ;;
         --force-downgrade) FORCE_DOWNGRADE=true; shift ;;
+        --flush-journal) FLUSH_JOURNAL=true; shift ;;
+        --add-standbys) ADD_STANDBYS=true; shift ;;
+        --keep-failover) KEEP_FAILOVER=true; shift ;;
         --) shift; while [[ $# -gt 0 ]]; do POSITIONAL+=("$1"); shift; done; break ;;
         -*) die "unknown option: $1 (see --help)" ;;
         *) POSITIONAL+=("$1"); shift ;;
@@ -239,10 +381,20 @@ require jq
 #   - if no image is given, build the default image from the version (used by
 #     the listing paths and as a convenience when only -t is supplied).
 resolve_image_and_version() {
+    if [[ -n "$TARGET_VERSION" && ! "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        if [[ "$TARGET_VERSION" == */* || "$TARGET_VERSION" == *:* ]]; then
+            die "-t/--target-version expects a version like 18.2.8, not an image; use -i/--image '$TARGET_VERSION' (and -t X.Y.Z if the tag holds no version)"
+        fi
+        die "-t/--target-version expects a version like 18.2.8 (got '$TARGET_VERSION')"
+    fi
     if [[ -n "$IMAGE" ]]; then
         if [[ -z "$TARGET_VERSION" ]]; then
-            if [[ "$IMAGE" =~ :v?([0-9]+\.[0-9]+\.[0-9]+) ]]; then
-                TARGET_VERSION="${BASH_REMATCH[1]}"
+            # version taken from the tag (after the last ':'), anywhere in it:
+            # v18.2.8, 18.2.8, reef-v18.2.8-mybuild-20260926 ...
+            local tag="${IMAGE##*:}"
+            if [[ "$IMAGE" != *:* || "$IMAGE" == *@sha256:* ]]; then tag=""; fi
+            if [[ "$tag" =~ (^|[^0-9.])v?([0-9]+\.[0-9]+\.[0-9]+)([^0-9]|$) ]]; then
+                TARGET_VERSION="${BASH_REMATCH[2]}"
             else
                 die "could not derive a version from image '$IMAGE'; specify it with -t/--target-version."
             fi
@@ -334,7 +486,10 @@ list_filesystems() {
             else
                 note="newer than target ($vers)"
             fi
-            printf "  %-28s %s\n" "$fs" "$note"
+            local nc=$C_CYN
+            $all_target && nc=$C_GRN
+            $has_stale && nc=$C_YEL
+            printf "  %-28s %s\n" "$fs" "$nc$note$C_RST"
         fi
     done < <(get_fs_list)
 }
@@ -412,7 +567,7 @@ apply_set_join_fs() {
             applied=$((applied + 1))
         fi
     done < <(get_fs_list)
-    info "mds_join_fs applied to $applied filesystem(s)."
+    success "mds_join_fs applied to $applied filesystem(s)."
     return 0
 }
 
@@ -432,7 +587,7 @@ apply_set_refuse() {
             applied=$((applied + 1))
         fi
     done < <(get_fs_list)
-    info "refuse_standby_for_another_fs applied to $applied filesystem(s)."
+    success "refuse_standby_for_another_fs applied to $applied filesystem(s)."
     return 0
 }
 
@@ -455,20 +610,1130 @@ redeploy_and_wait() {
         refresh_mds_ps
         local ok=true
         for d in "${batch[@]}"; do
-            if [[ "$(daemon_status "$d")" != "running" || "$(daemon_version "$d")" != "$TARGET_VERSION" ]]; then
+            if [[ "$(daemon_status "$d")" != "running" ]] || ! on_target "$(daemon_version "$d")"; then
                 ok=false; break
             fi
         done
-        $ok && { info "Batch up to date on $TARGET_VERSION"; return 0; }
+        $ok && { success "Batch up to date on $TARGET_VERSION"; return 0; }
         if (( $(date +%s) >= deadline )); then
-            warn "Timed out waiting for MDS redeploy. Current state:"
+            fail "Timed out waiting for MDS redeploy. Current state:"
             for d in "${batch[@]}"; do
-                echo "    $d : status=$(daemon_status "$d") version=$(daemon_version "$d")" >&2
+                echo "    ${C_RED}$d : status=$(daemon_status "$d") version=$(daemon_version "$d")${C_RST}" >&2
             done
             return 1
         fi
         sleep "$POLL_INTERVAL"
     done
+}
+
+# ---------------------------------------------------------------------------
+# Monitor-based state (no dependence on the cephadm daemon cache, which lags
+# ~20 s behind a redeploy - that lag is inside the outage window otherwise)
+# ---------------------------------------------------------------------------
+# gid of an MDS (by daemon name without the "mds." prefix) from a cached fs dump,
+# whether it holds a rank or is a standby; empty if unknown to the monitors.
+mds_gid_cached() {
+    jq -r --arg n "$1" '
+        ([.standbys[]? | select(.name==$n) | .gid]
+         + [.filesystems[]?.mdsmap.info[]? | select(.name==$n) | .gid])
+        | .[0] // ""' <<<"$FS_DUMP_JSON"
+}
+
+# "standby" if the MDS is a plain standby in the cached fs dump, else its state
+# in the mdsmap, else "".
+mds_state_cached() {
+    jq -r --arg n "$1" '
+        if ([.standbys[]? | select(.name==$n)] | length) > 0 then "standby"
+        else ([.filesystems[]?.mdsmap.info[]? | select(.name==$n) | .state] | .[0] // "") end' \
+        <<<"$FS_DUMP_JSON"
+}
+
+# X.Y.Z version of an MDS as reported to the monitors (mds metadata); empty if
+# the daemon has not registered yet.
+MDS_METADATA_JSON=""
+refresh_mds_metadata() { MDS_METADATA_JSON="$($CEPH mds metadata --format json 2>/dev/null)"; }
+mds_version_mon() {
+    jq -r --arg n "$1" '
+        [.[] | select(.name==$n)
+         | (.ceph_version_short // (.ceph_version | capture("ceph version (?<v>[0-9]+\\.[0-9]+\\.[0-9]+)").v) // "")]
+        | .[0] // ""' <<<"$MDS_METADATA_JSON"
+}
+
+# names (without "mds.") of the standbys pinned to FS (join_fscid == fscid of FS)
+fs_pinned_standbys() {
+    jq -r --arg f "$1" '
+        (.filesystems[] | select(.mdsmap.fs_name==$f) | .id) as $id
+        | .standbys[]? | select(.join_fscid==$id) | .name' <<<"$FS_DUMP_JSON"
+}
+
+# pinned standbys of $1 as "name:gid" lines, sorted, from the current FS_DUMP_JSON
+pinned_standby_gids() {
+    local n
+    fs_pinned_standbys "$1" | while IFS= read -r n; do
+        [[ -n "$n" ]] && echo "$n:$(mds_gid_cached "$n")"
+    done | sort
+}
+
+# every MDS of $1 (rank holders + pinned standbys) as "name:gid" lines, sorted,
+# straight from the monitors (FS_DUMP_JSON) - no cephadm cache involved
+fs_all_gids() {
+    jq -r --arg f "$1" '
+        (.filesystems[] | select(.mdsmap.fs_name==$f)) as $fs
+        | ($fs.id) as $id
+        | ( [ $fs.mdsmap.info[]? | "\(.name):\(.gid)" ]
+          + [ .standbys[]? | select(.join_fscid==$id) | "\(.name):\(.gid)" ] )
+        | sort[]' <<<"$FS_DUMP_JSON"
+}
+
+# Before failing the filesystem for a full switch, make sure the switch will
+# actually hand every rank to an upgraded standby. The monitors give the ranks
+# to the lowest-gid pinned standbys; the current actives respawn with new
+# (higher) gids and lose the race - but only as long as nothing restarts the
+# upgraded standbys in the background. External churn (a leftover
+# 'orch daemon redeploy' from an interrupted run, or an
+# 'mds.<fs> container_image' service pin that does not match the target and
+# makes cephadm reconcile in a loop) can bump an upgraded standby's gid above
+# an old one and mix versions after the switch. Refuse to fail the fs then.
+verify_switch_ready() {
+    local ranks="$1" n snap1 snap2 off=""; shift
+    # the remaining arguments are the daemons about to be fenced: they will be
+    # unpinned at the switch, so they do not compete with the pinned standbys
+    local -A fenced=()
+    for n in "$@"; do fenced["${n#mds.}"]=1; done
+
+    # a) no MDS of the fs is still restarting: snapshot every gid (rank holders
+    #    and pinned standbys) from the MONITORS, CHURN_CHECK_SECS apart, and wait
+    #    for two consecutive identical snapshots. A redeploy or a cephadm
+    #    reconciliation in flight restarts a daemon and changes its gid, which
+    #    would scramble which standby wins a rank at the switch. Transient
+    #    settling (a standby we just added is registering) clears within a few
+    #    seconds; only a PERSISTENT churn aborts. Monitor-based on purpose:
+    #    'orch ps' lags ~20 s and would flag just-upgraded standbys as not running.
+    local stable=false csd=$(( $(date +%s) + REDEPLOY_TIMEOUT ))
+    refresh_fs_dump; snap2="$(fs_all_gids "$FS")"
+    while :; do
+        snap1="$snap2"
+        sleep "$CHURN_CHECK_SECS"
+        refresh_fs_dump; snap2="$(fs_all_gids "$FS")"
+        [[ "$snap1" == "$snap2" ]] && { stable=true; break; }
+        (( $(date +%s) >= csd )) && break
+        info "waiting for $FS MDS gids to stop changing (a redeploy/reconciliation is still settling)"
+    done
+    $stable || die "the MDS of '$FS' keep restarting (gids still changing after ${REDEPLOY_TIMEOUT}s): a redeploy or a cephadm reconciliation is in flight. Let 'ceph orch ps --daemon-type mds' settle (and make the 'mds.$FS container_image' pin, if any, match the target so cephadm stops reconciling), then re-run. Nothing was changed."
+
+    # b) the 'ranks' lowest-gid pinned standbys must all be on target: those are
+    #    the ones the monitors pick, since the current actives respawn higher.
+    #    Daemons about to be fenced are left out (e.g. an active that crashed
+    #    and came back as a pinned standby on the old release: it is fenced
+    #    with the others and cannot take a rank).
+    refresh_mds_metadata
+    local -a low=()
+    while IFS= read -r n; do
+        [[ -n "$n" && -z "${fenced[${n%%:*}]:-}" ]] && low+=("${n%%:*}")
+    done < <(pinned_standby_gids "$FS" | sort -t: -k2 -n)
+    low=("${low[@]:0:$ranks}")
+    for n in "${low[@]}"; do on_target "$(mds_version_mon "$n")" || off="$off mds.$n"; done
+    [[ -z "$off" ]] || die "the lowest-gid pinned standbys of '$FS' are not all on $TARGET_VERSION:$off - they would take a rank before the upgraded ones and '$FS' would come back with mixed versions. Re-run from a clean state (no in-flight redeploys, 'mds.$FS container_image' pin matching the target). Nothing was changed."
+}
+
+# Fence the current rank holders (old version) so that, at the switch, the
+# monitors hand every rank to an upgraded standby - no reliance on gid ordering.
+# Each old daemon gets a per-daemon mds_join_fs naming a filesystem that does
+# not exist: the monitors then record it with join_fscid NONE (unpinned).
+# That holds as long as there are at least max_mds upgraded standbys pinned to
+# $FS (the full-switch condition); refuse_standby_for_another_fs does not
+# matter here (it only concerns standbys pinned to another fs).
+#
+# Why a pinned standby wins (FSMap::get_available_standby):
+#  - reef, squid, tentacle: a standby pinned to the fs is always preferred over
+#    an unpinned one, whatever the gids.
+#  - main (after tentacle), with host anti-affinity: the standbys are scored,
+#    and an unpinned standby on another host (SCORE_PREF_VANILLA, 5) outranks
+#    a pinned one on the host of the addresses to avoid (SCORE_FALLBACK_MATCH,
+#    3). find_replacement_for() only passes addresses to avoid for a rank that
+#    is still in 'up' (a laggy active being replaced, affinity re-balancing).
+#    'fs fail' purges every rank from 'up', so at the switch no address is
+#    avoided and pinned (6) still beats unpinned (5). The fence relies on that:
+#    the ranks must be empty when the monitors fill them, i.e. after 'fs fail'.
+#
+# MUST be done with $FS not joinable: an active whose join_fscid is not its fs
+# is dropped by MDSMonitor::check_health, one per tick, in favour of a pinned
+# standby - an unplanned failover to the new version while the fs serves.
+# While fenced, the old daemons are unpinned for EVERY filesystem: another
+# filesystem that needs a standby then and has no pinned one available could
+# take one of them (the fence is lifted as soon as the ranks are back).
+# Records the fenced daemons in FENCED_DAEMONS.
+FENCED_DAEMONS=()
+FENCE_SENTINEL="__upgrading__"
+fence_old_actives() {
+    FENCED_DAEMONS=()
+    local d id
+    for d in "$@"; do
+        id="${d#mds.}"
+        $CEPH config set "mds.$id" mds_join_fs "$FENCE_SENTINEL" >/dev/null || {
+            fail "could not fence $d (config set mds_join_fs failed); aborting the fenced switch"
+            unfence_old_actives
+            return 1
+        }
+        FENCED_DAEMONS+=("$d")
+    done
+    return 0
+}
+unfence_old_actives() {
+    local d id
+    for d in "${FENCED_DAEMONS[@]}"; do
+        id="${d#mds.}"
+        $CEPH config rm "mds.$id" mds_join_fs >/dev/null 2>&1 || true
+    done
+    FENCED_DAEMONS=()
+}
+
+# fscid of filesystem $1 / join_fscid of mds $1, from the cached fs dump
+fs_id_cached() {
+    jq -r --arg f "$1" '.filesystems[] | select(.mdsmap.fs_name==$f) | .id' <<<"$FS_DUMP_JSON"
+}
+mds_join_fscid_cached() {
+    jq -r --arg n "$1" '
+        ([.standbys[]? | select(.name==$n) | .join_fscid]
+         + [.filesystems[]?.mdsmap.info[]? | select(.name==$n) | .join_fscid])
+        | .[0] // "" | tostring' <<<"$FS_DUMP_JSON"
+}
+# wait_join_fscid WANT TIMEOUT daemon...: until the monitors report every given
+# daemon with join_fscid WANT (the MDS re-reads mds_join_fs at each beacon)
+wait_join_fscid() {
+    local want="$1" timeout="$2" d ok; shift 2
+    local deadline=$(( $(date +%s) + timeout ))
+    while :; do
+        refresh_fs_dump
+        ok=true
+        for d in "$@"; do
+            [[ "$(mds_join_fscid_cached "${d#mds.}")" == "$want" ]] || { ok=false; break; }
+        done
+        $ok && return 0
+        (( $(date +%s) >= deadline )) && return 1
+        sleep "$MON_POLL_INTERVAL"
+    done
+}
+
+# wait until every given MDS (names with "mds.") is known to the monitors (a
+# standby, or a rank holder), has a gid different from the one recorded in PRE_GIDS (i.e. it
+# restarted), and reports TARGET_VERSION. $1 = timeout, rest = daemons.
+declare -A PRE_GIDS=()
+wait_standby_on_target() {
+    local timeout="$1"; shift
+    local -a batch=("$@") d n
+    local deadline=$(( $(date +%s) + timeout ))
+    local next_hint=$(( $(date +%s) + 30 ))
+    while :; do
+        refresh_fs_dump; refresh_mds_metadata
+        local ok=true why=""
+        for d in "${batch[@]}"; do
+            n="${d#mds.}"
+            # up:* too: with --keep-failover an upgraded daemon may have taken
+            # over the rank of an active that crashed meanwhile
+            local st; st="$(mds_state_cached "$n")"
+            if [[ "$st" != "standby" && "$st" != up:* ]]; then ok=false; why="$d is not a standby yet"; break; fi
+            if [[ -n "${PRE_GIDS[$d]:-}" && "$(mds_gid_cached "$n")" == "${PRE_GIDS[$d]}" ]]; then ok=false; why="$d has not restarted yet"; break; fi
+            if ! on_target "$(mds_version_mon "$n")"; then ok=false; why="$d reports $(mds_version_mon "$n") (want $TARGET_VERSION)"; break; fi
+        done
+        $ok && return 0
+        if (( $(date +%s) >= deadline )); then
+            fail "Timed out: $why"
+            return 1
+        fi
+        if (( $(date +%s) >= next_hint )); then
+            info "still waiting: $why - if nothing restarts, check '$CEPH log last 50 cephadm' for deploy errors (image pull?)"
+            next_hint=$(( $(date +%s) + 30 ))
+        fi
+        sleep "$MON_POLL_INTERVAL"
+    done
+}
+
+# record the current gids of the given daemons, so a restart can be detected
+record_gids() {
+    local d
+    refresh_fs_dump
+    for d in "$@"; do PRE_GIDS["$d"]="$(mds_gid_cached "${d#mds.}")"; done
+}
+
+# flush the journal of every active rank of FS, one rank at a time (opt-in)
+flush_active_journals() {
+    local n
+    while IFS= read -r n; do
+        [[ -n "$n" ]] || continue
+        info "Flushing journal of mds.$n (rank of $FS, max ${FLUSH_TIMEOUT}s)"
+        # bounded: 'ceph tell' waits forever for an MDS that has left the map
+        local rc=0
+        timeout "$FLUSH_TIMEOUT" $CEPH tell "mds.$n" flush journal >/dev/null 2>&1 || rc=$?
+        if [[ $rc -eq 124 ]]; then
+            warn "flush journal on mds.$n timed out after ${FLUSH_TIMEOUT}s; replay may take longer"
+        elif [[ $rc -ne 0 ]]; then
+            warn "flush journal on mds.$n failed; replay may take longer"
+        fi
+    done < <(fs_get "$FS" | jq -r '.mdsmap.info[] | select(.state=="up:active") | .name')
+}
+
+# wait for every rank of FS to be up:active (monitor-based). $1 = timeout.
+wait_ranks_active() {
+    local deadline=$(( $(date +%s) + $1 ))
+    local fsj want have
+    while :; do
+        # one mon round-trip per poll: this loop runs inside the outage window
+        fsj="$(fs_get "$FS")"
+        want="$(jq -r '.mdsmap.max_mds' <<<"$fsj")"
+        have="$(jq -r '[.mdsmap.info[] | select(.state=="up:active")] | length' <<<"$fsj")"
+        [[ "$have" -ge "$want" ]] && return 0
+        (( $(date +%s) >= deadline )) && return 1
+        sleep "$MON_POLL_INTERVAL"
+    done
+}
+
+# ---------------------------------------------------------------------------
+# Temporary standbys (--add-standbys): raise the placement count of mds.<fs>
+# so that the switch can hand every rank to an upgraded standby. The extra
+# daemons are born on IMAGE: container_image is set for the service section
+# (mds.<fs>) before the count is raised. cephadm resolves a NEW daemon's image
+# from the config db (mds.<daemon> -> mds.<fs> -> mds -> global), and its serve
+# loop never redeploys an EXISTING daemon because that setting changed (only
+# 'orch upgrade' and 'orch daemon redeploy' do), so the still-old actives are
+# not touched. The extras are pinned to the filesystem by mds_join_fs.
+# ---------------------------------------------------------------------------
+ORIG_SPEC_JSON=""
+declare -a EXTRA_DAEMONS=()
+SVC_PIN_CHANGED=false   # we set container_image on the mds.<fs> section
+SVC_PIN_PREV=""         # its previous section-level value ("" = not set)
+
+# section-level value of container_image for mds.$1 ("" if not set there)
+svc_image_pin() {
+    $CEPH config dump --format json 2>/dev/null \
+        | jq -r --arg s "mds.$1" '[.[] | select(.section==$s and .name=="container_image") | .value] | .[0] // ""'
+}
+
+# put the mds.<fs> container_image section back as we found it (abort path)
+restore_service_image_pin() {
+    $SVC_PIN_CHANGED || return 0
+    if [[ -n "$SVC_PIN_PREV" ]]; then
+        $CEPH config set "mds.$FS" container_image "$SVC_PIN_PREV" >/dev/null
+    else
+        $CEPH config rm "mds.$FS" container_image >/dev/null 2>&1 || true
+    fi
+    SVC_PIN_CHANGED=false
+}
+
+# Once EVERY daemon of mds.$FS runs the target, move the image from the
+# per-daemon sections to the service: set mds.<fs> container_image and drop the
+# mds.<fs>.<host>.<id> overrides that 'orch daemon redeploy --image' leaves
+# behind. Otherwise those overrides outlive the upgrade, shadow any later
+# service-level change and a new daemon of the service would be born on the
+# old service image. Changing container_image redeploys nothing (see above).
+# The service is pinned to the repo digest the daemons actually run when they
+# all share a single one, else to IMAGE, so cephadm has no tag -> digest
+# difference to reconcile later. When that image is the global container_image
+# the mds.<fs> setting is removed instead: it would only duplicate global, and
+# would keep the service on this image once global moves on.
+# Left untouched, with a warning, while any daemon is not running the target:
+# there the overrides are what keeps the upgraded daemons on it.
+consolidate_image_pins() {
+    local deadline=$(( $(date +%s) + 120 )) d ok pin cur glob sec
+    local -a daemons=() lagging=() overrides=()
+    while :; do
+        refresh_mds_ps
+        mapfile -t daemons < <(fs_daemons "$FS")
+        lagging=()
+        for d in "${daemons[@]}"; do
+            [[ "$(daemon_status "$d")" == "running" ]] && on_target "$(daemon_version "$d")" || lagging+=("$d")
+        done
+        [[ ${#lagging[@]} -eq 0 ]] && break
+        if (( $(date +%s) >= deadline )); then
+            warn "not every MDS of $FS runs $TARGET_VERSION (${lagging[*]}): container_image left per daemon; once they do, run:"
+            warn "    $CEPH config set mds.$FS container_image $IMAGE"
+            warn "    for s in \$($CEPH config dump --format json | jq -r '.[] | select(.name==\"container_image\" and (.section|startswith(\"mds.$FS.\"))) | .section'); do $CEPH config rm \$s container_image; done"
+            return 0
+        fi
+        sleep "$POLL_INTERVAL"
+    done
+
+    # container_image_name may be the tag for some daemons and the digest for
+    # others (same image); the repo digests are what they have in common
+    pin="$(jq -r --arg s "mds.$FS" '[.[] | select(.service_name==$s) | (.container_image_digests // [""])[]] | unique | if length==1 and .[0]!="" then .[0] else "" end' <<<"$MDS_PS_JSON")"
+    [[ -n "$pin" ]] || pin="$IMAGE"
+
+    refresh_config_dump
+    cur="$(jq -r --arg s "mds.$FS" '[.[] | select(.section==$s and .name=="container_image") | .value] | .[0] // ""' <<<"$CONFIG_DUMP_JSON")"
+    mapfile -t overrides < <(jq -r --arg p "mds.$FS." '.[] | select(.name=="container_image" and (.section|startswith($p))) | .section' <<<"$CONFIG_DUMP_JSON")
+
+    glob="$(jq -r '[.[] | select(.section=="global" and .name=="container_image") | .value] | .[0] // ""' <<<"$CONFIG_DUMP_JSON")"
+
+    if [[ -n "$glob" && "$pin" == "$glob" ]]; then
+        if [[ -n "$cur" ]]; then
+            info "Every MDS of $FS runs $TARGET_VERSION on the global container_image: removing mds.$FS container_image ($cur)"
+            $CEPH config rm "mds.$FS" container_image >/dev/null \
+                || { warn "could not remove mds.$FS container_image; per-daemon overrides kept"; return 0; }
+        else
+            info "mds.$FS inherits the global container_image ($glob)"
+        fi
+    elif [[ "$cur" == "$pin" ]]; then
+        info "mds.$FS container_image already on $pin"
+    else
+        info "Every MDS of $FS runs $TARGET_VERSION: setting mds.$FS container_image $pin"
+        $CEPH config set "mds.$FS" container_image "$pin" >/dev/null \
+            || { warn "could not set mds.$FS container_image; per-daemon overrides kept"; return 0; }
+    fi
+    for sec in "${overrides[@]}"; do
+        [[ -n "$sec" ]] || continue
+        info "Removing per-daemon override: $CEPH config rm $sec container_image"
+        $CEPH config rm "$sec" container_image >/dev/null 2>&1 \
+            || warn "could not remove container_image from $sec; do it by hand: $CEPH config rm $sec container_image"
+    done
+    SVC_PIN_CHANGED=false
+}
+
+# the service spec of mds.<fs> as JSON (single object)
+fs_service_spec() {
+    $CEPH orch ls --service_name "mds.$1" --export --format json 2>/dev/null \
+        | jq -c 'if type=="array" then .[0] else . end'
+}
+
+# hosts cephadm may place the daemons of a spec on, as HostAssignment.get_candidates
+# (mgr/cephadm/schedule.py) computes them: the explicit host list, else the
+# label, else every host; then host_pattern if any. Draining hosts (label
+# _no_schedule) are left out. Offline and maintenance hosts are KEPT: cephadm
+# only reschedules haproxy and nfs away from unreachable hosts, so they still
+# count in the per-host limit of an MDS service. One per line; empty when the
+# placement cannot be resolved (unknown host_pattern type).
+spec_candidate_hosts() {
+    local spec="$1" hosts_json label pat ptype h
+    hosts_json="$($CEPH orch host ls --format json 2>/dev/null)" || return 0
+    local -a base=()
+    if jq -e '(.placement.hosts // []) | length > 0' <<<"$spec" >/dev/null; then
+        mapfile -t base < <(jq -r --argjson s "$spec" '
+            ([$s.placement.hosts[] | if type=="object" then .hostname else (split(":")[0] | split("=")[0]) end]) as $want
+            | .[] | select(.hostname as $h | $want | index($h))
+            | select(((.labels // []) | index("_no_schedule")) | not)
+            | .hostname' <<<"$hosts_json")
+    else
+        label="$(jq -r '.placement.label // empty' <<<"$spec")"
+        mapfile -t base < <(jq -r --arg l "$label" '.[]
+            | select(($l == "") or ((.labels // []) | index($l)))
+            | select(((.labels // []) | index("_no_schedule")) | not)
+            | .hostname' <<<"$hosts_json")
+    fi
+    # host_pattern: a string (fnmatch) up to reef, an object {pattern, pattern_type} later
+    pat="$(jq -r '.placement.host_pattern | if type=="object" then .pattern else . end // empty' <<<"$spec")"
+    ptype="$(jq -r '.placement.host_pattern | if type=="object" then (.pattern_type // "fnmatch") else "fnmatch" end' <<<"$spec" 2>/dev/null)"
+    for h in "${base[@]}"; do
+        [[ -n "$h" ]] || continue
+        if [[ -n "$pat" ]]; then
+            case "${ptype,,}" in
+                fnmatch) # shellcheck disable=SC2053
+                         [[ "$h" == $pat ]] || continue ;;
+                regex)   [[ "$h" =~ ^($pat) ]] || continue ;;
+                *)       return 0 ;;
+            esac
+        fi
+        echo "$h"
+    done | sort -u
+}
+
+# cephadm's per-host limit for a service with an explicit 'count' spread over
+# N candidate hosts (mgr/cephadm/schedule.py, colocation allowed for mds):
+#   per_host = 1 + (count - 1) // N
+# $1 = count, $2 = number of candidate hosts
+placement_per_host() { echo $(( 1 + ($1 - 1) / $2 )); }
+
+# add_temp_standbys N: deploy N more daemons in service mds.$FS, wait until the
+# monitors see them as standbys pinned to FS on TARGET_VERSION. Sets
+# ORIG_SPEC_JSON and EXTRA_DAEMONS.
+# --add-standbys is only safe when the service placement is bound by an explicit
+# 'count' AND the extra daemons fit in free placement slots. cephadm allows
+# per_host = 1 + (count-1)//N daemons per host: raising the count beyond
+# N * per_host(original count) raises that limit, the extras double up on hosts
+# that already run one, and when the original placement is restored cephadm
+# reconciles back to the original limit and removes a daemon from the doubled
+# host - possibly a rank holder, i.e. an unplanned failover while the fs serves.
+# Same with count_per_host or a bare label/host placement. $1 = number of
+# standbys to add. Prints "" if supported, else a reason string.
+add_standbys_unsupported_reason() {
+    local need="${1:-1}"
+    local spec; spec="$(fs_service_spec "$FS")"
+    [[ -n "$spec" && "$spec" != "null" ]] || { echo "cannot read the spec of service mds.$FS"; return; }
+    local cnt cph
+    cnt="$(jq -r '.placement.count // empty' <<<"$spec")"
+    cph="$(jq -r '.placement.count_per_host // empty' <<<"$spec")"
+    if [[ -n "$cph" ]]; then
+        echo "service mds.$FS uses a count_per_host placement"
+        return
+    elif [[ -z "$cnt" ]]; then
+        echo "service mds.$FS has no explicit placement count (label/host placement)"
+        return
+    fi
+    local -a hosts=()
+    mapfile -t hosts < <(spec_candidate_hosts "$spec")
+    [[ ${#hosts[@]} -gt 0 ]] || { echo "cannot resolve the candidate hosts of service mds.$FS (label/hosts placement expected)"; return; }
+    local per_host cap
+    per_host="$(placement_per_host "$cnt" "${#hosts[@]}")"
+    cap=$(( ${#hosts[@]} * per_host ))
+    if (( cnt + need > cap )); then
+        echo "no free placement slot for $need more daemon(s): count $cnt on ${#hosts[@]} host(s) (${hosts[*]}) allows $per_host per host ($cap slots), so the temporary daemons would share a host with an existing one and cephadm would remove one of them - possibly a rank holder - when the placement is restored. Add the placement label to another host (or add hosts to the placement) to make room"
+        return
+    fi
+    # cephadm never deploys on an unreachable (offline / maintenance) host, so
+    # the free slots must be on reachable ones, or the extras never show up
+    local hosts_json free=0 h n st
+    hosts_json="$($CEPH orch host ls --format json 2>/dev/null)"
+    refresh_mds_ps
+    for h in "${hosts[@]}"; do
+        st="$(jq -r --arg h "$h" '.[] | select(.hostname==$h) | .status // ""' <<<"$hosts_json")"
+        [[ -z "$st" ]] || continue
+        n="$(jq -r --arg s "mds.$FS" --arg h "$h" '[.[] | select(.service_name==$s and .hostname==$h)] | length' <<<"$MDS_PS_JSON")"
+        (( per_host > n )) && free=$(( free + per_host - n ))
+    done
+    if (( free < need )); then
+        echo "only $free free placement slot(s) on reachable hosts for $need more daemon(s) (limit $per_host per host on ${hosts[*]}; cephadm does not deploy on offline or maintenance hosts)"
+    fi
+}
+
+# hostname of an MDS (name with "mds.") from the cached orch ps
+daemon_host() {
+    jq -r --arg n "$1" '.[] | select(.daemon_name==$n) | .hostname // ""' <<<"$MDS_PS_JSON"
+}
+
+# hosts where mds.$FS runs more daemons than the ORIGINAL placement allows per
+# host, not counting the daemons given as arguments (planned removals). Prints
+# "host=n/limit ..." or "". Uses ORIG_SPEC_JSON and the cached MDS_PS_JSON.
+ORIG_CAND_HOSTS=()
+hosts_over_placement_limit() {
+    local cnt per_host d x h skip out=""
+    cnt="$(jq -r '.placement.count // empty' <<<"$ORIG_SPEC_JSON")"
+    [[ -n "$cnt" ]] || return 0
+    [[ ${#ORIG_CAND_HOSTS[@]} -gt 0 ]] || mapfile -t ORIG_CAND_HOSTS < <(spec_candidate_hosts "$ORIG_SPEC_JSON")
+    [[ ${#ORIG_CAND_HOSTS[@]} -gt 0 ]] || return 0
+    per_host="$(placement_per_host "$cnt" "${#ORIG_CAND_HOSTS[@]}")"
+    local -A per=()
+    while IFS= read -r d; do
+        [[ -n "$d" ]] || continue
+        skip=false
+        for x in "$@"; do [[ "$x" == "$d" ]] && skip=true; done
+        $skip && continue
+        h="$(daemon_host "$d")"
+        [[ -n "$h" ]] && per[$h]=$(( ${per[$h]:-0} + 1 ))
+    done < <(fs_daemons "$FS")
+    for h in "${!per[@]}"; do
+        (( per[$h] > per_host )) && out="$out $h=${per[$h]}/$per_host"
+    done
+    echo "${out# }"
+}
+
+add_temp_standbys() {
+    local need="$1" d
+    ORIG_SPEC_JSON="$(fs_service_spec "$FS")"
+    [[ -n "$ORIG_SPEC_JSON" && "$ORIG_SPEC_JSON" != "null" ]] || die "cannot read the spec of service mds.$FS (ceph orch ls --export)"
+    local count cph
+    count="$(jq -r '.placement.count // empty' <<<"$ORIG_SPEC_JSON")"
+    cph="$(jq -r '.placement.count_per_host // empty' <<<"$ORIG_SPEC_JSON")"
+    if [[ -z "$count" || -n "$cph" ]]; then
+        # count_per_host, or a hosts/label placement without an explicit count:
+        # base on the current number of daemons (setting .count alongside
+        # count_per_host is rejected, so we switch to an explicit count for the
+        # duration and restore the original spec afterwards)
+        refresh_mds_ps
+        count="$(fs_daemons "$FS" | wc -l)"
+    fi
+    local new_count=$(( count + need ))
+    local -a before=()
+    refresh_mds_ps
+    mapfile -t before < <(fs_daemons "$FS")
+
+    info "Adding $need temporary standby MDS to service mds.$FS (placement count $count -> $new_count), born on $TARGET_VERSION"
+    # new daemons must be born on the target image (see the section comment:
+    # this does not redeploy the existing daemons)
+    SVC_PIN_PREV="$(svc_image_pin "$FS")"
+    if [[ "$SVC_PIN_PREV" != "$IMAGE" ]]; then
+        $CEPH config set "mds.$FS" container_image "$IMAGE" >/dev/null
+        SVC_PIN_CHANGED=true
+    fi
+    jq -c --argjson c "$new_count" '.placement |= (del(.count_per_host) | .count = $c) | .unmanaged = false' <<<"$ORIG_SPEC_JSON" \
+        | $CEPH orch apply -i - >/dev/null
+
+    info "Waiting for the $need new MDS to be created and registered with $FS"
+    # The set of extras is accepted only once the service holds exactly
+    # new_count daemons and that set is the same on two consecutive polls: a
+    # failed deploy makes cephadm place a replacement and then remove the
+    # surplus once the failed one recovers - an extra picked up in between
+    # would be removed by cephadm later, possibly while holding a rank.
+    local deadline=$(( $(date +%s) + REDEPLOY_TIMEOUT ))
+    local prev_extras="" cur_extras total
+    while :; do
+        refresh_mds_ps; refresh_fs_dump
+        EXTRA_DAEMONS=()
+        total=0
+        while IFS= read -r d; do
+            [[ -n "$d" ]] || continue
+            total=$((total + 1))
+            local seen=false b
+            for b in "${before[@]}"; do [[ "$b" == "$d" ]] && seen=true; done
+            $seen || EXTRA_DAEMONS+=("$d")
+        done < <(fs_daemons "$FS")
+        cur_extras="${EXTRA_DAEMONS[*]:-}"
+        if [[ ${#EXTRA_DAEMONS[@]} -eq "$need" && "$total" -eq "$new_count" ]]; then
+            # all new daemons known to the monitors (as standbys)?
+            local ready=true
+            for d in "${EXTRA_DAEMONS[@]}"; do
+                [[ "$(mds_state_cached "${d#mds.}")" == "standby" ]] || { ready=false; break; }
+            done
+            $ready && [[ "$cur_extras" == "$prev_extras" ]] && break
+        fi
+        prev_extras="$cur_extras"
+        (( $(date +%s) >= deadline )) && die "timed out waiting for the temporary standbys of $FS (created so far: ${EXTRA_DAEMONS[*]:-none}). Nothing has been failed; restore the placement with: $CEPH orch apply -i <original spec>"
+        sleep "$POLL_INTERVAL"
+    done
+
+    # the extras must sit in free placement slots: a host above the original
+    # per-host limit would be reconciled by cephadm (one daemon removed) when
+    # the placement is restored. Checked before anything is failed; the exit
+    # trap removes the extras and restores the spec.
+    local over; over="$(hosts_over_placement_limit)"
+    [[ -z "$over" ]] || die "cephadm placed the temporary standbys on hosts that already run a daemon of mds.$FS ($over): restoring the placement later would remove one of them, possibly a rank holder. Nothing has been failed."
+
+    # they should already run the target; redeploy only a daemon that does not
+    # (e.g. an image pin resolved differently on its host) - normally none
+    refresh_mds_metadata
+    local -a stragglers=()
+    for d in "${EXTRA_DAEMONS[@]}"; do
+        on_target "$(mds_version_mon "${d#mds.}")" || stragglers+=("$d")
+    done
+    if [[ ${#stragglers[@]} -gt 0 ]]; then
+        warn "${#stragglers[@]} new standby(s) not born on $TARGET_VERSION: ${stragglers[*]} - redeploying them"
+        record_gids "${stragglers[@]}"
+        for d in "${stragglers[@]}"; do
+            $CEPH orch daemon redeploy "$d" --image "$IMAGE" >/dev/null
+        done
+    fi
+    wait_standby_on_target "$REDEPLOY_TIMEOUT" "${EXTRA_DAEMONS[@]}" \
+        || die "the temporary standbys of $FS did not reach $TARGET_VERSION; nothing has been failed"
+    success "Temporary standbys ready on $TARGET_VERSION: ${EXTRA_DAEMONS[*]}"
+    return 0
+}
+
+# rank held by an MDS (name without "mds.") in FS, or "" if it is a standby
+mds_rank_in_fs() {
+    fs_get "$FS" | jq -r --arg n "$1" '.mdsmap.info[] | select(.name==$n and .state=="up:active") | .rank' | head -1
+}
+
+# remove_temp_standbys: bring the daemon count of mds.<fs> back to the
+# original placement WITHOUT any failover. Idle extras are removed; for each
+# extra that ended up holding a rank, an idle permanent daemon (a previous
+# active, now an upgraded standby) is removed instead, and the extra stays as
+# a regular member of the service - same naming scheme, same placement rules,
+# only the daemon id differs.
+remove_temp_standbys() {
+    [[ ${#EXTRA_DAEMONS[@]} -gt 0 ]] || return 0
+    local d n
+    info "Bringing service mds.$FS back to its original placement (${#EXTRA_DAEMONS[@]} temporary daemon(s) to account for)"
+    # stop cephadm from re-creating what we remove, without touching the
+    # daemons: the same spec, unmanaged
+    jq -c '.unmanaged = true' <<<"$ORIG_SPEC_JSON" | $CEPH orch apply -i - >/dev/null
+    refresh_fs_dump
+    local -a idle_extra=() busy_extra=() idle_perm=()
+    for d in "${EXTRA_DAEMONS[@]}"; do
+        n="${d#mds.}"
+        if [[ -n "$(mds_rank_in_fs "$n")" ]]; then busy_extra+=("$d"); else idle_extra+=("$d"); fi
+    done
+    refresh_mds_ps
+    while IFS= read -r d; do
+        [[ -n "$d" ]] || continue
+        local is_extra=false e
+        for e in "${EXTRA_DAEMONS[@]}"; do [[ "$e" == "$d" ]] && is_extra=true; done
+        $is_extra && continue
+        [[ "$(mds_state_cached "${d#mds.}")" == "standby" ]] && idle_perm+=("$d")
+    done < <(fs_daemons "$FS")
+    for d in "${idle_extra[@]}"; do
+        info "Removing idle temporary standby $d"
+        $CEPH orch daemon rm "$d" --force >/dev/null
+    done
+    local i=0
+    for d in "${busy_extra[@]}"; do
+        if [[ $i -lt ${#idle_perm[@]} ]]; then
+            info "$d holds rank $(mds_rank_in_fs "${d#mds.}") of $FS: keeping it and removing the idle standby ${idle_perm[$i]} instead (no failover)"
+            $CEPH orch daemon rm "${idle_perm[$i]}" --force >/dev/null
+            i=$((i + 1))
+        else
+            warn "$d holds a rank of $FS and no idle standby is left to remove instead; leaving the service with one daemon more than its placement asks for"
+        fi
+    done
+    info "Restoring the original placement of service mds.$FS"
+    jq -c '.unmanaged = false' <<<"$ORIG_SPEC_JSON" | $CEPH orch apply -i - >/dev/null
+    EXTRA_DAEMONS=()
+}
+
+# ---------------------------------------------------------------------------
+# fail_fs: standbys first while the fs serves, then fail + rejoin with no
+# redeploy inside the outage window when enough upgraded standbys exist,
+# then the rest. Mimics the cephadm "staged switch"
+# (mgr/cephadm/upgrade_staged_switch) with a stock cephadm.
+# ---------------------------------------------------------------------------
+# After a successful switch that used temporary standbys: bring mds.<fs> back to
+# its original number of daemons BEFORE phase 3, removing idle daemons in this
+# order of preference:
+#   1. previous actives, still on the old version (fenced, plain standbys) -
+#      no point upgrading a daemon that is about to be removed;
+#   2. idle temporary standbys;
+#   3. idle upgraded permanent standbys.
+# Only plain standbys are removed - never a rank holder, so no failover. The
+# choice is also host-aware: a standby on a host above the original per-host
+# limit is removed first, whatever its class, because cephadm would otherwise
+# reconcile that host itself once the placement is restored and could remove
+# a rank holder there. If a host is still above the limit after the removals
+# (only rank holders left on it), the service is left UNMANAGED rather than
+# letting cephadm fail a rank over; the command to restore it is printed. Sets
+# STALE_KEEP to the previous actives that stay and still need the upgrade.
+declare -a STALE_KEEP=()
+declare -a STALE_DOWN=()
+shrink_after_switch() {
+    local need=${#EXTRA_DAEMONS[@]} d n x
+    STALE_KEEP=("${STALE_RANK[@]}")
+    [[ $need -gt 0 ]] || return 0
+    info "Bringing mds.$FS back to its original placement: $need daemon(s) to remove, previous actives first (no point upgrading them)"
+    jq -c '.unmanaged = true' <<<"$ORIG_SPEC_JSON" | $CEPH orch apply -i - >/dev/null
+    refresh_fs_dump; refresh_mds_ps
+
+    # removable daemons (plain standbys), in order of preference
+    local -a cands=()
+    for d in "${STALE_RANK[@]}" "${EXTRA_DAEMONS[@]}"; do
+        [[ "$(mds_state_cached "${d#mds.}")" == "standby" ]] && cands+=("$d")
+    done
+    while IFS= read -r d; do
+        [[ -n "$d" ]] || continue
+        local skip=false
+        for x in "${EXTRA_DAEMONS[@]}" "${STALE_RANK[@]}"; do [[ "$x" == "$d" ]] && skip=true; done
+        $skip && continue
+        [[ "$(mds_state_cached "${d#mds.}")" == "standby" ]] && cands+=("$d")
+    done < <(fs_daemons "$FS")
+
+    # pick victims one at a time: the first candidate on an over-limit host,
+    # else the first candidate
+    local -a victims=()
+    local over pick c h taken
+    while [[ ${#victims[@]} -lt $need ]]; do
+        over=" $(hosts_over_placement_limit "${victims[@]}") "
+        pick=""
+        for c in "${cands[@]}"; do
+            taken=false
+            for x in "${victims[@]}"; do [[ "$x" == "$c" ]] && taken=true; done
+            $taken && continue
+            h="$(daemon_host "$c")"
+            if [[ -n "$h" && "$over" == *" $h="* ]]; then pick="$c"; break; fi
+            [[ -n "$pick" ]] || pick="$c"
+        done
+        [[ -n "$pick" ]] || break
+        victims+=("$pick")
+    done
+
+    local -a keep=()
+    for d in "${STALE_RANK[@]}"; do
+        taken=false
+        for x in "${victims[@]}"; do [[ "$x" == "$d" ]] && taken=true; done
+        $taken || keep+=("$d")
+    done
+    STALE_KEEP=("${keep[@]}")
+    over="$(hosts_over_placement_limit "${victims[@]}")"
+
+    for d in "${victims[@]}"; do
+        local why=""
+        for x in "${STALE_RANK[@]}"; do [[ "$x" == "$d" ]] && why=" (previous active, still old: removed instead of upgraded)"; done
+        info "Removing idle standby $d on $(daemon_host "$d")$why"
+        $CEPH orch daemon rm "$d" --force >/dev/null
+        $CEPH config rm "mds.${d#mds.}" container_image >/dev/null 2>&1 || true
+    done
+    [[ ${#victims[@]} -ge $need ]] \
+        || warn "only ${#victims[@]} of $need idle daemon(s) could be removed (the others hold ranks); mds.$FS keeps $(( need - ${#victims[@]} )) daemon(s) more than its placement asks for"
+    if [[ -n "$over" ]]; then
+        warn "host(s) above the per-host limit of mds.$FS's placement with only rank holders left: $over. Restoring the managed placement now would make cephadm remove one of them (a failover). Leaving service mds.$FS UNMANAGED; once a planned failover is acceptable, restore it with:"
+        warn "    $CEPH orch apply -i - <<<'$(jq -c '.unmanaged = false' <<<"$ORIG_SPEC_JSON")'"
+    else
+        info "Restoring the original placement of service mds.$FS"
+        jq -c '.unmanaged = false' <<<"$ORIG_SPEC_JSON" | $CEPH orch apply -i - >/dev/null
+    fi
+    EXTRA_DAEMONS=()
+}
+
+# State of do_upgrade_fail_fs, for its exit trap:
+#   SWITCH_STAGE  pre     - before 'fs fail': an abort undoes everything
+#                 failed  - 'fs fail' done, not every rank back yet: an abort
+#                           leaves the filesystem and the fence as they are
+#                           (lifting the fence now would let the old daemons
+#                           compete for the ranks again) and prints the steps
+#                 serving - every rank back, on upgraded daemons
+#   FS_FROZEN     $FS is not joinable because of us (joinable false or fs fail)
+#   ASR_OFF       we turned allow_standby_replay off and have not restored it
+SWITCH_STAGE=pre
+FS_FROZEN=false
+FROZEN_SINCE=0
+ASR_OFF=false
+
+# freeze_fs CONTEXT: set $FS not joinable (no-op if it already is because of
+# us). The actives keep serving; the monitors neither promote a standby nor
+# re-balance ranks by affinity. CONTEXT is appended to the error message.
+freeze_fs() {
+    $FS_FROZEN && return 0
+    local out
+    # ceph's own reply ("marked not joinable; MDS cannot join as newly
+    # active") reads too much like the 'fs fail' one: shown only on error
+    out="$($CEPH fs set "$FS" joinable false 2>&1)" \
+        || die "could not set $FS not joinable: $out; $1"
+    FS_FROZEN=true
+    FROZEN_SINCE=$(date +%s)
+}
+thaw_fs() {
+    local out
+    out="$($CEPH fs set "$FS" joinable true 2>&1)" || return 1
+    FS_FROZEN=false
+}
+
+on_exit_cleanup() {
+    case "$SWITCH_STAGE" in
+    pre)
+        local -a was_fenced=("${FENCED_DAEMONS[@]}")
+        unfence_old_actives
+        if $FS_FROZEN; then
+            # the actives must be pinned again before $FS is joinable, or the
+            # monitors would drop them in favour of an upgraded standby
+            if [[ ${#was_fenced[@]} -gt 0 ]]; then
+                refresh_fs_dump
+                wait_join_fscid "$(fs_id_cached "$FS")" 60 "${was_fenced[@]}" \
+                    || warn "the monitors do not show the fence lifted yet on ${was_fenced[*]}"
+            fi
+            fail "aborting before the switch: setting $FS joinable again"
+            thaw_fs || warn "could not set $FS joinable; do it by hand: $CEPH fs set $FS joinable true"
+        fi
+        if [[ ${#EXTRA_DAEMONS[@]} -gt 0 ]]; then
+            fail "aborting before the switch: removing the temporary standbys and restoring mds.$FS"
+            remove_temp_standbys
+            restore_service_image_pin
+        fi
+        ;;
+    failed)
+        fail "aborted during the switch: '$FS' is left as it is. To recover:"
+        if $FS_FROZEN; then
+            warn "    $CEPH fs set $FS joinable true"
+        fi
+        if [[ ${#FENCED_DAEMONS[@]} -gt 0 ]]; then
+            warn "  once '$CEPH fs status $FS' shows every rank active (on $TARGET_VERSION), lift the fence on the previous actives:"
+            warn "    for d in ${FENCED_DAEMONS[*]}; do $CEPH config rm \$d mds_join_fs; done"
+        fi
+        warn "  then redeploy the MDS of $FS not yet on $TARGET_VERSION: $CEPH orch daemon redeploy <daemon> --image $IMAGE"
+        ;;
+    serving)
+        # every rank is held by an upgraded daemon: the fence can go
+        unfence_old_actives
+        if $FS_FROZEN; then
+            fail "aborting: setting $FS joinable again (its ranks are on $TARGET_VERSION)"
+            thaw_fs || warn "could not set $FS joinable; do it by hand: $CEPH fs set $FS joinable true"
+        fi
+        ;;
+    esac
+    if $ASR_OFF; then
+        warn "allow_standby_replay is left off on $FS; once every MDS of $FS runs the same version: $CEPH fs set $FS allow_standby_replay true"
+    fi
+}
+
+do_upgrade_fail_fs() {
+    # uses globals: FS, TARGET_VERSION, IMAGE, STALE, ASR, ORIG_MAX_MDS
+    local d n
+    SWITCH_STAGE=pre
+    FS_FROZEN=false
+    ASR_OFF=false
+    # shellcheck disable=SC2154  # _rc is set inside the trap string
+    trap '_rc=$?; on_exit_cleanup; exit_verdict $_rc' EXIT
+    trap 'exit 130' INT TERM
+
+    # -- prerequisites: the monitors must prefer OUR standbys for OUR ranks
+    refresh_config_dump; refresh_fs_dump
+    local pinned=true
+    if [[ "$(fs_join_fs_cached "$FS")" != "$FS" ]]; then
+        pinned=false
+        if $ADD_STANDBYS; then
+            die "--add-standbys needs mds_join_fs set to '$FS' for service mds.$FS (the monitors could hand its ranks to any standby). Run: $PROG -J --filesystem $FS"
+        fi
+        warn "mds_join_fs is not set to '$FS' for service mds.$FS: the monitors could hand its ranks to any standby, so every MDS will be redeployed inside the outage window. Run '$PROG -J --filesystem $FS' to allow the shorter switch next time"
+    fi
+    local nfs; nfs="$(get_fs_list | wc -l)"
+    if [[ "$nfs" -gt 1 && "$(fs_refuse_standby_cached "$FS")" != "true" ]]; then
+        warn "refuse_standby_for_another_fs is not set on '$FS': a standby of another filesystem could take one of its ranks during the switch. Consider: $PROG -R --filesystem $FS"
+    fi
+    local damaged; damaged="$(fs_get "$FS" | jq -r '.mdsmap.damaged | length')"
+    [[ "$damaged" == "0" ]] || die "'$FS' has damaged rank(s); repair it before upgrading"
+
+    # standby-replay must be off BEFORE we classify and upgrade the standbys, or
+    # an upgraded standby becomes standby-replay again, is killed by 'fs fail'
+    # and re-registers with a gid that races the previous actives'. Disabling it
+    # STOPS the standby-replay daemons; they respawn as plain standbys after a
+    # short gap during which the monitors do not know them. Record exactly those
+    # daemons and wait until every one of them is a plain standby again before
+    # classifying - otherwise they are seen mid-gap as "unknown" and wrongly
+    # treated as ranks (phase 1 would skip them and --add-standbys would fire).
+    if [[ "$ASR" == "true" ]]; then
+        refresh_fs_dump
+        local -a was_replay=()
+        mapfile -t was_replay < <(fs_get "$FS" | jq -r '.mdsmap.info[] | select(.state=="up:standby-replay") | .name')
+        info "Disabling allow_standby_replay on $FS"
+        $CEPH fs set "$FS" allow_standby_replay false
+        ASR_OFF=true
+        if [[ ${#was_replay[@]} -gt 0 ]]; then
+            info "Waiting for ${#was_replay[@]} standby-replay daemon(s) of $FS to become plain standbys"
+            local sd=$(( $(date +%s) + REDEPLOY_TIMEOUT ))
+            while :; do
+                refresh_fs_dump
+                local pending=false rn
+                for rn in "${was_replay[@]}"; do
+                    [[ "$(mds_state_cached "$rn")" == "standby" ]] || { pending=true; break; }
+                done
+                $pending || break
+                (( $(date +%s) >= sd )) && die "timed out waiting for standby-replay daemons of $FS to become plain standbys"
+                sleep "$POLL_INTERVAL"
+            done
+        fi
+    fi
+    refresh_fs_dump
+
+    # -- split: standbys (upgrade now, fs serving) / ranks (upgrade after the switch).
+    # A daemon momentarily unknown to the monitors is retried briefly before it is
+    # classified as a rank, to ride out any re-registration gap.
+    # STALE_DOWN: daemons the monitors do not know (down, e.g. on an offline
+    # host). They hold no rank and cannot take one while down; they are
+    # redeployed after the switch and never waited for inside the outage window.
+    local -a STALE_STANDBY=() STALE_RANK=()
+    STALE_DOWN=()
+    for d in "${STALE[@]}"; do
+        n="${d#mds.}"
+        local st; st="$(mds_state_cached "$n")"
+        if [[ -z "$st" ]]; then
+            local sd2=$(( $(date +%s) + 20 ))
+            while [[ -z "$st" ]] && (( $(date +%s) < sd2 )); do
+                sleep "$POLL_INTERVAL"; refresh_fs_dump; st="$(mds_state_cached "$n")"
+            done
+        fi
+        case "$st" in
+            standby)   STALE_STANDBY+=("$d") ;;
+            up:active) STALE_RANK+=("$d") ;;
+            "")        warn "$d is not known to the monitors (down, host offline?); it will be redeployed after the switch, without holding it up"; STALE_DOWN+=("$d") ;;
+            *)         warn "$d is in a transitional state ($st); it will be redeployed after the switch"; STALE_RANK+=("$d") ;;
+        esac
+    done
+
+    # -- freeze. From now until the switch, standbys of the target release
+    # sit next to the old actives (and, after it, the previous actives next to
+    # the upgraded ranks). An active that crashed meanwhile would be replaced by
+    # whichever standby the monitors pick: mixed-version active ranks, which
+    # CephFS does not support. Unless --keep-failover, $FS is not joinable
+    # during those phases instead: the actives keep serving, a crashed one is
+    # not replaced, and its rank is recovered by the switch that follows.
+    if $KEEP_FAILOVER; then
+        warn "--keep-failover: $FS stays joinable while its standbys are upgraded; an active that crashes meanwhile may be replaced by an MDS of another release (mixed-version ranks until the switch)"
+    else
+        freeze_fs "'$FS' is still serving, nothing was changed"
+        info "$FS set not joinable: the actives keep serving, but until the switch a crashed active is NOT replaced (no mixed-version ranks; see --keep-failover)"
+    fi
+
+    # -- phase 1: upgrade the standbys, filesystem serving
+    if [[ ${#STALE_STANDBY[@]} -gt 0 ]]; then
+        phase "Phase 1/3: upgrading ${#STALE_STANDBY[@]} standby MDS while $FS keeps serving"
+        record_gids "${STALE_STANDBY[@]}"
+        for d in "${STALE_STANDBY[@]}"; do
+            info "Redeploying $d -> $IMAGE"
+            $CEPH orch daemon redeploy "$d" --image "$IMAGE"
+        done
+        wait_standby_on_target "$REDEPLOY_TIMEOUT" "${STALE_STANDBY[@]}" \
+            || die "standby upgrade failed; '$FS' is still serving, nothing else was changed"
+        success "Phase 1/3 done: ${#STALE_STANDBY[@]} standby MDS on $TARGET_VERSION"
+    else
+        phase "Phase 1/3: no stale standby to upgrade"
+    fi
+
+    # -- can the ranks be handed to upgraded standbys straight away?
+    refresh_fs_dump; refresh_mds_metadata
+    local ranks; ranks="$(fs_get "$FS" | jq -r '.mdsmap.max_mds')"
+    local -a READY=()
+    while IFS= read -r n; do
+        [[ -n "$n" ]] || continue
+        on_target "$(mds_version_mon "$n")" && READY+=("mds.$n")
+    done < <(fs_pinned_standbys "$FS")
+    if [[ ${#READY[@]} -lt "$ranks" ]] && $ADD_STANDBYS; then
+        local addreason; addreason="$(add_standbys_unsupported_reason $(( ranks - ${#READY[@]} )))"
+        if [[ -n "$addreason" ]]; then
+            warn "--add-standbys is not supported here: $addreason. Proceeding WITHOUT adding standbys (the ranks will be redeployed inside the outage window instead). To get the zero-redeploy switch, add a permanent standby to mds.$FS (e.g. raise count/count_per_host) and re-run."
+        else
+            add_temp_standbys $(( ranks - ${#READY[@]} ))
+            refresh_fs_dump; refresh_mds_metadata
+            READY=()
+            while IFS= read -r n; do
+                [[ -n "$n" ]] || continue
+                on_target "$(mds_version_mon "$n")" && READY+=("mds.$n")
+            done < <(fs_pinned_standbys "$FS")
+        fi
+    fi
+    local full_switch=false
+    if ! $pinned; then
+        READY=()
+    fi
+    if [[ ${#READY[@]} -ge "$ranks" ]]; then
+        full_switch=true
+        phase "Phase 2/3: ${#READY[@]} upgraded standby(s) pinned to $FS for $ranks rank(s): the switch will redeploy NOTHING inside the outage window"
+        echo "${C_MAG}         (the old actives are fenced first, so only upgraded standbys can take a rank)${C_RST}"
+    elif $pinned; then
+        warn "Only ${#READY[@]} upgraded standby(s) pinned to $FS for $ranks rank(s): ${#STALE_RANK[@]} MDS will be redeployed inside the outage window (re-run with --add-standbys, or add standbys to the mds.$FS service, to avoid this)"
+    else
+        phase "Phase 2/3: ${#STALE_RANK[@]} MDS will be redeployed inside the outage window (no mds_join_fs)"
+    fi
+    if $INTERACTIVE; then
+        if $FS_FROZEN; then
+            warn "$FS has not been joinable for $(( $(date +%s) - FROZEN_SINCE ))s: an active that crashes is not replaced until the switch (answering no makes it joinable again)"
+        else
+            warn "$FS is joinable (--keep-failover) and has upgraded standbys: an active that crashes now may be replaced by an MDS of another release"
+        fi
+        confirm "Fail '$FS' now (outage starts)?" || die "aborted by user; '$FS' is still serving"
+    fi
+
+    # --flush-journal: before the fence and 'fs fail' (with --keep-failover,
+    # also before the freeze, so it does not lengthen the not-joinable window)
+    $FLUSH_JOURNAL && flush_active_journals
+
+    if $full_switch; then
+        verify_switch_ready "$ranks" "${STALE_RANK[@]}" "${STALE_DOWN[@]}"
+        # 1. not joinable (already, unless --keep-failover): the actives keep
+        #    serving, but the monitors no longer promote a standby nor
+        #    re-balance ranks by affinity - required before fencing
+        if ! $FS_FROZEN; then
+            freeze_fs "'$FS' is still serving, nothing was changed"
+            info "Ranks of $FS frozen (joinable=false): the actives keep serving, no promotion or rank re-balancing until the switch"
+        fi
+        # 2. fence the old actives, and wait until the monitors see it
+        fence_old_actives "${STALE_RANK[@]}" "${STALE_DOWN[@]}" || die "could not fence the old actives; '$FS' is still serving, nothing was changed"
+        # wait only for the daemons the monitors know: one that is down (e.g. on
+        # an offline host) cannot take a rank now, and re-registers unpinned
+        refresh_fs_dump
+        local -a fence_wait=()
+        for d in "${FENCED_DAEMONS[@]}"; do
+            [[ -n "$(mds_state_cached "${d#mds.}")" ]] && fence_wait+=("$d")
+        done
+        [[ ${#fence_wait[@]} -eq 0 ]] || wait_join_fscid -1 60 "${fence_wait[@]}" \
+            || die "the monitors do not show the old actives unpinned after 60s; '$FS' is still serving, nothing was changed"
+        success "Old actives fenced: only the upgraded standbys can take a rank at the switch"
+    fi
+
+    # -- phase 2: the switch
+    # the previous actives will respawn as standbys with new gids; record the
+    # old ones so their restart can be detected
+    record_gids "${STALE_RANK[@]}"
+    outage "Failing filesystem $FS (outage starts)"
+    local t0 fout; t0=$(date +%s)
+    if ! fout="$($CEPH fs fail "$FS" 2>&1)"; then
+        echo "${C_RED}$fout${C_RST}" >&2
+        die "fs fail refused for '$FS'; nothing was changed. Check 'ceph health detail' (MDS_TRIM / MDS_CACHE_OVERSIZED refuse 'fs fail' on recent releases; --flush-journal can help with MDS_TRIM)"
+    fi
+    # from here on an abort leaves $FS and the fence as they are (see the trap)
+    SWITCH_STAGE=failed
+    FS_FROZEN=true
+    outage "$FS failed: all ranks down"
+
+    if ! $full_switch; then
+        # like fail_fs, but the wait is monitor-based instead of orch ps
+        outage "Redeploying ${#STALE_RANK[@]} MDS inside the outage window"
+        for d in "${STALE_RANK[@]}"; do
+            info "Redeploying $d -> $IMAGE"
+            $CEPH orch daemon redeploy "$d" --image "$IMAGE"
+        done
+        wait_standby_on_target "$REDEPLOY_TIMEOUT" "${STALE_RANK[@]}" \
+            || die "redeploy failed; '$FS' left FAILED"
+    fi
+
+    outage "Setting $FS joinable (the ranks are handed to the standbys)"
+    local jout
+    jout="$($CEPH fs set "$FS" joinable true 2>&1)" \
+        || die "could not set $FS joinable: $jout; '$FS' is left FAILED"
+    FS_FROZEN=false
+    # keep the fence until every rank is held: lifting it earlier would let an
+    # old daemon take a rank that is still empty
+    wait_ranks_active "$REDEPLOY_TIMEOUT" \
+        || die "not every rank of $FS is active after ${REDEPLOY_TIMEOUT}s; check '$CEPH fs status $FS'"
+    serving "All $ranks rank(s) of $FS active again (outage: $(( $(date +%s) - t0 ))s)"
+    SWITCH_STAGE=serving
+
+    # -- phase 3 freeze: the previous actives, still on the old release, are
+    # about to be pinned to $FS again as standbys; unless --keep-failover, keep
+    # $FS not joinable until they are upgraded (a crashed active then waits for
+    # the end of phase 3 rather than being taken over by an old daemon)
+    if $full_switch && [[ ${#STALE_RANK[@]} -gt 0 ]] && ! $KEEP_FAILOVER; then
+        freeze_fs "'$FS' is serving on $TARGET_VERSION"
+        info "$FS set not joinable again while the previous actives are upgraded: a crashed active is not replaced until phase 3 ends"
+    fi
+    # the ranks are held by pinned upgraded daemons: lift the fence now, so the
+    # old daemons are pinned to $FS again and no other filesystem can borrow
+    # them as unpinned standbys
+    unfence_old_actives
+    if [[ ${#STALE_DOWN[@]} -gt 0 ]]; then
+        warn "redeploying ${#STALE_DOWN[@]} MDS the monitors do not know (${STALE_DOWN[*]}) on $IMAGE; not waiting for them - cephadm deploys them when their host is back"
+        for d in "${STALE_DOWN[@]}"; do
+            $CEPH orch daemon redeploy "$d" --image "$IMAGE" >/dev/null 2>&1 || fail "could not schedule the redeploy of $d"
+        done
+    fi
+
+    # -- phase 3: the previous actives, now standbys, filesystem serving. The
+    # fence kept them out of the ranks at the switch; redeploy the ones that
+    # stay on the target image.
+    if $full_switch && [[ ${#STALE_RANK[@]} -gt 0 ]]; then
+        shrink_after_switch          # sets STALE_KEEP (no-op without temporaries)
+        if [[ ${#STALE_KEEP[@]} -gt 0 ]]; then
+            phase "Phase 3/3: upgrading the ${#STALE_KEEP[@]} previous active MDS that stay (now standbys) while $FS serves"
+            record_gids "${STALE_KEEP[@]}"
+            for d in "${STALE_KEEP[@]}"; do
+                info "Redeploying $d -> $IMAGE"
+                $CEPH orch daemon redeploy "$d" --image "$IMAGE"
+            done
+            wait_standby_on_target "$REDEPLOY_TIMEOUT" "${STALE_KEEP[@]}" \
+                || fail "some previous active MDS did not come back on $TARGET_VERSION; '$FS' is serving on $TARGET_VERSION, fix them by hand"
+        else
+            phase "Phase 3/3: every previous active was removed; nothing left to upgrade"
+        fi
+    else
+        phase "Phase 3/3: nothing left to upgrade"
+    fi
+    if $FS_FROZEN; then
+        info "Setting $FS joinable again"
+        thaw_fs || die "could not set $FS joinable; do it by hand: $CEPH fs set $FS joinable true"
+    fi
+    # mds.$FS container_image (set by --add-standbys) is left on the target
+    # image; consolidate_image_pins (called by do_upgrade) settles it
+    SVC_PIN_CHANGED=false
+    trap - INT TERM
+    trap 'exit_verdict $?' EXIT
+
+    # final convergence check: after phase 3 every rank should be on target. If
+    # a late failover still left one behind, redeploy the offending rank holders
+    # once more (each fails over to an upgraded standby) rather than leaving the
+    # filesystem on mixed versions.
+    refresh_fs_dump; refresh_mds_metadata
+    local -a still=()
+    while IFS= read -r n; do
+        [[ -n "$n" ]] || continue
+        on_target "$(mds_version_mon "$n")" || still+=("mds.$n")
+    done < <(fs_get "$FS" | jq -r '.mdsmap.info[] | select(.state|startswith("up:")) | .name')
+    if [[ ${#still[@]} -gt 0 ]]; then
+        warn "rank(s) still on an old version after the switch: ${still[*]} - redeploying them to converge (brief failover each)"
+        record_gids "${still[@]}"
+        for d in "${still[@]}"; do info "Redeploying $d -> $IMAGE"; $CEPH orch daemon redeploy "$d" --image "$IMAGE"; done
+        wait_ranks_active "$REDEPLOY_TIMEOUT" || true
+        refresh_fs_dump; refresh_mds_metadata
+        local bad2=""
+        while IFS= read -r n; do [[ -n "$n" ]] && { on_target "$(mds_version_mon "$n")" || bad2="$bad2 mds.$n"; }; done < <(fs_get "$FS" | jq -r '.mdsmap.info[] | select(.state|startswith("up:")) | .name')
+        [[ -z "$bad2" ]] || fail "still not converged:$bad2 - redeploy these by hand: for d in$bad2; do $CEPH orch daemon redeploy \"$d\" --image \"$IMAGE\"; done"
+    fi
+
+    if [[ "$ASR" == "true" ]]; then
+        info "Restoring allow_standby_replay on $FS"
+        $CEPH fs set "$FS" allow_standby_replay true
+        ASR_OFF=false
+    fi
 }
 
 do_upgrade() {
@@ -490,7 +1755,7 @@ do_upgrade() {
     local is_downgrade=false
     for d in "${ALL_DAEMONS[@]}"; do
         dv="$(daemon_version "$d")"
-        if [[ "$dv" == "$TARGET_VERSION" ]]; then
+        if on_target "$dv"; then
             SKIP+=("$d")
         else
             STALE+=("$d")
@@ -515,21 +1780,31 @@ do_upgrade() {
     $is_downgrade && plan_title="*** DOWNGRADE PLAN ***"
 
     echo
-    echo "==================== $plan_title ===================="
+    if $is_downgrade; then echo "${C_ALERT}==================== $plan_title ====================${C_RST}"
+    else banner "==================== $plan_title ===================="; fi
     echo "Filesystem      : $FS"
     echo "Method          : $METHOD"
     echo "Target image    : $IMAGE"
     echo "Target version  : $TARGET_VERSION"
     echo "max_mds (orig)  : $ORIG_MAX_MDS"
     echo "standby_replay  : $ASR"
+    echo "flush journal   : $FLUSH_JOURNAL"
+    if [[ "$METHOD" == "fail_fs" ]]; then
+        echo "add standbys    : $ADD_STANDBYS"
+        if $KEEP_FAILOVER; then
+            echo "crashed active  : replaced at once while standbys are upgraded, possibly by an MDS of another release (--keep-failover)"
+        else
+            echo "crashed active  : NOT replaced while its standbys (then the previous actives) are upgraded: $FS is not joinable then"
+        fi
+    fi
     echo "Will redeploy (${#STALE[@]}):"
-    for d in "${STALE[@]}"; do echo "    + $d ($(daemon_version "$d") -> $TARGET_VERSION)"; done
+    for d in "${STALE[@]}"; do echo "    ${C_YEL}+${C_RST} $d ($(daemon_version "$d") -> $TARGET_VERSION)"; done
     if [[ ${#SKIP[@]} -gt 0 ]]; then
         echo "Will skip (already on target) (${#SKIP[@]}):"
         for d in "${SKIP[@]}"; do echo "    - $d (skipped)"; done
     fi
     echo "Other filesystems are NOT touched."
-    echo "======================================================"
+    banner "======================================================"
 
     if $is_downgrade; then
         echo
@@ -547,67 +1822,63 @@ do_upgrade() {
         confirm "Proceed?" || die "aborted by user"
     fi
 
-    # Prepare
+    if [[ "$METHOD" == "fail_fs" ]]; then
+        do_upgrade_fail_fs
+        consolidate_image_pins
+        echo
+        success "Done. Final state of $FS:"
+        sleep 3
+        $CEPH fs status "$FS" 2>/dev/null || fs_get "$FS" | jq '.mdsmap | {max_mds, in, up, flags}'
+        return 0
+    fi
+
+    # Prepare (max_mds)
     if [[ "$ASR" == "true" ]]; then
         info "Disabling allow_standby_replay on $FS"
         $CEPH fs set "$FS" allow_standby_replay false
     fi
 
-    if [[ "$METHOD" == "fail_fs" ]]; then
-        info "Failing filesystem $FS (offline until restore)"
-        $CEPH fs fail "$FS"
-    else
-        if [[ "$ORIG_MAX_MDS" -gt 1 ]]; then
-            info "Scaling $FS down to max_mds 1 (will restore to $ORIG_MAX_MDS)"
-            $CEPH fs set "$FS" max_mds 1
-            info "Waiting for $FS to reach a single active rank..."
-            local sd; sd=$(( $(date +%s) + REDEPLOY_TIMEOUT ))
-            while :; do
-                local ranks
-                ranks="$(fs_get "$FS" | jq -r '[.mdsmap.info[] | select(.state|startswith("up:active"))] | length')"
-                [[ "$ranks" == "1" ]] && break
-                (( $(date +%s) >= sd )) && die "timed out waiting for $FS to scale down to 1 rank"
-                sleep "$POLL_INTERVAL"
-            done
-        fi
-    fi
-
-    # Redeploy
-    if [[ "$METHOD" == "max_mds" ]]; then
-        refresh_mds_ps
-        local ACTIVE_DAEMON
-        ACTIVE_DAEMON="$(fs_get "$FS" | jq -r '.mdsmap.info[] | select(.state|startswith("up:active")) | "mds."+.name' | head -1)"
-        local -a STALE_STANDBY=() STALE_ACTIVE=()
-        for d in "${STALE[@]}"; do
-            if [[ -n "$ACTIVE_DAEMON" && "$d" == "$ACTIVE_DAEMON" ]]; then
-                STALE_ACTIVE+=("$d")
-            else
-                STALE_STANDBY+=("$d")
-            fi
+    if [[ "$ORIG_MAX_MDS" -gt 1 ]]; then
+        info "Scaling $FS down to max_mds 1 (will restore to $ORIG_MAX_MDS)"
+        $CEPH fs set "$FS" max_mds 1
+        info "Waiting for $FS to reach a single active rank..."
+        local sd; sd=$(( $(date +%s) + REDEPLOY_TIMEOUT ))
+        while :; do
+            local ranks
+            ranks="$(fs_get "$FS" | jq -r '[.mdsmap.info[] | select(.state|startswith("up:active"))] | length')"
+            [[ "$ranks" == "1" ]] && break
+            (( $(date +%s) >= sd )) && die "timed out waiting for $FS to scale down to 1 rank"
+            sleep "$POLL_INTERVAL"
         done
-        if [[ ${#STALE_STANDBY[@]} -gt 0 ]]; then
-            info "Phase 1/2: upgrading ${#STALE_STANDBY[@]} standby MDS (no failover)"
-            redeploy_and_wait "${STALE_STANDBY[@]}" || die "standby upgrade failed; '$FS' left at max_mds 1. Restore with: $CEPH fs set $FS max_mds $ORIG_MAX_MDS"
-        fi
-        if [[ ${#STALE_ACTIVE[@]} -gt 0 ]]; then
-            info "Phase 2/2: upgrading the active MDS ${STALE_ACTIVE[0]} last (single failover)"
-            redeploy_and_wait "${STALE_ACTIVE[@]}" || die "active upgrade failed; '$FS' left at max_mds 1. Restore with: $CEPH fs set $FS max_mds $ORIG_MAX_MDS"
-        else
-            info "Active MDS already on target; no failover needed"
-        fi
-    else
-        redeploy_and_wait "${STALE[@]}" || die "redeploy failed; '$FS' left FAILED. Restore with: $CEPH fs set $FS joinable true"
     fi
 
-    # Restore
-    if [[ "$METHOD" == "fail_fs" ]]; then
-        info "Setting $FS joinable"
-        $CEPH fs set "$FS" joinable true
-    else
-        if [[ "$ORIG_MAX_MDS" -gt 1 ]]; then
-            info "Restoring max_mds to $ORIG_MAX_MDS on $FS"
-            $CEPH fs set "$FS" max_mds "$ORIG_MAX_MDS"
+    # Redeploy (max_mds)
+    refresh_mds_ps
+    local ACTIVE_DAEMON
+    ACTIVE_DAEMON="$(fs_get "$FS" | jq -r '.mdsmap.info[] | select(.state|startswith("up:active")) | "mds."+.name' | head -1)"
+    local -a STALE_STANDBY=() STALE_ACTIVE=()
+    for d in "${STALE[@]}"; do
+        if [[ -n "$ACTIVE_DAEMON" && "$d" == "$ACTIVE_DAEMON" ]]; then
+            STALE_ACTIVE+=("$d")
+        else
+            STALE_STANDBY+=("$d")
         fi
+    done
+    if [[ ${#STALE_STANDBY[@]} -gt 0 ]]; then
+        phase "Phase 1/2: upgrading ${#STALE_STANDBY[@]} standby MDS (no failover)"
+        redeploy_and_wait "${STALE_STANDBY[@]}" || die "standby upgrade failed; '$FS' left at max_mds 1. Restore with: $CEPH fs set $FS max_mds $ORIG_MAX_MDS"
+    fi
+    if [[ ${#STALE_ACTIVE[@]} -gt 0 ]]; then
+        phase "Phase 2/2: upgrading the active MDS ${STALE_ACTIVE[0]} last (single failover)"
+        redeploy_and_wait "${STALE_ACTIVE[@]}" || die "active upgrade failed; '$FS' left at max_mds 1. Restore with: $CEPH fs set $FS max_mds $ORIG_MAX_MDS"
+    else
+        info "Active MDS already on target; no failover needed"
+    fi
+
+    # Restore (max_mds)
+    if [[ "$ORIG_MAX_MDS" -gt 1 ]]; then
+        info "Restoring max_mds to $ORIG_MAX_MDS on $FS"
+        $CEPH fs set "$FS" max_mds "$ORIG_MAX_MDS"
     fi
     if [[ "$ASR" == "true" ]]; then
         info "Restoring allow_standby_replay on $FS"
@@ -623,8 +1894,10 @@ do_upgrade() {
         sleep "$POLL_INTERVAL"
     done
 
+    consolidate_image_pins
+
     echo
-    info "Done. Final state of $FS:"
+    success "Done. Final state of $FS:"
     sleep 3
     $CEPH fs status "$FS" 2>/dev/null || fs_get "$FS" | jq '.mdsmap | {max_mds, in, up, flags}'
 }
@@ -673,7 +1946,7 @@ do_upgrade_list() {
         while IFS= read -r v; do
             [[ -z "$v" ]] && continue
             if $FORCE_DOWNGRADE; then
-                [[ "$v" != "$TARGET_VERSION" ]] && needs=true
+                on_target "$v" || needs=true
             else
                 ver_lt "$v" "$TARGET_VERSION" && needs=true
             fi
@@ -697,14 +1970,14 @@ do_upgrade_list() {
     for fs in "${TODO[@]}"; do
         idx=$((idx + 1))
         echo
-        echo "----------------------------------------------------------"
-        echo " [$idx/$total] Upgrading filesystem: $fs"
-        echo "----------------------------------------------------------"
+        banner "----------------------------------------------------------"
+        banner " [$idx/$total] Upgrading filesystem: $fs"
+        banner "----------------------------------------------------------"
         FS="$fs"
         do_upgrade
     done
     echo
-    info "All ${total} filesystem(s) processed."
+    success "All ${total} filesystem(s) processed."
     return 0
 }
 
@@ -752,7 +2025,9 @@ interactive_mode() {
 
     echo
     echo "Upgrade method for '$FS':"
-    echo "  1) fail_fs  (default) - fs offline briefly; fastest"
+    echo "  1) fail_fs  (default) - standbys upgraded first while the fs serves, then"
+    echo "                          fail + rejoin (no redeploy inside the outage when"
+    echo "                          enough standbys exist); fs offline briefly"
     echo "  2) max_mds            - fs online but degraded; slower"
     local m
     read -r -p "Choose [1/2, default 1]: " m
@@ -811,11 +2086,11 @@ if [[ -z "$TARGET_VERSION" ]]; then
 fi
 
 # Header: explain what the script is doing.
-echo "=========================================================="
-echo " CephFS per-filesystem MDS upgrade helper"
-echo "=========================================================="
+banner "=========================================================="
+banner " CephFS per-filesystem MDS upgrade helper"
+banner "=========================================================="
 echo
-echo "Step 1. Cluster version"
+banner "Step 1. Cluster version"
 echo
 if [[ -n "$CLUSTER_VERSION" ]]; then
     echo "   Current version of the cluster (mons/mgrs): $CLUSTER_VERSION"
@@ -828,7 +2103,7 @@ fi
 
 if [[ ${#FS_LIST_ARG[@]} -eq 0 ]] && ! $ALL; then
     echo
-    echo "Step 2. Filesystems and their MDS versions"
+    banner "Step 2. Filesystems and their MDS versions"
     echo
     # version (explicit or defaulted) -> list with up-to-date / needs upgrade annotations
     if [[ -n "$TARGET_VERSION" ]]; then
@@ -837,7 +2112,7 @@ if [[ ${#FS_LIST_ARG[@]} -eq 0 ]] && ! $ALL; then
         list_filesystems
     fi
     echo
-    echo "Step 3. Pre-upgrade recommendations"
+    banner "Step 3. Pre-upgrade recommendations"
     echo
     recommend_settings
     echo
@@ -855,8 +2130,9 @@ fi
 
 # An upgrade is intended (either --all or a specific --filesystem).
 echo
-echo "Step 2. Upgrade"
+banner "Step 2. Upgrade"
 echo
+trap 'exit_verdict $?' EXIT
 
 # version + target but no method -> default to fail_fs
 if [[ -z "$METHOD" ]]; then
