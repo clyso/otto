@@ -114,7 +114,19 @@ ver_lt() {
 
 # true when a reported version is the target: exact, or a development build
 # of it (18.2.8-97-g4c7647d for a target of 18.2.8)
-on_target() { [[ "$1" == "$TARGET_VERSION" || "$1" == "$TARGET_VERSION-"* ]]; }
+on_target() { local t="${2:-$TARGET_VERSION}"; [[ "$1" == "$t" || "$1" == "$t-"* ]]; }
+
+# Compare releases by X.Y.Z only: the commit count of a development build
+# (18.2.8-17-g...) says nothing about another build of the same release, so
+# replacing one custom 18.2.8 build by another is an upgrade, not a downgrade.
+# needs_upgrade V [TARGET]: V is not on target and its release is not newer
+needs_upgrade() {
+    local t="${2:-$TARGET_VERSION}"
+    on_target "$1" "$t" && return 1
+    ! ver_lt "${t%%-*}" "${1%%-*}"
+}
+# newer_than_target V: V's release is newer than the target's (a downgrade)
+newer_than_target() { ver_lt "${TARGET_VERSION%%-*}" "${1%%-*}"; }
 
 # cached `orch ps` snapshot of all MDS daemons
 MDS_PS_JSON=""
@@ -175,7 +187,11 @@ OPTIONS:
                             given (derived from the image tag); overrides the tag
                             if both are given. With neither -i nor -t, the default
                             image quay.io/ceph/ceph:v<VER> and the cluster's
-                            current version are used.
+                            current version are used. May also be a development
+                            build as shown by 'ceph orch ps' (e.g.
+                            18.2.8-17-gf7a9f4db5bb, requires -i): only that exact
+                            build is then on target, which lets one custom build
+                            of a release replace another.
   -f, --filesystem NAME     Filesystem(s) to act on. May be a comma-separated
                             list (-f a,b,c) and/or repeated (-f a -f b). With
                             more than one, they are upgraded one after the other.
@@ -380,12 +396,18 @@ require jq
 #     -t/--target-version overrides it; if neither yields a version, error.
 #   - if no image is given, build the default image from the version (used by
 #     the listing paths and as a convenience when only -t is supplied).
+#   - -t also takes a development build version (18.2.8-17-gf7a9f4db5bb, as in
+#     'ceph orch ps'); only that exact build is then on target, so one custom
+#     X.Y.Z build can replace another. It needs -i (no default image for it).
 resolve_image_and_version() {
-    if [[ -n "$TARGET_VERSION" && ! "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ -n "$TARGET_VERSION" && ! "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+-g[0-9a-f]+)?$ ]]; then
         if [[ "$TARGET_VERSION" == */* || "$TARGET_VERSION" == *:* ]]; then
             die "-t/--target-version expects a version like 18.2.8, not an image; use -i/--image '$TARGET_VERSION' (and -t X.Y.Z if the tag holds no version)"
         fi
-        die "-t/--target-version expects a version like 18.2.8 (got '$TARGET_VERSION')"
+        die "-t/--target-version expects a version like 18.2.8 or 18.2.8-17-gf7a9f4db5bb (got '$TARGET_VERSION')"
+    fi
+    if [[ -z "$IMAGE" && "$TARGET_VERSION" == *-g* ]]; then
+        die "-t $TARGET_VERSION is a development build: give its image with -i/--image"
     fi
     if [[ -n "$IMAGE" ]]; then
         if [[ -z "$TARGET_VERSION" ]]; then
@@ -472,8 +494,8 @@ list_filesystems() {
         else
             local has_stale=false all_target=true v
             for v in "${vlist[@]}"; do
-                ver_lt "$v" "$tv" && has_stale=true
-                [[ "$v" == "$tv" ]] || all_target=false
+                needs_upgrade "$v" "$tv" && has_stale=true
+                on_target "$v" "$tv" || all_target=false
             done
             if $has_stale; then
                 if [[ ${#vlist[@]} -gt 1 ]]; then
@@ -655,7 +677,7 @@ refresh_mds_metadata() { MDS_METADATA_JSON="$($CEPH mds metadata --format json 2
 mds_version_mon() {
     jq -r --arg n "$1" '
         [.[] | select(.name==$n)
-         | (.ceph_version_short // (.ceph_version | capture("ceph version (?<v>[0-9]+\\.[0-9]+\\.[0-9]+)").v) // "")]
+         | (.ceph_version_short // (.ceph_version | capture("ceph version (?<v>[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9]+-g[0-9a-f]+)?)").v) // "")]
         | .[0] // ""' <<<"$MDS_METADATA_JSON"
 }
 
@@ -1760,7 +1782,7 @@ do_upgrade() {
         else
             STALE+=("$d")
             # a daemon currently NEWER than target means this is a downgrade
-            ver_lt "$TARGET_VERSION" "$dv" && is_downgrade=true
+            newer_than_target "$dv" && is_downgrade=true
         fi
     done
     [[ ${#STALE[@]} -gt 0 ]] || die "all MDS of '$FS' already on $TARGET_VERSION (nothing to do)"
@@ -1948,7 +1970,7 @@ do_upgrade_list() {
             if $FORCE_DOWNGRADE; then
                 on_target "$v" || needs=true
             else
-                ver_lt "$v" "$TARGET_VERSION" && needs=true
+                needs_upgrade "$v" && needs=true
             fi
         done < <(fs_versions "$fs")
         if $needs; then
@@ -2003,7 +2025,7 @@ interactive_mode() {
         mapfile -t vlist < <(fs_versions "$fs")
         [[ ${#vlist[@]} -eq 0 ]] && continue
         local has_stale=false v
-        for v in "${vlist[@]}"; do ver_lt "$v" "$TARGET_VERSION" && has_stale=true; done
+        for v in "${vlist[@]}"; do needs_upgrade "$v" && has_stale=true; done
         $has_stale || continue
         any=true
         local vers; vers="$(printf '%s,' "${vlist[@]}")"; vers="${vers%,}"
@@ -2116,12 +2138,14 @@ if [[ ${#FS_LIST_ARG[@]} -eq 0 ]] && ! $ALL; then
     echo
     recommend_settings
     echo
+    RERUN_ARGS="-t $TARGET_VERSION"
+    [[ "$TARGET_VERSION" == *-g* ]] && RERUN_ARGS="-i $IMAGE $RERUN_ARGS"
     echo "----------------------------------------------------------"
     echo "To upgrade one or more filesystems, re-run with:"
-    echo "    ./$PROG -t $TARGET_VERSION <fs_name> [<fs_name> ...] [-m fail_fs|max_mds]"
+    echo "    ./$PROG $RERUN_ARGS <fs_name> [<fs_name> ...] [-m fail_fs|max_mds]"
     echo "    (method defaults to fail_fs; filesystems may also be given with -f)"
     echo "To upgrade all filesystems one after the other, re-run with:"
-    echo "    ./$PROG -t $TARGET_VERSION --all [-m fail_fs|max_mds]"
+    echo "    ./$PROG $RERUN_ARGS --all [-m fail_fs|max_mds]"
     echo "----------------------------------------------------------"
     echo
     echo "For a full description of all arguments, re-run with -h / --help."
