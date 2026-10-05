@@ -1,8 +1,8 @@
 {
   "summary": {
-    "score": 26.0,
+    "score": 27.0,
     "grade": "F",
-    "max_score": 33
+    "max_score": 34
   },
   "sections": [
     {
@@ -319,8 +319,8 @@
     },
     {
       "id": "OSD Health",
-      "score": 10.0,
-      "max_score": 13,
+      "score": 11.0,
+      "max_score": 14,
       "summary": "",
       "info": [
         {
@@ -330,6 +330,15 @@
         }
       ],
       "checks": [
+        {
+          "id": "Elastic Shared Blob Bug",
+          "result": "PASS",
+          "summary": "No OSDs created during versions affected by Elastic Shared Blob bug",
+          "detail": [
+            "No OSDs were created during Squid 19.2.0–19.2.3 or Tentacle 20.2.0, which are affected by the Elastic Shared Blob (ESB) bug (https://tracker.ceph.com/issues/70390)."
+          ],
+          "recommend": []
+        },
         {
           "id": "Check osdmap flags",
           "result": "PASS",
