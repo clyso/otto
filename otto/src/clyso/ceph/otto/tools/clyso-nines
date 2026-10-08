@@ -1725,6 +1725,10 @@ def analyze_pool(args, pool, pg_dump):
                f"{reported_osds}; using {len(osds)}.")
 
     domains = infer_failure_domains(all_pgs)
+    if not domains:
+        # e.g. a manager that has just started and not yet heard from the OSDs
+        print(f"    Warning: no PG in the dump has OSDs, skipping '{pool['pool_name']}'.")
+        return []
     args.num_domains = len(domains)
     args.failure_domain = "domain"
 
