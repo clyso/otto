@@ -1654,6 +1654,11 @@ def osd_capacity_and_usage(pg_dump, osds):
 
 
 def analyze_pool(args, pool, pg_dump):
+    """Estimate the pool's durability and availability, printing as it goes.
+
+    Returns [(scenario, simulate() result)], one per scenario, or [] when the
+    pool could not be analyzed.
+    """
     vprint(f"Analyzing pool '{pool['pool_name']}' (id {pool['pool_id']}, size {pool['size']}) ")
     if 'erasure_code_profile' in pool and pool['erasure_code_profile']:
         vprint(f"    Type: erasure-coded ({pool['erasure_code_profile']})")
@@ -1669,7 +1674,7 @@ def analyze_pool(args, pool, pg_dump):
             print(f"    Warning: could not read k/m from erasure code profile "
                   f"'{pool['erasure_code_profile']}', skipping pool. "
                   "Use the simulate subcommand with --k/--m instead.")
-            return
+            return []
     else:
         vprint(f"    Type: replicated")
         args.size = pool['size']
@@ -1688,7 +1693,7 @@ def analyze_pool(args, pool, pg_dump):
 
     if not pgs:
         print(f"    Warning: no PGs for pool '{pool['pool_name']}' in the PG dump, skipping.")
-        return
+        return []
     if len(pgs) != args.pg_num:
         print(f"    Warning: found {len(pgs)} PGs in the dump but pg_num is {args.pg_num} "
               "(pg_num may have changed); continuing with the PGs from the dump.")
@@ -1791,11 +1796,13 @@ def analyze_pool(args, pool, pg_dump):
     args.osd_recovery_max_active = fetch_ceph_config(
         args, 'osd_recovery_max_active', int, args.osd_recovery_max_active)
 
+    results = []
     for label, tb_per_osd in scenarios:
         args.tb_per_osd = tb_per_osd
         args.scenario = f"{label}, {format_bytes(tb_per_osd * 1024**4)} per OSD"
         vprint("")
-        simulate(args, domains=domains)
+        results.append((label, simulate(args, domains=domains)))
+    return results
 
 
 def warn_device_class_mismatch(args, osd_tree):
