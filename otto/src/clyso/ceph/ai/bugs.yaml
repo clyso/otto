@@ -1,16 +1,18 @@
 ---
 # Source: the known bugs at https://docs.clyso.com/docs/kb/known-bugs/ (one
 # page per release). Keep the two in step.
-# affected_versions: an exact version, an fnmatch pattern (17.2.*), or one
-# numeric range in brackets (18.2.[0-7], expanded by helpers.known_bugs).
-# severity: critical or high fail the report's known-bugs check; medium and
-# low warn. docs.clyso.com's Major maps to high, minor to low.
+# Also read by the analyzer UI (gitlab.clyso.com/ceph/analyzer-ui, vendor/otto)
+# and the CES console (a Go port), so keep to what all three understand:
+# affected_versions: exact versions or a whole series as 17.2.*; no bracket
+#   ranges (the analyzer's upgrade planner doesn't expand them).
+# severity: critical, medium or low. docs.clyso.com's Critical, High and Major
+#   map to critical, Medium to medium, minor to low.
 last_updated: '9 October 2026'
 bugs:
   - name: PG Splitting/Merging Causes OSD Out-Of-Memory
     description: A bug in the PG splitting and merging code can cause the OSD to go out-of-memory, a condition which persists even after restart. Offline tools are available in fixed releases to workaround the issue.
     recommendation: Do not change pg_num for any pool until after upgrade to a fixed release. Disable the pg autoscaler. Fixed in v16.2.11 and v17.2.4.
-    severity: high
+    severity: critical
     tracker: https://tracker.ceph.com/issues/53729
     affected_versions:
       - 15.2.*
@@ -31,7 +33,7 @@ bugs:
       - 17.2.3
   - name: Pacific Broken Hotfixes
     description: Version 16.2.11 has a bug in ceph-volume osd activation, which was meant to be hotfixed in 16.2.12 but that release was built incorrectly, including changes which did not pass the rigorous QA testing.
-    severity: high
+    severity: critical
     recommendation: It is recommended to upgrade to version 16.2.13 or later.
     affected_versions:
       - 16.2.11
@@ -75,12 +77,22 @@ bugs:
     recommendation: Use "radosgw-admin bucket rm" without --bypass-gc, which correctly handles copied objects. Fixed in 18.2.8, 19.2.4 and 20.2.1. If --bypass-gc has been used in the past, audit buckets for objects with missing data.
     affected_versions:
       - 17.2.*
-      - 18.2.[0-7]
-      - 19.2.[0-3]
+      - 18.2.0
+      - 18.2.1
+      - 18.2.2
+      - 18.2.3
+      - 18.2.4
+      - 18.2.5
+      - 18.2.6
+      - 18.2.7
+      - 19.2.0
+      - 19.2.1
+      - 19.2.2
+      - 19.2.3
       - 20.2.0
   - name: OSD Crash When Enabling EC Optimizations on CephFS
     description: OSDs crash when "allow_ec_optimizations" is enabled on an existing CephFS Erasure Coded (EC) data pool that does not have "allow_ec_overwrites" explicitly enabled. The crash occurs in ECTransaction::WritePlanObj when accessing a non-existent transaction key.
-    severity: high
+    severity: critical
     tracker: https://tracker.ceph.com/issues/71642
     recommendation: Upgrade to 20.2.1 or later. Until then, do not enable allow_ec_optimizations on existing CephFS EC data pools. See https://docs.clyso.com/blog/tentacle-v20.2.0-ec-bug for details.
     affected_versions:
@@ -110,7 +122,7 @@ bugs:
       - 19.2.*
   - name: Cephadm Changes Ownership of Crash Directories When Deploying Monitoring Daemons
     description: When deploying monitoring daemons (e.g., Grafana) to a host that already has Ceph daemons running, cephadm incorrectly changes the ownership of the /var/lib/ceph/<fsid>/crash and /var/lib/ceph/<fsid>/crash/posted directories to match the monitoring daemon's UID/GID. This prevents the ceph-crash daemon and other Ceph daemons from posting crash reports, as they run as user 'ceph' and can no longer access these directories.
-    severity: high
+    severity: critical
     tracker: https://tracker.ceph.com/issues/69590
     recommendation: As a workaround, create a cron job or systemd timer that periodically checks for incorrect permissions in crash directories and corrects them by running "chown -R 167:167 /var/lib/ceph/<fsid>/crash/" and "chown 167:167 /var/lib/ceph/<fsid>". Run this hourly or as needed. Note that UID 167 corresponds to the ceph user in the container. A patch is pending review upstream.
     affected_versions:
@@ -130,10 +142,11 @@ bugs:
     affected_versions:
       - 19.2.6
       - 20.2.4
-  - name: RGW Segfaults With Swift TempURL
+  - name: RGW seg-faults with TempURL in Quincy
     description: Under certain circumstances, when a Swift get_obj() call reads object permissions through RADOS, RGW segfaults. The failed request is retried on the next RGW daemon, which segfaults too, so every RGW daemon can go down in turn. Seen on 18.2.0 alongside 17.2.7 RGW daemons.
-    severity: high
+    severity: critical
     tracker: https://tracker.ceph.com/issues/63684
     recommendation: Upgrade to 18.2.8 or later, the final v18 release. See also https://tracker.ceph.com/issues/67825.
     affected_versions:
+      - 17.2.7
       - 18.2.0
