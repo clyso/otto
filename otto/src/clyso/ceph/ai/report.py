@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import traceback
 from math import ceil, fsum, log2, floor
@@ -183,11 +184,14 @@ def check_report_known_bugs(result: AIResult, data: CephData) -> None:
 
     summary = "No known severe bugs in running release"
 
-    # Check for critical severity bugs (trigger FAIL)
-    (last_updated, bugs) = known_bugs(report.version, "critical")
-    for bug in bugs:
+    # Check for critical and high severity bugs (trigger FAIL)
+    severe = []
+    for severity_level in ["critical", "high"]:
+        (last_updated, bugs) = known_bugs(report.version, severity_level)
+        severe += bugs
+    for bug in severe:
         passfail = "FAIL"
-        summary = f"CRITICAL: Found {len(bugs)} critical severity bug(s) in running version {report.version}"
+        summary = f"CRITICAL: Found {len(severe)} critical or high severity bug(s) in running version {report.version}"
         tracker_info = f" (Tracker: {bug['tracker']})" if bug.get("tracker") else ""
         detail.append(
             f"{bug['name']} (severity: {bug['severity']}){tracker_info}: {bug['description']}"
@@ -1830,6 +1834,9 @@ def check_report_operating_system(result: AIResult, data: CephData) -> None:
     summary = "Operating System is Supported"
     passfail = "PASS"
     for d in distro_descriptions:
+        # os.yaml keys drop the codename: "Rocky Linux 9.4 (Blue Onyx)" -> "Rocky Linux 9.4"
+        if d not in osdb["operating_systems"]:
+            d = re.sub(r"\s*\([^)]*\)\s*$", "", d)
         if d not in osdb["operating_systems"]:
             passfail = "WARN"
             summary = "Operating System is Unknown"
