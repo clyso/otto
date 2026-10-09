@@ -1,13 +1,16 @@
 ---
-# NOTE: affected_versions entries are matched with fnmatch, where [...] is a
-# single-character class. Ranges like [0-10] or [11-12] will NOT expand as
-# expected — list multi-digit versions explicitly (e.g. 16.2.10, 16.2.11).
-last_updated: '10 June 2026'
+# Source: the known bugs at https://docs.clyso.com/docs/kb/known-bugs/ (one
+# page per release). Keep the two in step.
+# affected_versions: an exact version, an fnmatch pattern (17.2.*), or one
+# numeric range in brackets (18.2.[0-7], expanded by helpers.known_bugs).
+# severity: critical or high fail the report's known-bugs check; medium and
+# low warn. docs.clyso.com's Major maps to high, minor to low.
+last_updated: '9 October 2026'
 bugs:
   - name: PG Splitting/Merging Causes OSD Out-Of-Memory
     description: A bug in the PG splitting and merging code can cause the OSD to go out-of-memory, a condition which persists even after restart. Offline tools are available in fixed releases to workaround the issue.
     recommendation: Do not change pg_num for any pool until after upgrade to a fixed release. Disable the pg autoscaler. Fixed in v16.2.11 and v17.2.4.
-    severity: critical
+    severity: high
     tracker: https://tracker.ceph.com/issues/53729
     affected_versions:
       - 15.2.*
@@ -28,7 +31,7 @@ bugs:
       - 17.2.3
   - name: Pacific Broken Hotfixes
     description: Version 16.2.11 has a bug in ceph-volume osd activation, which was meant to be hotfixed in 16.2.12 but that release was built incorrectly, including changes which did not pass the rigorous QA testing.
-    severity: critical
+    severity: high
     recommendation: It is recommended to upgrade to version 16.2.13 or later.
     affected_versions:
       - 16.2.11
@@ -69,19 +72,17 @@ bugs:
     description: A long-standing data loss bug with "--bypass-gc" causes deletion of copied object data. If any of the deleted objects had been copied to/from other buckets, --bypass-gc deletes the data of those copies too. As a result, the copies are still visible to ListObjects requests but GetObject requests fail with NoSuchKey.
     severity: critical
     tracker: https://tracker.ceph.com/issues/73348
-    recommendation: Use "radosgw-admin bucket rm" without --bypass-gc, which correctly handles copied objects. Fixed in 18.2.8 and 20.2.1. If --bypass-gc has been used in the past, audit buckets for objects with missing data.
+    recommendation: Use "radosgw-admin bucket rm" without --bypass-gc, which correctly handles copied objects. Fixed in 18.2.8, 19.2.4 and 20.2.1. If --bypass-gc has been used in the past, audit buckets for objects with missing data.
     affected_versions:
       - 17.2.*
-      - 18.2.*
-      - 19.2.0
-      - 19.2.1
-      - 19.2.2
-      - 19.2.3
+      - 18.2.[0-7]
+      - 19.2.[0-3]
+      - 20.2.0
   - name: OSD Crash When Enabling EC Optimizations on CephFS
     description: OSDs crash when "allow_ec_optimizations" is enabled on an existing CephFS Erasure Coded (EC) data pool that does not have "allow_ec_overwrites" explicitly enabled. The crash occurs in ECTransaction::WritePlanObj when accessing a non-existent transaction key.
-    severity: critical
+    severity: high
     tracker: https://tracker.ceph.com/issues/71642
-    recommendation: Wait for future tentacle releases. See the Clyso blog post "tentacle-v20.2.0-ec-bug" for details.
+    recommendation: Upgrade to 20.2.1 or later. Until then, do not enable allow_ec_optimizations on existing CephFS EC data pools. See https://docs.clyso.com/blog/tentacle-v20.2.0-ec-bug for details.
     affected_versions:
       - 20.2.0
   - name: FastEC Scrub Errors After Recovery
@@ -109,7 +110,7 @@ bugs:
       - 19.2.*
   - name: Cephadm Changes Ownership of Crash Directories When Deploying Monitoring Daemons
     description: When deploying monitoring daemons (e.g., Grafana) to a host that already has Ceph daemons running, cephadm incorrectly changes the ownership of the /var/lib/ceph/<fsid>/crash and /var/lib/ceph/<fsid>/crash/posted directories to match the monitoring daemon's UID/GID. This prevents the ceph-crash daemon and other Ceph daemons from posting crash reports, as they run as user 'ceph' and can no longer access these directories.
-    severity: critical
+    severity: high
     tracker: https://tracker.ceph.com/issues/69590
     recommendation: As a workaround, create a cron job or systemd timer that periodically checks for incorrect permissions in crash directories and corrects them by running "chown -R 167:167 /var/lib/ceph/<fsid>/crash/" and "chown 167:167 /var/lib/ceph/<fsid>". Run this hourly or as needed. Note that UID 167 corresponds to the ceph user in the container. A patch is pending review upstream.
     affected_versions:
@@ -121,3 +122,18 @@ bugs:
     recommendation: TBD.
     affected_versions:
       - 17.2.7
+  - name: Cephadm OSD Key Rotation Bug Causes Unnecessary OSD Restarts
+    description: Every "ceph orch daemon reconfig" of an OSD stops and restarts it, because cephadm compares the OSD keyring with the one ceph-volume rewrote, never finds them equal, and rotates the key in the bluestore label. cephadm reconfigures OSDs on its own whenever the monmap changes (a monitor added or removed, sometimes a mgr failover), so many OSDs can restart at once and PGs can go inactive. The cephadm log shows "Stopping osd.N to update osd_key bluestore label" and "Rotating osd.N key with ceph-bluestore-tool".
+    severity: critical
+    tracker: https://tracker.ceph.com/issues/80440
+    recommendation: Avoid adding or removing monitors and plan mgr failovers as maintenance, since each can restart OSDs. Watch "ceph -W cephadm" for the "Rotating ... key" sequence. Fixed upstream in https://github.com/ceph/ceph/pull/71640; the squid and tentacle backports are pending. Contact Clyso support for a hotfix build.
+    affected_versions:
+      - 19.2.6
+      - 20.2.4
+  - name: RGW Segfaults With Swift TempURL
+    description: Under certain circumstances, when a Swift get_obj() call reads object permissions through RADOS, RGW segfaults. The failed request is retried on the next RGW daemon, which segfaults too, so every RGW daemon can go down in turn. Seen on 18.2.0 alongside 17.2.7 RGW daemons.
+    severity: high
+    tracker: https://tracker.ceph.com/issues/63684
+    recommendation: Upgrade to 18.2.8 or later, the final v18 release. See also https://tracker.ceph.com/issues/67825.
+    affected_versions:
+      - 18.2.0

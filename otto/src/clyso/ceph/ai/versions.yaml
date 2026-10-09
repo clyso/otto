@@ -46,6 +46,7 @@ releases:
     version: 19.2.6
     recommended: true
     caveats:
+        - "Every cephadm reconfig of an OSD restarts it (also on monitor add/remove): see https://docs.clyso.com/docs/kb/known-bugs/squid/#cephadm-osd-key-rotation-bug-causes-unnecessary-osd-restarts"
         - See https://docs.clyso.com/docs/kb/known-bugs/squid/#squid-deployed-osds-are-crashing
         - See https://ceph.io/en/news/blog/2026/v20-2-4-v19-2-6-combo-released/
   v20:
@@ -53,6 +54,7 @@ releases:
     version: 20.2.4
     recommended: true
     caveats:
+        - "Every cephadm reconfig of an OSD restarts it (also on monitor add/remove): see https://docs.clyso.com/docs/kb/known-bugs/tentacle/#cephadm-osd-key-rotation-bug-causes-unnecessary-osd-restarts"
         - See https://ceph.io/en/news/blog/2026/v20-2-4-v19-2-6-combo-released/
   v21:
     name: umbrella
