@@ -1770,13 +1770,17 @@ def check_report_osd_cluster_network(result: AIResult, data: CephData) -> None:
     public_ip = first.public_addr.split(":")[0]
     cluster_ip = first.cluster_addr.split(":")[0]
     if public_ip == cluster_ip:
-        passfail = "WARN"
+        # Not a warning: one network is the norm on 25-100 GbE, a report
+        # shows neither NIC speeds nor network load, so it cannot tell when
+        # the network is the bottleneck, and a second network (NICs,
+        # switches, cabling) is rarely an option for an existing cluster.
+        passfail = "PASS"
         summary = "Public and Cluster Networks are Shared"
         detail = [
-            "OSDs are using the same IP address for the public and cluster networks. This may have performance implications for busy clusters notably during periods of recovery or backfilling."
+            "OSDs use one network for client and replication traffic. This is the usual setup on fast (25-100 GbE) networks."
         ]
         recommend = [
-            "Consider adding a dedicated cluster network for internal OSD traffic."
+            "Nothing to do unless the OSD hosts' network links saturate during recovery or backfill; then a faster network, or a separate cluster network, helps."
         ]
     else:
         passfail = "PASS"
