@@ -38,7 +38,7 @@ bugs:
     affected_versions:
       - 16.2.11
       - 16.2.12
-  - name: Potential OSD Data Corruption
+  - name: 'Critical Notice: Potential OSD Data Corruption (v19.2.0 - v19.2.3, v20.2.0)'
     description: A bug has been identified in Ceph versions v19.2.0 through v19.2.3 and Ceph version v20.2.0 that, in rare cases, can lead to silent data corruption in the OSD. This issue impacts any OSD created on these versions while bluestore_elastic_shared_blobs is enabled (which is the default setting). Ceph versions v19.2.4 and v20.2.1 contain a patch for this issue; however, this fix only prevents new corruptions from occurring. It cannot detect or repair existing silent corruptions on OSDs that were created with elastic shared blobs enabled during the affected release window.
     severity: critical
     tracker: https://tracker.ceph.com/issues/70390
@@ -117,9 +117,11 @@ bugs:
     description: When an RBD image with an object map is created and filled with non-zero data, a clone is created, a snapshot is created on the clone and remains open, and then the clone is flattened - data read from the cloned snapshot that was opened before flattening returns zeros instead of the expected data from the parent image.
     severity: medium
     tracker: https://tracker.ceph.com/issues/74554
-    recommendation: TBD.
+    recommendation: A fix is under review in https://github.com/ceph/ceph/pull/70143. Until then, avoid reading from snapshots of a clone that is being flattened.
     affected_versions:
       - 19.2.*
+      - 18.2.*
+      - 20.2.*
   - name: Cephadm Changes Ownership of Crash Directories When Deploying Monitoring Daemons
     description: When deploying monitoring daemons (e.g., Grafana) to a host that already has Ceph daemons running, cephadm incorrectly changes the ownership of the /var/lib/ceph/<fsid>/crash and /var/lib/ceph/<fsid>/crash/posted directories to match the monitoring daemon's UID/GID. This prevents the ceph-crash daemon and other Ceph daemons from posting crash reports, as they run as user 'ceph' and can no longer access these directories.
     severity: critical
