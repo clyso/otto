@@ -363,3 +363,38 @@ class TestClysoCephAI(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestKnownBugsDB(unittest.TestCase):
+    def names(self, version, severity):
+        from clyso.ceph.ai.helpers import known_bugs
+
+        return {b["name"] for b in known_bugs(version, severity)[1]}
+
+    def test_key_rotation(self) -> None:
+        rot = "Cephadm OSD Key Rotation Bug Causes Unnecessary OSD Restarts"
+        for v in ("19.2.6", "20.2.4"):
+            self.assertIn(rot, self.names(v, "critical"), v)
+        for v in ("19.2.5", "20.2.3"):
+            self.assertNotIn(rot, self.names(v, "critical"), v)
+
+    def test_bypass_gc_ranges(self) -> None:
+        gc = "RadosGW --bypass-gc Data Loss Bug"
+        for v in ("17.2.7", "18.2.0", "18.2.7", "19.2.3", "20.2.0"):
+            self.assertIn(gc, self.names(v, "critical"), v)
+        for v in ("18.2.8", "19.2.4", "20.2.1"):
+            self.assertNotIn(gc, self.names(v, "critical"), v)
+
+    def test_entries_complete(self) -> None:
+        from clyso.ceph.ai.helpers import bugdb, osdb
+
+        for bug in bugdb["bugs"]:
+            self.assertIn(bug["severity"], ("critical", "high", "medium", "low"))
+            for key in ("name", "description", "recommendation", "affected_versions"):
+                self.assertTrue(bug.get(key), f"{bug['name']}: {key}")
+        for name, entry in osdb["operating_systems"].items():
+            self.assertIn(
+                entry["status"], ("Supported", "Out of Date", "End of Life"), name
+            )
+            if entry["status"] != "Supported":
+                self.assertTrue(entry.get("detail") and entry.get("recommend"), name)

@@ -1,249 +1,530 @@
 ---
+# Operating systems by /etc/os-release PRETTY_NAME without the codename in
+# parentheses (report.py strips it before the lookup).
+# Release and end-of-life dates from https://endoflife.date (October 2026).
+# status: Supported, Out of Date, End of Life. A status other than Supported
+# needs detail and recommend.
 
 operating_systems:
-  'CentOS Linux 7 (Core)':
+  'CentOS Linux 7':
     status: End of Life
-    detail: CentOS Linux 7 has reached end of life (EOL) on June 30, 2024. Ceph Octopus (v15, already EOL) is only partially supported on CentOS Linux 7. Pacific (v16) and beyond do not support CentOS Linux 7 at all.
-    recommend: It is strongly recommended to upgrade to RHEL 8+ or a clone (Alma, Rocky). Note that CentOS Stream 8 is not recommended for bare-metal Ceph clusters.
+    detail: 'CentOS Linux 7 reached end of life on June 30, 2024. Pacific (v16) and later do not support it.'
+    recommend: 'It is strongly recommended to move to RHEL 9 or a rebuild (AlmaLinux, Rocky Linux).'
   'CentOS Linux 8':
     status: End of Life
-    detail: CentOS Linux 8 reached end of life (EOL) on December 31, 2021. It is no longer receiving any security or bug fixes.
-    recommend: It is strongly recommended to upgrade to RHEL 8+ or a clone (Alma, Rocky). Note that CentOS Stream 8 is not recommended for bare-metal Ceph clusters.
+    detail: 'CentOS Linux 8 reached end of life on December 31, 2021 and receives no security or bug fixes.'
+    recommend: 'It is strongly recommended to move to RHEL 9 or a rebuild (AlmaLinux, Rocky Linux).'
   'CentOS Stream 8':
-    status: Supported
-    recommend: It is recommended to upgrade to CentOS Stream 9.
-    detail: CentOS Stream 8 reached its end-of-life on May 31, 2024. After this date, no further updates or builds will be provided for CentOS Stream 8.
+    status: End of Life
+    detail: 'CentOS Stream 8 reached end of life on May 31, 2024.'
+    recommend: 'It is recommended to move to CentOS Stream 9 or 10, or to RHEL 9 or a rebuild.'
   'CentOS Stream 9':
     status: Supported
-    detail: CentOS Stream 9 is the latest version and has an expected EOL date of May 31, 2027.
-  'Red Hat Enterprise Linux 8 (Ootpa)':
-    status: Out of Date
-    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
-  'Red Hat Enterprise Linux 8.1 (Ootpa)':
-    status: Out of Date
-    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
-  'Red Hat Enterprise Linux 8.2 (Ootpa)':
-    status: Out of Date
-    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
-  'Red Hat Enterprise Linux 8.3 (Ootpa)':
-    status: Out of Date
-    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
-  'Red Hat Enterprise Linux 8.4 (Ootpa)':
-    status: Out of Date
-    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
-  'Red Hat Enterprise Linux 8.5 (Ootpa)':
-    status: Out of Date
-    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
-  'Red Hat Enterprise Linux 8.6 (Ootpa)':
-    status: Out of Date
-    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
-  'Red Hat Enterprise Linux 8.7 (Ootpa)':
-    status: Out of Date
-    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
-  'Red Hat Enterprise Linux 8.8 (Ootpa)':
-    status: Out of Date
-    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
-  'Red Hat Enterprise Linux 8.9 (Ootpa)':
-    status: Out of Date
-    detail: The latest Red Hat Enterprise Linux 8 release is 8.10 as of May 22, 2024.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 8.10.
-  'Red Hat Enterprise Linux 8.10 (Ootpa)':
+    detail: 'CentOS Stream 9 is maintained until May 31, 2027.'
+  'CentOS Stream 10':
     status: Supported
-  'Red Hat Enterprise Linux 9.4 (Plow)':
+    detail: 'CentOS Stream 10 is maintained until May 31, 2030.'
+  'Red Hat Enterprise Linux Server 7':
+    status: End of Life
+    detail: 'RHEL 7 maintenance ended on June 30, 2024 (extended life cycle support only).'
+    recommend: 'It is strongly recommended to upgrade to RHEL 9.'
+  'Red Hat Enterprise Linux Server 7.0':
+    status: End of Life
+    detail: 'RHEL 7 maintenance ended on June 30, 2024 (extended life cycle support only).'
+    recommend: 'It is strongly recommended to upgrade to RHEL 9.'
+  'Red Hat Enterprise Linux Server 7.1':
+    status: End of Life
+    detail: 'RHEL 7 maintenance ended on June 30, 2024 (extended life cycle support only).'
+    recommend: 'It is strongly recommended to upgrade to RHEL 9.'
+  'Red Hat Enterprise Linux Server 7.2':
+    status: End of Life
+    detail: 'RHEL 7 maintenance ended on June 30, 2024 (extended life cycle support only).'
+    recommend: 'It is strongly recommended to upgrade to RHEL 9.'
+  'Red Hat Enterprise Linux Server 7.3':
+    status: End of Life
+    detail: 'RHEL 7 maintenance ended on June 30, 2024 (extended life cycle support only).'
+    recommend: 'It is strongly recommended to upgrade to RHEL 9.'
+  'Red Hat Enterprise Linux Server 7.4':
+    status: End of Life
+    detail: 'RHEL 7 maintenance ended on June 30, 2024 (extended life cycle support only).'
+    recommend: 'It is strongly recommended to upgrade to RHEL 9.'
+  'Red Hat Enterprise Linux Server 7.5':
+    status: End of Life
+    detail: 'RHEL 7 maintenance ended on June 30, 2024 (extended life cycle support only).'
+    recommend: 'It is strongly recommended to upgrade to RHEL 9.'
+  'Red Hat Enterprise Linux Server 7.6':
+    status: End of Life
+    detail: 'RHEL 7 maintenance ended on June 30, 2024 (extended life cycle support only).'
+    recommend: 'It is strongly recommended to upgrade to RHEL 9.'
+  'Red Hat Enterprise Linux Server 7.7':
+    status: End of Life
+    detail: 'RHEL 7 maintenance ended on June 30, 2024 (extended life cycle support only).'
+    recommend: 'It is strongly recommended to upgrade to RHEL 9.'
+  'Red Hat Enterprise Linux Server 7.8':
+    status: End of Life
+    detail: 'RHEL 7 maintenance ended on June 30, 2024 (extended life cycle support only).'
+    recommend: 'It is strongly recommended to upgrade to RHEL 9.'
+  'Red Hat Enterprise Linux Server 7.9':
+    status: End of Life
+    detail: 'RHEL 7 maintenance ended on June 30, 2024 (extended life cycle support only).'
+    recommend: 'It is strongly recommended to upgrade to RHEL 9.'
+  'Red Hat Enterprise Linux 8':
+    status: Out of Date
+    detail: 'Red Hat Enterprise Linux 8 without a minor version; the latest 8.x release is 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 8.10.'
+  'Red Hat Enterprise Linux 8.0':
+    status: Out of Date
+    detail: 'A newer minor release of Red Hat Enterprise Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 8.10.'
+  'Red Hat Enterprise Linux 8.1':
+    status: Out of Date
+    detail: 'A newer minor release of Red Hat Enterprise Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 8.10.'
+  'Red Hat Enterprise Linux 8.2':
+    status: Out of Date
+    detail: 'A newer minor release of Red Hat Enterprise Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 8.10.'
+  'Red Hat Enterprise Linux 8.3':
+    status: Out of Date
+    detail: 'A newer minor release of Red Hat Enterprise Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 8.10.'
+  'Red Hat Enterprise Linux 8.4':
+    status: Out of Date
+    detail: 'A newer minor release of Red Hat Enterprise Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 8.10.'
+  'Red Hat Enterprise Linux 8.5':
+    status: Out of Date
+    detail: 'A newer minor release of Red Hat Enterprise Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 8.10.'
+  'Red Hat Enterprise Linux 8.6':
+    status: Out of Date
+    detail: 'A newer minor release of Red Hat Enterprise Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 8.10.'
+  'Red Hat Enterprise Linux 8.7':
+    status: Out of Date
+    detail: 'A newer minor release of Red Hat Enterprise Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 8.10.'
+  'Red Hat Enterprise Linux 8.8':
+    status: Out of Date
+    detail: 'A newer minor release of Red Hat Enterprise Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 8.10.'
+  'Red Hat Enterprise Linux 8.9':
+    status: Out of Date
+    detail: 'A newer minor release of Red Hat Enterprise Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 8.10.'
+  'Red Hat Enterprise Linux 8.10':
     status: Supported
-    detail: This is the latest release of RHEL 9 as of April 30, 2024.
-    recommend: This is the most up-to-date version of RHEL 9 and is recommended for use.
-  'Red Hat Enterprise Linux 9.3 (Plow)':
+    detail: 'Red Hat Enterprise Linux 8.10 is the final Red Hat Enterprise Linux 8 release; it is maintained until May 2029.'
+  'Red Hat Enterprise Linux 9':
     status: Out of Date
-    detail: A newer version (9.4) is available as of April 30, 2024.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 9.4.
-  'Red Hat Enterprise Linux 9.2 (Plow)':
+    detail: 'Red Hat Enterprise Linux 9 without a minor version; the latest 9.x release is 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 9.8.'
+  'Red Hat Enterprise Linux 9.0':
     status: Out of Date
-    detail: Newer versions (9.3 and 9.4) are available.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 9.4.
-  'Red Hat Enterprise Linux 9.1 (Plow)':
+    detail: 'A newer minor release of Red Hat Enterprise Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 9.8.'
+  'Red Hat Enterprise Linux 9.1':
     status: Out of Date
-    detail: Newer versions (9.2, 9.3, and 9.4) are available.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 9.4.
-  'Red Hat Enterprise Linux 9.0 (Plow)':
+    detail: 'A newer minor release of Red Hat Enterprise Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 9.8.'
+  'Red Hat Enterprise Linux 9.2':
     status: Out of Date
-    detail: This was the initial release of RHEL 9 on May 17, 2022. Newer versions are available.
-    recommend: It is recommended to upgrade to Red Hat Enterprise Linux 9.4.
-  
-  'Rocky Linux 8 (Green Obsidian)':
+    detail: 'A newer minor release of Red Hat Enterprise Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 9.8.'
+  'Red Hat Enterprise Linux 9.3':
     status: Out of Date
-    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
-    recommend: It is recommended to upgrade to Rocky Linux 8.10.
-  'Rocky Linux 8.1 (Green Obsidian)':
+    detail: 'A newer minor release of Red Hat Enterprise Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 9.8.'
+  'Red Hat Enterprise Linux 9.4':
     status: Out of Date
-    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
-    recommend: It is recommended to upgrade to Rocky Linux 8.10.
-  'Rocky Linux 8.2 (Green Obsidian)':
+    detail: 'A newer minor release of Red Hat Enterprise Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 9.8.'
+  'Red Hat Enterprise Linux 9.5':
     status: Out of Date
-    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
-    recommend: It is recommended to upgrade to Rocky Linux 8.10.
-  'Rocky Linux 8.3 (Green Obsidian)':
+    detail: 'A newer minor release of Red Hat Enterprise Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 9.8.'
+  'Red Hat Enterprise Linux 9.6':
     status: Out of Date
-    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
-    recommend: It is recommended to upgrade to Rocky Linux 8.10.
-  'Rocky Linux 8.4 (Green Obsidian)':
+    detail: 'A newer minor release of Red Hat Enterprise Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 9.8.'
+  'Red Hat Enterprise Linux 9.7':
     status: Out of Date
-    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
-    recommend: It is recommended to upgrade to Rocky Linux 8.10.
-  'Rocky Linux 8.5 (Green Obsidian)':
-    status: Out of Date
-    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
-    recommend: It is recommended to upgrade to Rocky Linux 8.10.
-  'Rocky Linux 8.6 (Green Obsidian)':
-    status: Out of Date
-    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
-    recommend: It is recommended to upgrade to Rocky Linux 8.10.
-  'Rocky Linux 8.7 (Green Obsidian)':
-    status: Out of Date
-    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
-    recommend: It is recommended to upgrade to Rocky Linux 8.10.
-  'Rocky Linux 8.8 (Green Obsidian)':
-    status: Out of Date
-    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
-    recommend: It is recommended to upgrade to Rocky Linux 8.10.
-  'Rocky Linux 8.9 (Green Obsidian)':
-    status: Out of Date
-    detail: The latest Rocky Linux 8 release is 8.10 as of May 30, 2024.
-    recommend: It is recommended to upgrade to Rocky Linux 8.10.
-  'Rocky Linux 8.10 (Green Obsidian)':
+    detail: 'A newer minor release of Red Hat Enterprise Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 9.8.'
+  'Red Hat Enterprise Linux 9.8':
     status: Supported
-    detail: This is an old version, but it is still maintained.
-  'Blue Onyx 9.0 (Blue Onyx)':
-    status: Unsupported
-    detail: Rocky Linux 9.0 was released on 2022-07-14 and is no longer supported.
-    recommend: It is recommended to upgrade to Rocky Linux 9.4.
-  'Blue Onyx 9.1 (Blue Onyx)':
-    status: Unsupported
-    detail: Rocky Linux 9.1 was released on 2022-11-26 and is no longer supported.
-    recommend: It is recommended to upgrade to Rocky Linux 9.4.
-  'Blue Onyx 9.2 (Blue Onyx)':
-    status: Unsupported
-    detail: Rocky Linux 9.2 was released on 2023-05-16 and is no longer supported.
-    recommend: It is recommended to upgrade to Rocky Linux 9.4.
-  'Blue Onyx 9.3 (Blue Onyx)':
-    status: Unsupported
-    detail: Rocky Linux 9.3 was released on 2023-11-20 and is no longer supported.
-    recommend: It is recommended to upgrade to Rocky Linux 9.4.
-  'Blue Onyx 9.4 (Blue Onyx)':
+    detail: 'Red Hat Enterprise Linux 9.8 (May 2026) is the latest Red Hat Enterprise Linux 9 release; full support until May 2027.'
+  'Red Hat Enterprise Linux 10':
+    status: Out of Date
+    detail: 'Red Hat Enterprise Linux 10 without a minor version; the latest 10.x release is 10.2 (May 2026).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 10.2.'
+  'Red Hat Enterprise Linux 10.0':
+    status: Out of Date
+    detail: 'A newer minor release of Red Hat Enterprise Linux 10 is available: 10.2 (May 2026).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 10.2.'
+  'Red Hat Enterprise Linux 10.1':
+    status: Out of Date
+    detail: 'A newer minor release of Red Hat Enterprise Linux 10 is available: 10.2 (May 2026).'
+    recommend: 'It is recommended to upgrade to Red Hat Enterprise Linux 10.2.'
+  'Red Hat Enterprise Linux 10.2':
     status: Supported
-    detail: Rocky Linux 9.4 was released on 2024-05-09 and is currently supported.
+    detail: 'Red Hat Enterprise Linux 10.2 (May 2026) is the latest Red Hat Enterprise Linux 10 release; full support until May 2030.'
+  'Rocky Linux 8':
+    status: Out of Date
+    detail: 'Rocky Linux 8 without a minor version; the latest 8.x release is 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 8.10.'
+  'Rocky Linux 8.0':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 8.10.'
+  'Rocky Linux 8.1':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 8.10.'
+  'Rocky Linux 8.2':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 8.10.'
+  'Rocky Linux 8.3':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 8.10.'
+  'Rocky Linux 8.4':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 8.10.'
+  'Rocky Linux 8.5':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 8.10.'
+  'Rocky Linux 8.6':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 8.10.'
+  'Rocky Linux 8.7':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 8.10.'
+  'Rocky Linux 8.8':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 8.10.'
+  'Rocky Linux 8.9':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 8.10.'
+  'Rocky Linux 8.10':
+    status: Supported
+    detail: 'Rocky Linux 8.10 is the final Rocky Linux 8 release; it is maintained until May 2029.'
+  'Rocky Linux 9':
+    status: Out of Date
+    detail: 'Rocky Linux 9 without a minor version; the latest 9.x release is 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 9.8.'
+  'Rocky Linux 9.0':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 9.8.'
+  'Rocky Linux 9.1':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 9.8.'
+  'Rocky Linux 9.2':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 9.8.'
+  'Rocky Linux 9.3':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 9.8.'
+  'Rocky Linux 9.4':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 9.8.'
+  'Rocky Linux 9.5':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 9.8.'
+  'Rocky Linux 9.6':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 9.8.'
+  'Rocky Linux 9.7':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 9.8.'
+  'Rocky Linux 9.8':
+    status: Supported
+    detail: 'Rocky Linux 9.8 (May 2026) is the latest Rocky Linux 9 release; full support until May 2027.'
+  'Rocky Linux 10':
+    status: Out of Date
+    detail: 'Rocky Linux 10 without a minor version; the latest 10.x release is 10.2 (May 2026).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 10.2.'
+  'Rocky Linux 10.0':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 10 is available: 10.2 (May 2026).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 10.2.'
+  'Rocky Linux 10.1':
+    status: Out of Date
+    detail: 'A newer minor release of Rocky Linux 10 is available: 10.2 (May 2026).'
+    recommend: 'It is recommended to upgrade to Rocky Linux 10.2.'
+  'Rocky Linux 10.2':
+    status: Supported
+    detail: 'Rocky Linux 10.2 (May 2026) is the latest Rocky Linux 10 release; full support until May 2030.'
+  'AlmaLinux 8':
+    status: Out of Date
+    detail: 'AlmaLinux 8 without a minor version; the latest 8.x release is 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 8.10.'
+  'AlmaLinux 8.0':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 8.10.'
+  'AlmaLinux 8.1':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 8.10.'
+  'AlmaLinux 8.2':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 8.10.'
+  'AlmaLinux 8.3':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 8.10.'
+  'AlmaLinux 8.4':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 8.10.'
+  'AlmaLinux 8.5':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 8.10.'
+  'AlmaLinux 8.6':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 8.10.'
+  'AlmaLinux 8.7':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 8.10.'
+  'AlmaLinux 8.8':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 8.10.'
+  'AlmaLinux 8.9':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 8 is available: 8.10 (May 2024).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 8.10.'
+  'AlmaLinux 8.10':
+    status: Supported
+    detail: 'AlmaLinux 8.10 is the final AlmaLinux 8 release; it is maintained until May 2029.'
+  'AlmaLinux 9':
+    status: Out of Date
+    detail: 'AlmaLinux 9 without a minor version; the latest 9.x release is 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 9.8.'
+  'AlmaLinux 9.0':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 9.8.'
+  'AlmaLinux 9.1':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 9.8.'
+  'AlmaLinux 9.2':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 9.8.'
+  'AlmaLinux 9.3':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 9.8.'
+  'AlmaLinux 9.4':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 9.8.'
+  'AlmaLinux 9.5':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 9.8.'
+  'AlmaLinux 9.6':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 9.8.'
+  'AlmaLinux 9.7':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 9 is available: 9.8 (May 2026).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 9.8.'
+  'AlmaLinux 9.8':
+    status: Supported
+    detail: 'AlmaLinux 9.8 (May 2026) is the latest AlmaLinux 9 release; full support until May 2027.'
+  'AlmaLinux 10':
+    status: Out of Date
+    detail: 'AlmaLinux 10 without a minor version; the latest 10.x release is 10.2 (May 2026).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 10.2.'
+  'AlmaLinux 10.0':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 10 is available: 10.2 (May 2026).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 10.2.'
+  'AlmaLinux 10.1':
+    status: Out of Date
+    detail: 'A newer minor release of AlmaLinux 10 is available: 10.2 (May 2026).'
+    recommend: 'It is recommended to upgrade to AlmaLinux 10.2.'
+  'AlmaLinux 10.2':
+    status: Supported
+    detail: 'AlmaLinux 10.2 (May 2026) is the latest AlmaLinux 10 release; full support until May 2030.'
   'SUSE Linux Enterprise Server 15':
     status: Out of Date
-    detail: The latest SUSE Linux Enterprise Server 15 is SP6 as of June 26, 2024.
-    recommend: It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP6.
+    detail: 'General support for SUSE Linux Enterprise Server 15 has ended; the latest service pack is SP7 (June 2025).'
+    recommend: 'It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP7 or 16.'
   'SUSE Linux Enterprise Server 15 SP1':
     status: Out of Date
-    detail: The latest SUSE Linux Enterprise Server 15 SP1 was released on 24 Jun 2019 and is no longer supported.
-    recommend: It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP6.
+    detail: 'General support for SUSE Linux Enterprise Server 15 SP1 has ended; the latest service pack is SP7 (June 2025).'
+    recommend: 'It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP7 or 16.'
   'SUSE Linux Enterprise Server 15 SP2':
     status: Out of Date
-    detail: The latest SUSE Linux Enterprise Server 15 SP2 was released on 21 Jul 2020 and is no longer supported.
-    recommend: It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP6.
+    detail: 'General support for SUSE Linux Enterprise Server 15 SP2 has ended; the latest service pack is SP7 (June 2025).'
+    recommend: 'It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP7 or 16.'
   'SUSE Linux Enterprise Server 15 SP3':
     status: Out of Date
-    detail: The latest SUSE Linux Enterprise Server 15 SP3 was released on 22 Jun 2021 and is no longer supported.
-    recommend: It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP6.
+    detail: 'General support for SUSE Linux Enterprise Server 15 SP3 has ended; the latest service pack is SP7 (June 2025).'
+    recommend: 'It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP7 or 16.'
   'SUSE Linux Enterprise Server 15 SP4':
-    status: Supported
+    status: Out of Date
+    detail: 'General support for SUSE Linux Enterprise Server 15 SP4 has ended; the latest service pack is SP7 (June 2025).'
+    recommend: 'It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP7 or 16.'
   'SUSE Linux Enterprise Server 15 SP5':
-    status: Supported
+    status: Out of Date
+    detail: 'General support for SUSE Linux Enterprise Server 15 SP5 has ended; the latest service pack is SP7 (June 2025).'
+    recommend: 'It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP7 or 16.'
   'SUSE Linux Enterprise Server 15 SP6':
+    status: Out of Date
+    detail: 'General support for SUSE Linux Enterprise Server 15 SP6 has ended; the latest service pack is SP7 (June 2025).'
+    recommend: 'It is recommended to upgrade to SUSE Linux Enterprise Server 15 SP7 or 16.'
+  'SUSE Linux Enterprise Server 15 SP7':
     status: Supported
+    detail: 'SLES 15 SP7 (June 2025) is generally supported until July 2031.'
+  'SUSE Linux Enterprise Server 16.0':
+    status: Supported
+    detail: 'SLES 16.0 was released in November 2025.'
   'Ubuntu 18.04 LTS':
     status: End of Life
-    detail: Ubuntu 18.04 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
-    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+    detail: 'Standard support for Ubuntu 18.04 LTS ended on May 31, 2023. Ceph releases after Pacific do not support it.'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 18.04.1 LTS':
     status: End of Life
-    detail: Ubuntu 18.04.1 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
-    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+    detail: 'Standard support for Ubuntu 18.04 LTS ended on May 31, 2023. Ceph releases after Pacific do not support it.'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 18.04.2 LTS':
     status: End of Life
-    detail: Ubuntu 18.04.2 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
-    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+    detail: 'Standard support for Ubuntu 18.04 LTS ended on May 31, 2023. Ceph releases after Pacific do not support it.'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 18.04.3 LTS':
     status: End of Life
-    detail: Ubuntu 18.04.3 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
-    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+    detail: 'Standard support for Ubuntu 18.04 LTS ended on May 31, 2023. Ceph releases after Pacific do not support it.'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 18.04.4 LTS':
     status: End of Life
-    detail: Ubuntu 18.04.4 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
-    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+    detail: 'Standard support for Ubuntu 18.04 LTS ended on May 31, 2023. Ceph releases after Pacific do not support it.'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 18.04.5 LTS':
     status: End of Life
-    detail: Ubuntu 18.04.5 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
-    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+    detail: 'Standard support for Ubuntu 18.04 LTS ended on May 31, 2023. Ceph releases after Pacific do not support it.'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 18.04.6 LTS':
     status: End of Life
-    detail: Ubuntu 18.04.6 LTS reached end of life (EOL) on May 31, 2023. Ceph releases beyond Pacific no longer support Ubuntu 18.04 LTS. 
-    recommend: It is strongly recommended to upgrade to Ubuntu 20.04 LTS or newer.
+    detail: 'Standard support for Ubuntu 18.04 LTS ended on May 31, 2023. Ceph releases after Pacific do not support it.'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 20.04 LTS':
-    status: Out of Date
-    detail: The latest 20.04 LTS release is 20.04.6 as of Mar 23, 2023.
-    recommend: It is recommended to upgrade to Ubuntu 20.04.6 LTS.
+    status: End of Life
+    detail: 'Standard support for Ubuntu 20.04 LTS ended on May 31, 2025 (security fixes only with Ubuntu Pro).'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 20.04.1 LTS':
-    status: Out of Date
-    detail: The latest 20.04 LTS release is 20.04.6 as of Mar 23, 2023.
-    recommend: It is recommended to upgrade to Ubuntu 20.04.6 LTS.
+    status: End of Life
+    detail: 'Standard support for Ubuntu 20.04 LTS ended on May 31, 2025 (security fixes only with Ubuntu Pro).'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 20.04.2 LTS':
-    status: Out of Date
-    detail: The latest 20.04 LTS release is 20.04.6 as of Mar 23, 2023.
-    recommend: It is recommended to upgrade to Ubuntu 20.04.6 LTS.
+    status: End of Life
+    detail: 'Standard support for Ubuntu 20.04 LTS ended on May 31, 2025 (security fixes only with Ubuntu Pro).'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 20.04.3 LTS':
-    status: Out of Date
-    detail: The latest 20.04 LTS release is 20.04.6 as of Mar 23, 2023.
-    recommend: It is recommended to upgrade to Ubuntu 20.04.6 LTS.
+    status: End of Life
+    detail: 'Standard support for Ubuntu 20.04 LTS ended on May 31, 2025 (security fixes only with Ubuntu Pro).'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 20.04.4 LTS':
-    status: Out of Date
-    detail: The latest 20.04 LTS release is 20.04.6 as of Mar 23, 2023.
-    recommend: It is recommended to upgrade to Ubuntu 20.04.6 LTS.
+    status: End of Life
+    detail: 'Standard support for Ubuntu 20.04 LTS ended on May 31, 2025 (security fixes only with Ubuntu Pro).'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 20.04.5 LTS':
-    status: Out of Date
-    detail: The latest 20.04 LTS release is 20.04.6 as of Mar 23, 2023.
-    recommend: It is recommended to upgrade to Ubuntu 20.04.6 LTS.
+    status: End of Life
+    detail: 'Standard support for Ubuntu 20.04 LTS ended on May 31, 2025 (security fixes only with Ubuntu Pro).'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 20.04.6 LTS':
-    status: Supported
-    detail: This is the latest point release for Ubuntu 20.04 LTS (Focal Fossa).
-    recommend: Continue using this version or consider upgrading to Ubuntu 22.04 LTS.
+    status: End of Life
+    detail: 'Standard support for Ubuntu 20.04 LTS ended on May 31, 2025 (security fixes only with Ubuntu Pro).'
+    recommend: 'It is strongly recommended to upgrade to Ubuntu 24.04 LTS.'
   'Ubuntu 22.04 LTS':
-    status: Supported
-    detail: This is the initial release of Ubuntu 22.04 LTS (Jammy Jellyfish) from April 21, 2022.
-    recommend: Consider upgrading to the latest point release, Ubuntu 22.04.5 LTS.
+    status: Out of Date
+    detail: 'A newer point release of Ubuntu 22.04 LTS is available: 22.04.5 (September 2024).'
+    recommend: 'It is recommended to upgrade to Ubuntu 22.04.5 LTS.'
   'Ubuntu 22.04.1 LTS':
     status: Out of Date
-    detail: Newer point releases are available for Ubuntu 22.04 LTS.
-    recommend: It is recommended to upgrade to Ubuntu 22.04.5 LTS.
+    detail: 'A newer point release of Ubuntu 22.04 LTS is available: 22.04.5 (September 2024).'
+    recommend: 'It is recommended to upgrade to Ubuntu 22.04.5 LTS.'
   'Ubuntu 22.04.2 LTS':
     status: Out of Date
-    detail: Newer point releases are available for Ubuntu 22.04 LTS.
-    recommend: It is recommended to upgrade to Ubuntu 22.04.5 LTS.
+    detail: 'A newer point release of Ubuntu 22.04 LTS is available: 22.04.5 (September 2024).'
+    recommend: 'It is recommended to upgrade to Ubuntu 22.04.5 LTS.'
   'Ubuntu 22.04.3 LTS':
     status: Out of Date
-    detail: A newer point release is available for Ubuntu 22.04 LTS.
-    recommend: It is recommended to upgrade to Ubuntu 22.04.5 LTS.
+    detail: 'A newer point release of Ubuntu 22.04 LTS is available: 22.04.5 (September 2024).'
+    recommend: 'It is recommended to upgrade to Ubuntu 22.04.5 LTS.'
   'Ubuntu 22.04.4 LTS':
     status: Out of Date
-    detail: A newer point release is available for Ubuntu 22.04 LTS.
-    recommend: It is recommended to upgrade to Ubuntu 22.04.5 LTS.
+    detail: 'A newer point release of Ubuntu 22.04 LTS is available: 22.04.5 (September 2024).'
+    recommend: 'It is recommended to upgrade to Ubuntu 22.04.5 LTS.'
   'Ubuntu 22.04.5 LTS':
     status: Supported
-    detail: This is the latest point release for Ubuntu 22.04 LTS (Jammy Jellyfish) as of September 12, 2024.
-    recommend: This is the most up-to-date version of Ubuntu 22.04 LTS.
-  'Debian GNU/Linux 12 (bookworm)':
+    detail: 'Ubuntu 22.04.5 LTS (September 2024) is the latest 22.04 point release; standard support until June 2027.'
+  'Ubuntu 24.04 LTS':
+    status: Out of Date
+    detail: 'A newer point release of Ubuntu 24.04 LTS is available: 24.04.5 (September 2026).'
+    recommend: 'It is recommended to upgrade to Ubuntu 24.04.5 LTS.'
+  'Ubuntu 24.04.1 LTS':
+    status: Out of Date
+    detail: 'A newer point release of Ubuntu 24.04 LTS is available: 24.04.5 (September 2026).'
+    recommend: 'It is recommended to upgrade to Ubuntu 24.04.5 LTS.'
+  'Ubuntu 24.04.2 LTS':
+    status: Out of Date
+    detail: 'A newer point release of Ubuntu 24.04 LTS is available: 24.04.5 (September 2026).'
+    recommend: 'It is recommended to upgrade to Ubuntu 24.04.5 LTS.'
+  'Ubuntu 24.04.3 LTS':
+    status: Out of Date
+    detail: 'A newer point release of Ubuntu 24.04 LTS is available: 24.04.5 (September 2026).'
+    recommend: 'It is recommended to upgrade to Ubuntu 24.04.5 LTS.'
+  'Ubuntu 24.04.4 LTS':
+    status: Out of Date
+    detail: 'A newer point release of Ubuntu 24.04 LTS is available: 24.04.5 (September 2026).'
+    recommend: 'It is recommended to upgrade to Ubuntu 24.04.5 LTS.'
+  'Ubuntu 24.04.5 LTS':
     status: Supported
-    detail: Debian 12 (Bookworm) was released on June 10, 2023 and is currently supported until June 2028.
-    recommend: This is a supported version for running Ceph clusters.
+    detail: 'Ubuntu 24.04.5 LTS (September 2026) is the latest 24.04 point release; standard support until May 2029.'
+  'Ubuntu 26.04 LTS':
+    status: Out of Date
+    detail: 'A newer point release of Ubuntu 26.04 LTS is available: 26.04.1 (August 2026).'
+    recommend: 'It is recommended to upgrade to Ubuntu 26.04.1 LTS.'
+  'Ubuntu 26.04.1 LTS':
+    status: Supported
+    detail: 'Ubuntu 26.04.1 LTS (August 2026) is the latest 26.04 point release; standard support until May 2031.'
+  'Debian GNU/Linux 10':
+    status: End of Life
+    detail: 'Debian 10 (buster) reached end of life on June 30, 2024.'
+    recommend: 'It is strongly recommended to upgrade to Debian 12 or 13.'
+  'Debian GNU/Linux 11':
+    status: End of Life
+    detail: 'Debian 11 (bullseye) reached end of life (LTS) on August 31, 2026.'
+    recommend: 'It is strongly recommended to upgrade to Debian 12 or 13.'
+  'Debian GNU/Linux 12':
+    status: Supported
+    detail: 'Debian 12 (bookworm) is in long-term support since July 2026, until June 30, 2028. Consider Debian 13.'
+  'Debian GNU/Linux 13':
+    status: Supported
+    detail: 'Debian 13 (trixie) was released on August 9, 2025, and is supported until 2028 (LTS until 2030).'

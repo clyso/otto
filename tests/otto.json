@@ -1,6 +1,6 @@
 {
   "summary": {
-    "score": 26.0,
+    "score": 25.5,
     "grade": "F",
     "max_score": 33
   },
@@ -61,7 +61,7 @@
         {
           "id": "Check for Known Issues in Running Version",
           "result": "FAIL",
-          "summary": "CRITICAL: Found 1 critical severity bug(s) in running version 16.2.9-2",
+          "summary": "CRITICAL: Found 1 critical or high severity bug(s) in running version 16.2.9-2",
           "detail": [
             "PG Splitting/Merging Causes OSD Out-Of-Memory (severity: critical) (Tracker: https://tracker.ceph.com/issues/53729): A bug in the PG splitting and merging code can cause the OSD to go out-of-memory, a condition which persists even after restart. Offline tools are available in fixed releases to workaround the issue."
           ],
@@ -83,22 +83,24 @@
     },
     {
       "id": "Operating System",
-      "score": 1.0,
+      "score": 0.5,
       "max_score": 1,
       "summary": "",
       "info": [],
       "checks": [
         {
           "id": "OS Support",
-          "result": "PASS",
-          "summary": "Operating System is Supported",
+          "result": "WARN",
+          "summary": "Operating System is End of Life",
           "detail": [
-            "CentOS Stream 8 is Supported."
+            "CentOS Stream 8 reached end of life on May 31, 2024."
           ],
-          "recommend": []
+          "recommend": [
+            "It is recommended to move to CentOS Stream 9 or 10, or to RHEL 9 or a rebuild. See https://docs.ceph.com/en/latest/start/os-recommendations/ for further information."
+          ]
         }
       ],
-      "grade": "A+"
+      "grade": "F"
     },
     {
       "id": "Capacity",
