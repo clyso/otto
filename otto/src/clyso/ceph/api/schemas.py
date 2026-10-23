@@ -24,7 +24,7 @@ from __future__ import annotations
 import pathlib
 from typing import Any, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 
 class CephBaseModel(BaseModel):
@@ -2355,6 +2355,19 @@ class RGWBucketStatsEntry(CephBaseModel):
 
 class RGWBucketStatsResponse(RootModel[list[RGWBucketStatsEntry]]):
     """Schema for `radosgw-admin bucket stats --uid <user>` response."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _unwrap_paginated(cls, data: Any) -> Any:
+        """Accept both the bare-list output and the paginated form.
+
+        Newer Ceph releases return ``{"buckets": [...], "truncated": ...,
+        "count": ...}`` when ``--max-entries`` is used, whereas older releases
+        return a bare list of bucket stats entries.
+        """
+        if isinstance(data, dict) and "buckets" in data:
+            return data["buckets"]
+        return data
 
     def __iter__(self):
         return iter(self.root)
