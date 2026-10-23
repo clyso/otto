@@ -144,13 +144,13 @@ refresh_fs_dump()     { FS_DUMP_JSON="$($CEPH fs dump --format json 2>/dev/null)
 # standbys pinned by mds_join_fs), mapped to their service by 'orch ps'. A
 # service literally named mds.<fs> wins; otherwise the one with most daemons.
 # FS_SVC_ALT lists the other services seen serving the filesystem.
-declare -A FS_SVC=() FS_SVC_ALT=()
+declare -A FS_SVC=() FS_SVC_ALT=() FS_SVC_RESOLVED=()
 SVC=""                  # service of the filesystem being upgraded (do_upgrade)
 SERVICE_ARG=""          # -s/--service override
 
 resolve_fs_services() {
     refresh_mds_ps; refresh_fs_dump
-    FS_SVC=(); FS_SVC_ALT=()
+    FS_SVC=(); FS_SVC_ALT=(); FS_SVC_RESOLVED=()
     local map fs svc
     map="$(jq -c 'map({key: .daemon_name, value: .service_name}) | from_entries' <<<"${MDS_PS_JSON:-[]}")"
     while IFS=$'\t' read -r fs svc; do
@@ -243,7 +243,8 @@ OPTIONS:
                             By default it is mds.<fs> if that service exists,
                             else the service of the daemons the monitors
                             associate with the filesystem. Needs exactly one
-                            filesystem.
+                            filesystem. Refused when daemons of another
+                            service serve the filesystem too.
   --add-standbys            With 'fail_fs': when the filesystem has fewer standbys
                             than ranks, temporarily raise the placement count of
                             its MDS service so that enough upgraded standbys
@@ -1025,7 +1026,13 @@ consolidate_image_pins() {
 
     refresh_config_dump
     cur="$(jq -r --arg s "$SVC" '[.[] | select(.section==$s and .name=="container_image") | .value] | .[0] // ""' <<<"$CONFIG_DUMP_JSON")"
-    mapfile -t overrides < <(jq -r --arg p "$SVC." '.[] | select(.name=="container_image" and (.section|startswith($p))) | .section' <<<"$CONFIG_DUMP_JSON")
+    # sections match by dotted prefix: skip those of another service whose name
+    # extends $SVC (mds.X.Y.<host>.<id> under mds.X)
+    mapfile -t overrides < <(jq -r --arg s "$SVC" --argjson ps "${MDS_PS_JSON:-[]}" '
+        ([$ps[].service_name] | unique | map(select(. != $s and startswith($s + ".")))) as $other
+        | .[] | select(.name=="container_image" and (.section|startswith($s + "."))
+                       and ([.section as $c | $other[] | select(. as $o | $c | startswith($o + "."))] | length == 0))
+        | .section' <<<"$CONFIG_DUMP_JSON")
 
     glob="$(jq -r '[.[] | select(.section=="global" and .name=="container_image") | .value] | .[0] // ""' <<<"$CONFIG_DUMP_JSON")"
 
@@ -1817,10 +1824,15 @@ do_upgrade() {
     mapfile -t ALL_DAEMONS < <(fs_daemons "$FS")
     [[ ${#ALL_DAEMONS[@]} -gt 0 ]] || die "no MDS daemons found for filesystem '$FS' (service $SVC)"
 
-    # The fence, the switch and the redeploys act on every daemon of $SVC and
-    # on every daemon holding a rank of $FS: both sets must be the same.
-    if [[ -n "${FS_SVC_ALT[$FS]:-}" && -z "$SERVICE_ARG" ]]; then
-        die "'$FS' is served by daemons of several services ($SVC ${FS_SVC_ALT[$FS]}); pin its MDS with mds_join_fs, or name the service with -s/--service. Nothing was changed."
+    # The fence, the switch and the redeploys act on the daemons of $SVC only,
+    # so $SVC must be the one service serving $FS. -s/--service does not lift
+    # this: it only names the service, it does not make the others follow.
+    local others="" s
+    for s in ${FS_SVC_RESOLVED[$FS]:-} ${FS_SVC_ALT[$FS]:-}; do
+        [[ "$s" == "$SVC" ]] || others="${others:+$others }$s"
+    done
+    if [[ -n "$others" ]]; then
+        die "'$FS' is also served by daemons of ${others} (besides $SVC). Upgrading only one service would leave mixed MDS versions. Move all daemons of '$FS' into one service (or fail over the stray ones, with mds_join_fs set accordingly) and re-run. Nothing was changed."
     fi
     local cross
     refresh_fs_dump
@@ -2127,8 +2139,8 @@ resolve_fs_services
 if [[ -n "$SERVICE_ARG" ]]; then
     [[ ${#FS_LIST_ARG[@]} -eq 1 ]] || die "-s/--service needs exactly one filesystem"
     [[ "$SERVICE_ARG" == mds.* ]] || SERVICE_ARG="mds.$SERVICE_ARG"
+    FS_SVC_RESOLVED[$FS]="${FS_SVC[$FS]:-}"
     FS_SVC[$FS]="$SERVICE_ARG"
-    FS_SVC_ALT[$FS]=""
 fi
 
 # Standalone fix actions: run any that are requested (both may be given), then exit.
