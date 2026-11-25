@@ -3,8 +3,9 @@
 
 import os
 import sys
-import subprocess
 import argparse
+
+from clyso.ceph.otto.connections import run_child, script_target_lines
 
 
 def add_command_upmap_remapped(subparsers) -> None:
@@ -58,19 +59,15 @@ def upmap_remapped(args: argparse.Namespace) -> None:
     if args.ignore_backfilling:
         cmd.append("--ignore-backfilling")
 
-    process = None
-    try:
-        process = subprocess.Popen(cmd)
-        return_code = process.wait()
-    except KeyboardInterrupt:
-        if process:
-            process.terminate()
-            return_code = process.wait()
-        else:
-            print(
-                "Process creation interrupted or failed before start.", file=sys.stderr
-            )
-            exit(1)
+    # The script runs later in another shell (`| sh -x`) that never sees otto's
+    # -C target: these lines carry it there and check the fsid again at run time.
+    for line in script_target_lines():
+        print(line)
+    sys.stdout.flush()
+
+    # waits for the script; a SIGTERM to otto is passed on to it first, so otto
+    # never exits (removing the -C conf snapshot) while the script still runs
+    return_code = run_child(cmd)
 
     if return_code != 0:
         print(f"Error: Upmap script failed with code {return_code}", file=sys.stderr)

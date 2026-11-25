@@ -19,7 +19,11 @@ def add_command_pg(subparsers):
     parser_pg_distribution = parser_pg.add_parser(
         "distribution", help="plot a graph of pg distributions"
     )
-    parser_pg_distribution.set_defaults(func=pg_distribution)
+    parser_pg_distribution.set_defaults(
+        func=pg_distribution,
+        # both dumps given: offline, no cluster is checked or needed
+        skip_connection=lambda a: bool(a.osd_tree_json and a.pg_dump_json),
+    )
     parser_pg_distribution.add_argument(
         "--osd_tree_json", type=str, help="analyze this ceph osd tree file"
     )

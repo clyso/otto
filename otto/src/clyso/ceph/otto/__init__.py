@@ -21,6 +21,12 @@ from clyso.__version__ import __version__
 from clyso.ceph.ai.cephfs import add_command_cephfs
 from clyso.ceph.ai.rgw import add_command_rgw
 from clyso.ceph.ai.osd.command import OSDPerfCommand
+from clyso.ceph.otto.connections import (
+    activate_selected_connection,
+    add_command_config,
+    add_command_passthrough,
+    normalize_passthrough_argv,
+)
 
 CONFIG_FILE = "otto.yaml"
 
@@ -506,11 +512,26 @@ def main():
         action="version",
         version=f"Otto v{__version__}",
     )
+    parser.add_argument(
+        "-C",
+        "--connect",
+        dest="connect",
+        metavar="CONNECTION",
+        default=None,
+        help="run against this connection (default: $OTTO_CONNECT, then current-connection)",
+    )
+    parser.add_argument(
+        "--allow-fsid-mismatch",
+        action="store_true",
+        help="proceed even if the cluster's live fsid differs from the pinned one",
+    )
     subparsers.required = True
 
     # # Add a subparser for the 'help' command
     help_parser = subparsers.add_parser("help", help="Show this help message and exit")
-    help_parser.set_defaults(func=lambda args: parser.print_help())
+    help_parser.set_defaults(
+        func=lambda args: parser.print_help(), skip_connection=True
+    )
 
     # create the parser for the "checkup" command
     parser_checkup = subparsers.add_parser(
@@ -531,7 +552,10 @@ def main():
         help="Output format: 'text' (default, honors --summary/--verbose) "
         "or 'json' (machine-readable, full result document)",
     )
-    parser_checkup.set_defaults(func=subcommand_checkup)
+    parser_checkup.set_defaults(
+        func=subcommand_checkup,
+        skip_connection=lambda a: bool(a.ceph_report_json),  # a saved report: offline
+    )
 
     # TODO: add back once we start collecting for this
     # parser_checkup.add_argument(
@@ -571,7 +595,10 @@ def main():
         type=str,
         help="JSON file containing OSD perf dump data to analyze",
     )
-    parser_osd_perf.set_defaults(func=subcommand_osd_perf)
+    parser_osd_perf.set_defaults(
+        func=subcommand_osd_perf,
+        skip_connection=lambda a: bool(a.file),  # a saved perf dump: offline
+    )
 
     # Create the parser for the "pg" related commands
     add_command_pg(subparsers)
@@ -584,6 +611,10 @@ def main():
 
     # Create the parser for the "upmap" command
     add_command_upmap_remapped(subparsers)
+
+    # Multi-cluster connections and raw passthrough
+    add_command_config(subparsers)
+    add_command_passthrough(subparsers)
 
     # HIDE THE PLANNER and PROFILE COMMANDS FOR NOW
 
@@ -634,7 +665,8 @@ def main():
         dest="toolkit_command", help="A selection of useful Ceph Tools", metavar=""
     )
     toolkit_subparsers.required = False
-    parser_toolkit.set_defaults(func=toolkit_help)
+    # listing and showing scripts is local; running one connects (skip_connection=False)
+    parser_toolkit.set_defaults(func=toolkit_help, skip_connection=True)
 
     parser_echo = toolkit_subparsers.add_parser(
         "echo", help="Display the contents of a script"
@@ -664,11 +696,18 @@ def main():
                     nargs=argparse.REMAINDER,
                     help=f"Arguments for {tool}",
                 )
-                parser_tool.set_defaults(func=toolkit_run, script=tool)
+                parser_tool.set_defaults(
+                    func=toolkit_run, script=tool, skip_connection=False
+                )
             except Exception as e:
                 print(f"Error adding parser for {tool}: {e}", file=sys.stderr)
                 exit(errno.EIO)
 
     # Parse the arguments and call the appropriate function
-    args = parser.parse_args()
+    args = parser.parse_args(normalize_passthrough_argv(sys.argv[1:]))
+    # Check the selected cluster only when this invocation talks to one:
+    # skip_connection is True, or a function of the arguments (offline files).
+    skip = getattr(args, "skip_connection", False)
+    if not (skip(args) if callable(skip) else skip):
+        activate_selected_connection(args.connect, args.allow_fsid_mismatch)
     args.func(args)
